@@ -15,6 +15,8 @@ That worked surprisingly well. Infrastructure awareness surfaced inline during u
 
 But it had obvious limits. Diagnostics weren't captured at detection time (by the time you asked "why is CPU high?", the spike might be over). There was no structural detection — if a key process stopped, every metric looked *better*, and nothing alerted. Knowledge lived in platform-locked memory. It only worked with one system, on one platform.
 
+The [original LinkedIn post](https://www.linkedin.com/posts/cmeans_mcp-modelcontextprotocol-platformengineering-activity-7440439710315098112-Fstj) tells the full story of how this pattern emerged.
+
 `mcp-awareness` is the generalization of that experiment. The goals:
 
 - **Multi-source awareness** — any number of edge processes (NAS daemons, calendar processors, CI/CD watchers) write to one store
