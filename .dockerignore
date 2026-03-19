@@ -1,0 +1,16 @@
+.git
+.github
+.mypy_cache
+.pytest_cache
+.ruff_cache
+.coverage
+__pycache__
+*.pyc
+data/
+awareness-data/
+*.db
+*.db-wal
+*.db-shm
+tests/
+docs/
+CLAUDE.md
