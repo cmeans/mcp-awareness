@@ -122,7 +122,7 @@ The collaboration model itself is part of what this project explores: AI agents 
 
 ## License
 
-MIT — see [LICENSE](LICENSE) for details.
+Apache 2.0 — see [LICENSE](LICENSE) for details.
 
 ---
 

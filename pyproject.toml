@@ -3,7 +3,7 @@ name = "mcp-awareness-server"
 version = "0.1.0"
 description = "Generic MCP server for ambient system awareness across monitored systems"
 readme = "README.md"
-license = "MIT"
+license = "Apache-2.0"
 requires-python = ">=3.10"
 dependencies = [
     "mcp[cli]>=1.0.0",
