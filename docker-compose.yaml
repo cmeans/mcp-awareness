@@ -1,0 +1,16 @@
+services:
+  mcp-awareness:
+    build: .
+    container_name: mcp-awareness
+    restart: unless-stopped
+    volumes:
+      - ./awareness-data:/app/data
+    ports:
+      - "8420:8420"
+    environment:
+      - AWARENESS_DATA_DIR=/app/data
+    deploy:
+      resources:
+        limits:
+          cpus: '0.1'
+          memory: 64M

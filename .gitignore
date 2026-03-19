@@ -1,3 +1,10 @@
+# Runtime data
+data/
+awareness-data/
+*.db
+*.db-wal
+*.db-shm
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
