@@ -41,7 +41,7 @@ src/mcp_awareness/
 - Pattern matching uses word-overlap between effect string and alert fields (hyphens/dashes normalized); hour ranges handle overnight wraparound
 - Resource descriptions carry behavioral hints — duplicate guidance in both server instructions and docstrings
 - Store uses threading.Lock on writes for async safety; _cleanup_expired is debounced (10s interval)
-- Transport: stdio only (HTTP transport is next priority)
+- Transport: stdio (default) or streamable-http via AWARENESS_TRANSPORT env var; HTTP on AWARENESS_HOST:AWARENESS_PORT/mcp
 
 ## Key Documents
 

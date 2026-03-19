@@ -1,11 +1,16 @@
-"""FastMCP server — resources + tools for the awareness service."""
+"""FastMCP server — resources + tools for the awareness service.
+
+Transport is selected via the AWARENESS_TRANSPORT environment variable:
+  - "stdio" (default): stdin/stdout, for direct MCP client integration
+  - "streamable-http": HTTP server on AWARENESS_HOST:AWARENESS_PORT/mcp
+"""
 
 from __future__ import annotations
 
 import json
 import os
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import Any, Literal
 
 from mcp.server.fastmcp import FastMCP
 
@@ -14,11 +19,18 @@ from .schema import Entry, EntryType, make_id, now_iso
 from .store import AwarenessStore
 
 DATA_DIR = os.environ.get("AWARENESS_DATA_DIR", "./data")
+TRANSPORT: Literal["stdio", "streamable-http"] = os.environ.get(  # type: ignore[assignment]
+    "AWARENESS_TRANSPORT", "stdio"
+)
+HOST = os.environ.get("AWARENESS_HOST", "0.0.0.0")
+PORT = int(os.environ.get("AWARENESS_PORT", "8420"))
 
 store = AwarenessStore(os.path.join(DATA_DIR, "awareness.db"))
 
 mcp = FastMCP(
     name="mcp-awareness",
+    host=HOST,
+    port=PORT,
     instructions=(
         "This server provides ambient awareness across monitored systems. "
         "At conversation start, read awareness://briefing. If attention_needed "
@@ -272,7 +284,7 @@ async def set_preference(
 
 
 def main() -> None:
-    mcp.run()
+    mcp.run(transport=TRANSPORT)
 
 
 if __name__ == "__main__":

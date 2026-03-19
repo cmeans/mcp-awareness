@@ -84,15 +84,29 @@ The agent reads `awareness://briefing` at conversation start. If `attention_need
 # Install
 pip install -e .
 
-# Run via stdio (for MCP client integration)
+# Run via stdio (default, for direct MCP client integration)
 mcp-awareness
 
-# Or with a custom data directory
+# Run via HTTP (for remote clients, edge agents, mobile)
+AWARENESS_TRANSPORT=streamable-http mcp-awareness
+# → Listening on http://0.0.0.0:8420/mcp
+
+# Custom data directory
 AWARENESS_DATA_DIR=./my-data mcp-awareness
 ```
 
+### Environment variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `AWARENESS_TRANSPORT` | `stdio` | Transport: `stdio` or `streamable-http` |
+| `AWARENESS_HOST` | `0.0.0.0` | Bind address (HTTP mode) |
+| `AWARENESS_PORT` | `8420` | Port (HTTP mode) |
+| `AWARENESS_DATA_DIR` | `./data` | SQLite database directory |
+
 ### Claude Desktop / Claude Code config
 
+**stdio** (local):
 ```json
 {
   "mcpServers": {
@@ -103,10 +117,22 @@ AWARENESS_DATA_DIR=./my-data mcp-awareness
 }
 ```
 
+**HTTP** (remote):
+```json
+{
+  "mcpServers": {
+    "mcp-awareness": {
+      "url": "http://your-host:8420/mcp"
+    }
+  }
+}
+```
+
 ### Docker
 
 ```bash
 docker compose up -d
+# → HTTP server on port 8420
 ```
 
 ## Current status
@@ -121,7 +147,7 @@ docker compose up -d
 
 **Not yet implemented:**
 - Layer 2 (baseline) detection — rolling averages and deviation calculation are planned but not built
-- HTTP transport — server currently runs via stdio only; Streamable HTTP is needed for remote clients and edge agents
+- ~~HTTP transport~~ — **implemented** (set `AWARENESS_TRANSPORT=streamable-http`)
 - Edge processes — no producers exist yet; the store works but nothing writes to it in production ([example script](examples/simulate_edge.py) demonstrates the write path)
 - Semantic pattern matching — current matching is keyword-based; RAG/vector similarity is a future consideration for complex natural-language patterns
 
