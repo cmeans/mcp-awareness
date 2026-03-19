@@ -36,10 +36,12 @@ src/mcp_awareness/
 
 **Key design decisions**:
 - Briefing is computed on-demand per read (not background task) — fine for SQLite with WAL
-- One status entry per source (upsert), alerts keyed by source + alert_id
+- One status entry per source (upsert), alerts keyed by source + alert_id, preferences upsert by key + scope
 - Suppressions use expiry timestamps + escalation override (critical breaks through warning-level suppression)
-- Pattern matching uses word-overlap between effect string and alert fields (hyphens/dashes normalized)
+- Pattern matching uses word-overlap between effect string and alert fields (hyphens/dashes normalized); hour ranges handle overnight wraparound
 - Resource descriptions carry behavioral hints — duplicate guidance in both server instructions and docstrings
+- Store uses threading.Lock on writes for async safety; _cleanup_expired is debounced (10s interval)
+- Transport: stdio only (HTTP transport is next priority)
 
 ## Key Documents
 
