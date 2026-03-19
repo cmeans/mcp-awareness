@@ -211,7 +211,9 @@ def test_expired_entries_cleaned(store):
         data={"metric": "cpu_pct", "suppress_level": "warning"},
     )
     store.add(entry)  # add doesn't check expiry of the entry being added right away
-    # But count_active_suppressions calls _cleanup_expired
+    # Force cleanup to run despite debounce (add() just ran cleanup moments ago)
+    store._last_cleanup = 0.0
+    # count_active_suppressions calls _cleanup_expired
     assert store.count_active_suppressions() == 0
 
 
@@ -281,6 +283,25 @@ def test_wal_mode(tmp_path):
     result = conn.execute("PRAGMA journal_mode").fetchone()[0]
     conn.close()
     assert result == "wal"
+
+
+def test_upsert_preference_deduplicates(store):
+    entry1 = store.upsert_preference(
+        key="alert_verbosity",
+        scope="global",
+        tags=["prefs"],
+        data={"key": "alert_verbosity", "value": "verbose", "scope": "global"},
+    )
+    entry2 = store.upsert_preference(
+        key="alert_verbosity",
+        scope="global",
+        tags=["prefs"],
+        data={"key": "alert_verbosity", "value": "one_sentence", "scope": "global"},
+    )
+    prefs = store.get_entries(entry_type=EntryType.PREFERENCE)
+    assert len(prefs) == 1
+    assert prefs[0].data["value"] == "one_sentence"
+    assert entry1.id == entry2.id
 
 
 def test_clear(store):

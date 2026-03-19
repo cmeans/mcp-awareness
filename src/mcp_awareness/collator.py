@@ -145,12 +145,14 @@ def _conditions_match(conditions: dict[str, Any], now: datetime) -> bool:
             if current_day != str(value).lower():
                 return False
         elif key == "hour_range":
-            if (
-                isinstance(value, list)
-                and len(value) == 2
-                and not (value[0] <= now.hour < value[1])
-            ):
-                return False
+            if isinstance(value, list) and len(value) == 2:
+                if value[0] > value[1]:
+                    # Overnight wraparound (e.g., [22, 6] = 10 PM to 6 AM)
+                    if not (now.hour >= value[0] or now.hour < value[1]):
+                        return False
+                else:
+                    if not (value[0] <= now.hour < value[1]):
+                        return False
     return True
 
 

@@ -354,6 +354,24 @@ class TestSetPreferenceTool:
         assert data["scope"] == "global"
 
     @pytest.mark.anyio
+    async def test_set_preference_upserts(self) -> None:
+        await server_mod.set_preference(
+            key="alert_verbosity",
+            value="verbose",
+            scope="global",
+        )
+        await server_mod.set_preference(
+            key="alert_verbosity",
+            value="one_sentence",
+            scope="global",
+        )
+        from mcp_awareness.schema import EntryType
+
+        entries = _store().get_entries(entry_type=EntryType.PREFERENCE)
+        assert len(entries) == 1
+        assert entries[0].data["value"] == "one_sentence"
+
+    @pytest.mark.anyio
     async def test_set_preference_scoped(self) -> None:
         result = await server_mod.set_preference(
             key="check_frequency",

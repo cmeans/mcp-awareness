@@ -262,18 +262,12 @@ async def set_preference(
     Use this for preferences like alert_verbosity='one_sentence_warnings'
     or check_frequency='first_turn_only'. These are portable —
     any agent on any platform reads the same preferences."""
-    now = now_iso()
-    entry = Entry(
-        id=make_id(),
-        type=EntryType.PREFERENCE,
-        source=scope,
+    store.upsert_preference(
+        key=key,
+        scope=scope,
         tags=[],
-        created=now,
-        updated=now,
-        expires=None,
         data={"key": key, "value": value, "scope": scope},
     )
-    store.add(entry)
     return json.dumps({"status": "ok", "key": key, "value": value, "scope": scope})
 
 

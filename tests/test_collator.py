@@ -246,6 +246,32 @@ class TestMatchesPattern:
             mock_dt.side_effect = lambda *a, **k: datetime(*a, **k)
             assert not matches_pattern(alert, [pattern])
 
+    def test_hour_range_overnight_inside(self):
+        """Hour 23 is inside the overnight range [22, 6]."""
+        alert = _make_alert(metric="cpu_pct")
+        pattern = _make_pattern(
+            effect="suppress cpu_pct",
+            conditions={"hour_range": [22, 6]},
+        )
+        late_night = datetime(2026, 3, 19, 23, 0, tzinfo=timezone.utc)
+        with patch("mcp_awareness.collator.datetime") as mock_dt:
+            mock_dt.now.return_value = late_night
+            mock_dt.side_effect = lambda *a, **k: datetime(*a, **k)
+            assert matches_pattern(alert, [pattern])
+
+    def test_hour_range_overnight_outside(self):
+        """Hour 12 (noon) is outside the overnight range [22, 6]."""
+        alert = _make_alert(metric="cpu_pct")
+        pattern = _make_pattern(
+            effect="suppress cpu_pct",
+            conditions={"hour_range": [22, 6]},
+        )
+        noon = datetime(2026, 3, 19, 12, 0, tzinfo=timezone.utc)
+        with patch("mcp_awareness.collator.datetime") as mock_dt:
+            mock_dt.now.return_value = noon
+            mock_dt.side_effect = lambda *a, **k: datetime(*a, **k)
+            assert not matches_pattern(alert, [pattern])
+
     def test_effect_matches_message(self):
         alert = _make_alert(message="qBittorrent stopped — should always be running")
         pattern = _make_pattern(effect="suppress qbittorrent stopped")
@@ -504,19 +530,12 @@ class TestGenerateBriefing:
 
     def test_stale_source_detection(self, store):
         old = (datetime.now(timezone.utc) - timedelta(seconds=300)).isoformat()
-        store._entries.append(
-            Entry(
-                id=make_id(),
-                type=EntryType.STATUS,
-                source="nas",
-                tags=["infra"],
-                created=old,
-                updated=old,
-                expires=None,
-                data={"metrics": {}, "ttl_sec": 120},
-            )
+        store.upsert_status("nas", ["infra"], {"metrics": {}, "ttl_sec": 120})
+        store._conn.execute(
+            "UPDATE entries SET updated = ?, created = ? WHERE type = 'status' AND source = 'nas'",
+            (old, old),
         )
-        store._save()
+        store._conn.commit()
         briefing = generate_briefing(store)
         assert briefing["attention_needed"] is True
         assert briefing["sources"]["nas"]["status"] == "stale"

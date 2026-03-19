@@ -3,7 +3,7 @@
 > **Every system tells you what's happening. None of them tell you why.**
 
 > [!NOTE]
-> This project is a **proof of concept**. The architecture is designed, the core is implemented and tested, but it has not yet been deployed against real systems. Expect rough edges.
+> This project is a **proof of concept**. See [Current status](#current-status) for what's implemented vs. planned.
 
 ## Background
 
@@ -108,6 +108,22 @@ AWARENESS_DATA_DIR=./my-data mcp-awareness
 ```bash
 docker compose up -d
 ```
+
+## Current status
+
+**Implemented:**
+- Awareness service with SQLite store (WAL mode), collation engine, and full MCP API (6 resources, 6 tools)
+- Layer 1 (threshold) detection via alert levels from edge processes
+- Layer 3 (knowledge) detection via keyword-based pattern matching — learned patterns suppress expected anomalies
+- Suppression system with time-based expiry and escalation overrides (critical breaks through warning-level suppression)
+- Briefing generation targeting ~200 tokens all-clear, ~500 with issues
+- 99 tests, 99% coverage, strict type checking, CI pipeline
+
+**Not yet implemented:**
+- Layer 2 (baseline) detection — rolling averages and deviation calculation are planned but not built
+- HTTP transport — server currently runs via stdio only; Streamable HTTP is needed for remote clients and edge agents
+- Edge processes — no producers exist yet; the store works but nothing writes to it in production ([example script](examples/simulate_edge.py) demonstrates the write path)
+- Semantic pattern matching — current matching is keyword-based; RAG/vector similarity is a future consideration for complex natural-language patterns
 
 ## Design docs
 
