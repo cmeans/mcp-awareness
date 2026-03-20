@@ -76,11 +76,9 @@ Note this URL — you'll need it in the next step. The tunnel URL changes each t
 ## Step 4: Add the MCP connector in Claude.ai
 
 1. Go to [claude.ai](https://claude.ai)
-2. Open **Settings** → **Integrations**
-3. Click **Add Custom Connector** (or similar)
-4. Enter a name: `mcp-awareness`
-5. Enter the URL: `https://your-tunnel-url.trycloudflare.com/mcp`
-6. Save and ensure all tools are permitted/allowed
+2. Open **Settings** → **Connectors**
+3. Click **Add custom connector**
+4. In the dialog: enter a name (e.g., `mcp-awareness`), enter the URL `https://your-tunnel-url.trycloudflare.com/mcp`, click **Add**
 
 ## Step 5: Add the memory instruction
 
