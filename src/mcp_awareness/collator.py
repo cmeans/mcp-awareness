@@ -14,6 +14,25 @@ from .schema import Entry, severity_rank
 from .store import AwarenessStore
 
 
+def _suppression_tags_match(s_tags: list[str], alert: Entry) -> bool:
+    """Check if suppression tags match the alert via tags or content keywords."""
+    # Direct tag overlap
+    if any(t in alert.tags for t in s_tags):
+        return True
+    # Check suppression tags against alert content (alert_id, message)
+    alert_data = alert.data
+    content_fields = [
+        alert_data.get("alert_id", "").lower(),
+        alert_data.get("message", "").lower(),
+        alert_data.get("metric", "").lower(),
+    ]
+    for tag in s_tags:
+        tag_lower = tag.lower()
+        if any(tag_lower in field for field in content_fields if field):
+            return True
+    return False
+
+
 def is_suppressed(alert: Entry, suppressions: list[Entry]) -> bool:
     """Check if an alert is suppressed, respecting escalation overrides.
 
@@ -43,9 +62,11 @@ def is_suppressed(alert: Entry, suppressions: list[Entry]) -> bool:
         if s_metric and s_metric != alert_metric:
             continue
 
-        # Tag match
+        # Tag match — check against alert tags AND alert content (alert_id, message)
+        # so that a suppression tagged "qbittorrent" matches an alert about qbittorrent
+        # even if the alert's structural tags are ["infra", "nas", "docker"]
         s_tags = s_data.get("tags")
-        if s_tags and not any(t in alert.tags for t in s_tags):
+        if s_tags and not _suppression_tags_match(s_tags, alert):
             continue
 
         # Matched — check escalation override
