@@ -1,4 +1,7 @@
-"""Storage backend for the awareness store — SQLite with WAL mode."""
+"""Storage backend for the awareness store.
+
+Defines the Store protocol (interface) and the default SQLiteStore implementation.
+"""
 
 from __future__ import annotations
 
@@ -6,14 +9,65 @@ import json
 import sqlite3
 import threading
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol, runtime_checkable
 
 from .schema import Entry, EntryType, make_id, now_iso
 
+# How long soft-deleted entries remain recoverable before auto-purge
+TRASH_RETENTION_DAYS = 30
 
-class AwarenessStore:
+
+@runtime_checkable
+class Store(Protocol):
+    """Storage protocol — the contract that all backends must satisfy."""
+
+    def add(self, entry: Entry) -> Entry: ...
+
+    def upsert_status(self, source: str, tags: list[str], data: dict[str, Any]) -> Entry: ...
+
+    def upsert_alert(
+        self, source: str, tags: list[str], alert_id: str, data: dict[str, Any]
+    ) -> Entry: ...
+
+    def upsert_preference(
+        self, key: str, scope: str, tags: list[str], data: dict[str, Any]
+    ) -> Entry: ...
+
+    def get_entries(
+        self,
+        entry_type: EntryType | None = None,
+        source: str | None = None,
+        tags: list[str] | None = None,
+    ) -> list[Entry]: ...
+
+    def get_sources(self) -> list[str]: ...
+
+    def get_latest_status(self, source: str) -> Entry | None: ...
+
+    def get_active_alerts(self, source: str | None = None) -> list[Entry]: ...
+
+    def get_active_suppressions(self, source: str | None = None) -> list[Entry]: ...
+
+    def get_patterns(self, source: str | None = None) -> list[Entry]: ...
+
+    def count_active_suppressions(self) -> int: ...
+
+    def get_knowledge(self, tags: list[str] | None = None) -> list[Entry]: ...
+
+    def soft_delete_by_id(self, entry_id: str) -> bool: ...
+
+    def soft_delete_by_source(self, source: str, entry_type: EntryType | None = None) -> int: ...
+
+    def get_deleted(self) -> list[Entry]: ...
+
+    def restore_by_id(self, entry_id: str) -> bool: ...
+
+    def clear(self) -> None: ...
+
+
+class SQLiteStore:
     def __init__(self, path: str | Path = "awareness.db") -> None:
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -35,6 +89,7 @@ class AwarenessStore:
                 created  TEXT NOT NULL,
                 updated  TEXT NOT NULL,
                 expires  TEXT,
+                deleted  TEXT,
                 tags     TEXT NOT NULL DEFAULT '[]',
                 data     TEXT NOT NULL DEFAULT '{}'
             );
@@ -42,6 +97,11 @@ class AwarenessStore:
             CREATE INDEX IF NOT EXISTS idx_entries_source ON entries(source);
             CREATE INDEX IF NOT EXISTS idx_entries_type_source ON entries(type, source);
         """)
+        # Migration: add deleted column if missing (existing databases)
+        cur = self._conn.execute("PRAGMA table_info(entries)")
+        columns = {row["name"] for row in cur.fetchall()}
+        if "deleted" not in columns:
+            self._conn.execute("ALTER TABLE entries ADD COLUMN deleted TEXT")
         self._conn.commit()
 
     # ------------------------------------------------------------------
@@ -89,12 +149,17 @@ class AwarenessStore:
         self._conn.commit()
         self._last_cleanup = time.monotonic()
 
+    # Base filter for all normal reads — excludes soft-deleted entries
+    _ACTIVE = "deleted IS NULL"
+
     def _query_entries(self, where: str = "1=1", params: tuple[Any, ...] = ()) -> list[Entry]:
-        cur = self._conn.execute(f"SELECT * FROM entries WHERE {where}", params)
+        cur = self._conn.execute(
+            f"SELECT * FROM entries WHERE {self._ACTIVE} AND ({where})", params
+        )
         return [self._row_to_entry(r) for r in cur.fetchall()]
 
     # ------------------------------------------------------------------
-    # Public API — identical signatures to the original JSON backend
+    # Public API
     # ------------------------------------------------------------------
 
     def add(self, entry: Entry) -> Entry:
@@ -110,7 +175,7 @@ class AwarenessStore:
             self._cleanup_expired()
             now = now_iso()
             self._conn.execute(
-                "DELETE FROM entries WHERE type = ? AND source = ?",
+                f"DELETE FROM entries WHERE type = ? AND source = ? AND {self._ACTIVE}",
                 (EntryType.STATUS.value, source),
             )
             entry = Entry(
@@ -225,14 +290,15 @@ class AwarenessStore:
     def get_sources(self) -> list[str]:
         """Get all unique sources that have reported status."""
         cur = self._conn.execute(
-            "SELECT DISTINCT source FROM entries WHERE type = ?",
+            f"SELECT DISTINCT source FROM entries WHERE type = ? AND {self._ACTIVE}",
             (EntryType.STATUS.value,),
         )
         return [row["source"] for row in cur.fetchall()]
 
     def get_latest_status(self, source: str) -> Entry | None:
         cur = self._conn.execute(
-            "SELECT * FROM entries WHERE type = ? AND source = ? ORDER BY rowid DESC LIMIT 1",
+            f"SELECT * FROM entries WHERE type = ? AND source = ? AND {self._ACTIVE}"
+            " ORDER BY rowid DESC LIMIT 1",
             (EntryType.STATUS.value, source),
         )
         row = cur.fetchone()
@@ -267,7 +333,7 @@ class AwarenessStore:
     def count_active_suppressions(self) -> int:
         self._cleanup_expired()
         cur = self._conn.execute(
-            "SELECT COUNT(*) FROM entries WHERE type = ?",
+            f"SELECT COUNT(*) FROM entries WHERE type = ? AND {self._ACTIVE}",
             (EntryType.SUPPRESSION.value,),
         )
         result: int = cur.fetchone()[0]
@@ -282,7 +348,68 @@ class AwarenessStore:
             entries = [e for e in entries if any(t in e.tags for t in tags)]
         return entries
 
+    # ------------------------------------------------------------------
+    # Soft delete / trash
+    # ------------------------------------------------------------------
+
+    def soft_delete_by_id(self, entry_id: str) -> bool:
+        """Soft-delete a single entry. Returns True if an entry was trashed."""
+        with self._write_lock:
+            now = datetime.now(timezone.utc)
+            expires = (now + timedelta(days=TRASH_RETENTION_DAYS)).isoformat()
+            cur = self._conn.execute(
+                f"UPDATE entries SET deleted = ?, expires = ? WHERE id = ? AND {self._ACTIVE}",
+                (now.isoformat(), expires, entry_id),
+            )
+            self._conn.commit()
+            return cur.rowcount > 0
+
+    def soft_delete_by_source(
+        self,
+        source: str,
+        entry_type: EntryType | None = None,
+    ) -> int:
+        """Soft-delete all entries for a source, optionally filtered by type.
+
+        Returns the number of trashed entries.
+        """
+        with self._write_lock:
+            now = datetime.now(timezone.utc)
+            expires = (now + timedelta(days=TRASH_RETENTION_DAYS)).isoformat()
+            clauses = ["source = ?", self._ACTIVE]
+            params: list[str] = [source]
+            if entry_type is not None:
+                clauses.append("type = ?")
+                params.append(entry_type.value)
+            where = " AND ".join(clauses)
+            cur = self._conn.execute(
+                f"UPDATE entries SET deleted = ?, expires = ? WHERE {where}",
+                (now.isoformat(), expires, *params),
+            )
+            self._conn.commit()
+            return cur.rowcount
+
+    def get_deleted(self) -> list[Entry]:
+        """Get all soft-deleted entries (the trash)."""
+        cur = self._conn.execute("SELECT * FROM entries WHERE deleted IS NOT NULL")
+        return [self._row_to_entry(r) for r in cur.fetchall()]
+
+    def restore_by_id(self, entry_id: str) -> bool:
+        """Restore a soft-deleted entry. Returns True if restored."""
+        with self._write_lock:
+            cur = self._conn.execute(
+                "UPDATE entries SET deleted = NULL, expires = NULL"
+                " WHERE id = ? AND deleted IS NOT NULL",
+                (entry_id,),
+            )
+            self._conn.commit()
+            return cur.rowcount > 0
+
     def clear(self) -> None:
         with self._write_lock:
             self._conn.execute("DELETE FROM entries")
             self._conn.commit()
+
+
+# Backward-compatibility alias
+AwarenessStore = SQLiteStore

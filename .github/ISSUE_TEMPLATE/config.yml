@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Deployment Guide
+    url: https://github.com/cmeans/mcp-awareness/blob/main/docs/deployment-guide.md
+    about: Deployment walkthrough and setup guide

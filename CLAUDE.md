@@ -27,21 +27,32 @@ CI runs all three (ruff, mypy, pytest) on push/PR to main via `.github/workflows
 src/mcp_awareness/
 ├── schema.py      # Entry types (status/alert/pattern/suppression/context/preference),
 │                  # common envelope, validation, TTL/expiry logic, severity ranking
-├── store.py       # SQLite backend (WAL mode), CRUD, filtering, TTL cleanup via SQL
+├── store.py       # Store protocol + SQLiteStore implementation (WAL mode), CRUD, soft delete, TTL cleanup
 ├── collator.py    # Briefing generation: applies suppressions + patterns, composes summary/mention
-└── server.py      # FastMCP server wiring — resources (read) + tools (write)
+└── server.py      # FastMCP server wiring — resources (read) + tools (write) + secret path middleware
 ```
 
 **Data flow**: Edge processes → tools (`report_status`, `report_alert`) → `store` → `collator.generate_briefing()` → `awareness://briefing` resource
+
+**Storage abstraction**: `Store` protocol defines the interface; `SQLiteStore` is the default implementation. `AwarenessStore` is a backward-compat alias. The collator depends on the protocol, not the concrete class — future backends (Postgres, hybrid) can be swapped without changing collator or server logic.
 
 **Key design decisions**:
 - Briefing is computed on-demand per read (not background task) — fine for SQLite with WAL
 - One status entry per source (upsert), alerts keyed by source + alert_id, preferences upsert by key + scope
 - Suppressions use expiry timestamps + escalation override (critical breaks through warning-level suppression)
 - Pattern matching uses word-overlap between effect string and alert fields (hyphens/dashes normalized); hour ranges handle overnight wraparound
+- Soft delete: `delete_entry` moves to trash (30-day retention), `restore_entry` recovers, `get_deleted` lists trash. Bulk deletes require `confirm=True` (dry-run by default). Auto-purged by existing `_cleanup_expired`.
 - Resource descriptions carry behavioral hints — duplicate guidance in both server instructions and docstrings
 - Store uses threading.Lock on writes for async safety; _cleanup_expired is debounced (10s interval)
 - Transport: stdio (default) or streamable-http via AWARENESS_TRANSPORT env var; HTTP on AWARENESS_HOST:AWARENESS_PORT/mcp
+- Secret path auth: `AWARENESS_MOUNT_PATH` env var (e.g., `/my-secret`) rewrites `/my-secret/mcp` → `/mcp`, returns 404 for all other paths. Used with Cloudflare WAF to block unauthenticated traffic at the edge.
+
+## Deployment
+
+Docker Compose runs both the server and a Cloudflare named tunnel. See `docker-compose.yaml`.
+- Named tunnel: `docker compose up -d` (requires `~/.cloudflared/` credentials)
+- Quick tunnel: `docker compose --profile quick up -d mcp-awareness tunnel-quick` (ephemeral URL, no account needed)
+- Data is bind-mounted from host (default `~/awareness`, configurable via `AWARENESS_DATA`)
 
 ## Key Documents
 

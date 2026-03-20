@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from .schema import Entry, severity_rank
-from .store import AwarenessStore
+from .store import Store
 
 
 def _suppression_tags_match(s_tags: list[str], alert: Entry) -> bool:
@@ -228,7 +228,7 @@ def compose_mention(briefing: dict[str, Any]) -> str:
     return " ".join(parts)
 
 
-def generate_briefing(store: AwarenessStore) -> dict[str, Any]:
+def generate_briefing(store: Store) -> dict[str, Any]:
     """Generate a compact briefing from the raw store.
 
     This is the core collation logic. It:

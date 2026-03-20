@@ -16,7 +16,7 @@ from mcp.server.fastmcp import FastMCP
 
 from .collator import generate_briefing
 from .schema import Entry, EntryType, make_id, now_iso
-from .store import AwarenessStore
+from .store import SQLiteStore, Store
 
 DATA_DIR = os.environ.get("AWARENESS_DATA_DIR", "./data")
 TRANSPORT: Literal["stdio", "streamable-http"] = os.environ.get(  # type: ignore[assignment]
@@ -24,8 +24,9 @@ TRANSPORT: Literal["stdio", "streamable-http"] = os.environ.get(  # type: ignore
 )
 HOST = os.environ.get("AWARENESS_HOST", "0.0.0.0")
 PORT = int(os.environ.get("AWARENESS_PORT", "8420"))
+MOUNT_PATH = os.environ.get("AWARENESS_MOUNT_PATH", "")
 
-store = AwarenessStore(os.path.join(DATA_DIR, "awareness.db"))
+store: Store = SQLiteStore(os.path.join(DATA_DIR, "awareness.db"))
 
 mcp = FastMCP(
     name="mcp-awareness",
@@ -336,8 +337,120 @@ async def set_preference(
     return json.dumps({"status": "ok", "key": key, "value": value, "scope": scope})
 
 
+@mcp.tool()
+async def delete_entry(
+    source: str | None = None,
+    entry_type: str | None = None,
+    entry_id: str | None = None,
+    confirm: bool = False,
+) -> str:
+    """Soft-delete entries (moves to trash, recoverable for 30 days). Three modes:
+    - By entry_id: trash a single specific entry (no confirm needed).
+    - By source + entry_type: trash all entries of that type for the source.
+    - By source alone: trash ALL entries for that source.
+    For bulk deletes (by source), set confirm=True. Without it, a dry-run count
+    is returned so the user can verify before committing.
+    Use when the user says 'forget that', 'delete the pattern about X',
+    or 'remove everything about Y'. Entries auto-purge after 30 days."""
+    if entry_id:
+        trashed = store.soft_delete_by_id(entry_id)
+        return json.dumps(
+            {
+                "status": "ok",
+                "trashed": 1 if trashed else 0,
+                "entry_id": entry_id,
+                "recoverable_days": 30,
+            }
+        )
+    if not source:
+        return json.dumps({"status": "error", "message": "Provide entry_id or source"})
+    et = EntryType(entry_type) if entry_type else None
+    if not confirm:
+        entries = store.get_entries(entry_type=et, source=source)
+        return json.dumps(
+            {
+                "status": "dry_run",
+                "would_trash": len(entries),
+                "source": source,
+                "entry_type": entry_type,
+                "message": "Set confirm=True to move to trash. Show the user this count first.",
+            }
+        )
+    count = store.soft_delete_by_source(source, et)
+    return json.dumps(
+        {
+            "status": "ok",
+            "trashed": count,
+            "source": source,
+            "entry_type": entry_type,
+            "recoverable_days": 30,
+        }
+    )
+
+
+@mcp.tool()
+async def restore_entry(entry_id: str) -> str:
+    """Restore a soft-deleted entry from the trash. Requires the entry ID.
+    Call get_deleted first to see what's in the trash and get the IDs."""
+    restored = store.restore_by_id(entry_id)
+    return json.dumps(
+        {
+            "status": "ok" if restored else "not_found",
+            "restored": restored,
+            "entry_id": entry_id,
+        }
+    )
+
+
+@mcp.tool()
+async def get_deleted() -> str:
+    """List all entries in the trash (soft-deleted, recoverable).
+    Returns entries with their IDs so they can be restored via restore_entry.
+    Trashed entries auto-purge after 30 days."""
+    entries = store.get_deleted()
+    return json.dumps([e.to_dict() for e in entries], indent=2)
+
+
 def main() -> None:
-    mcp.run(transport=TRANSPORT)
+    if TRANSPORT == "streamable-http" and MOUNT_PATH:
+        import uvicorn
+        from starlette.types import ASGIApp, Receive, Scope, Send
+
+        inner_app = mcp.streamable_http_app()
+
+        class SecretPathMiddleware:
+            """Rewrite /SECRET/mcp → /mcp, reject everything else."""
+
+            def __init__(self, app: ASGIApp, prefix: str) -> None:
+                self.app = app
+                self.prefix = prefix.rstrip("/")
+
+            async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+                if scope["type"] in ("http", "websocket"):
+                    path: str = scope.get("path", "")
+                    if path.startswith(self.prefix):
+                        scope = dict(scope)
+                        scope["path"] = path[len(self.prefix) :] or "/"
+                        await self.app(scope, receive, send)
+                        return
+                    # Not the secret path — 404
+                    from starlette.responses import Response
+
+                    response = Response("Not Found", status_code=404)
+                    await response(scope, receive, send)
+                    return
+                await self.app(scope, receive, send)
+
+        app = SecretPathMiddleware(inner_app, MOUNT_PATH)
+
+        config = uvicorn.Config(app, host=HOST, port=PORT)
+        server = uvicorn.Server(config)
+
+        import anyio
+
+        anyio.run(server.serve)
+    else:
+        mcp.run(transport=TRANSPORT)
 
 
 if __name__ == "__main__":

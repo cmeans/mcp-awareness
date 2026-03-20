@@ -5,12 +5,12 @@ import sqlite3
 import pytest
 
 from mcp_awareness.schema import Entry, EntryType, make_id, now_iso
-from mcp_awareness.store import AwarenessStore
+from mcp_awareness.store import SQLiteStore
 
 
 @pytest.fixture
 def store(tmp_path):
-    return AwarenessStore(tmp_path / "test-store.db")
+    return SQLiteStore(tmp_path / "test-store.db")
 
 
 def test_empty_store(store):
@@ -267,10 +267,10 @@ def test_knowledge_filtered_by_tags(store):
 
 def test_persistence(tmp_path):
     path = tmp_path / "persist.db"
-    store1 = AwarenessStore(path)
+    store1 = SQLiteStore(path)
     store1.upsert_status("nas", ["infra"], {"metrics": {"cpu": 42}, "ttl_sec": 120})
 
-    store2 = AwarenessStore(path)
+    store2 = SQLiteStore(path)
     assert store2.get_sources() == ["nas"]
     status = store2.get_latest_status("nas")
     assert status.data["metrics"]["cpu"] == 42
@@ -278,7 +278,7 @@ def test_persistence(tmp_path):
 
 def test_wal_mode(tmp_path):
     path = tmp_path / "wal.db"
-    AwarenessStore(path)
+    SQLiteStore(path)
     conn = sqlite3.connect(str(path))
     result = conn.execute("PRAGMA journal_mode").fetchone()[0]
     conn.close()
@@ -302,6 +302,156 @@ def test_upsert_preference_deduplicates(store):
     assert len(prefs) == 1
     assert prefs[0].data["value"] == "one_sentence"
     assert entry1.id == entry2.id
+
+
+def test_soft_delete_by_id(store):
+    now = now_iso()
+    entry = Entry(
+        id=make_id(),
+        type=EntryType.PATTERN,
+        source="nas",
+        tags=["infra"],
+        created=now,
+        updated=now,
+        expires=None,
+        data={"description": "test pattern"},
+    )
+    store.add(entry)
+    assert len(store.get_patterns()) == 1
+    assert store.soft_delete_by_id(entry.id) is True
+    # No longer visible in normal queries
+    assert len(store.get_patterns()) == 0
+    # But still in trash
+    assert len(store.get_deleted()) == 1
+
+
+def test_soft_delete_by_id_not_found(store):
+    assert store.soft_delete_by_id("nonexistent-id") is False
+
+
+def test_soft_delete_by_source(store):
+    now = now_iso()
+    for i in range(3):
+        store.add(
+            Entry(
+                id=make_id(),
+                type=EntryType.PATTERN,
+                source="nas",
+                tags=[],
+                created=now,
+                updated=now,
+                expires=None,
+                data={"description": f"pattern {i}"},
+            )
+        )
+    store.add(
+        Entry(
+            id=make_id(),
+            type=EntryType.PATTERN,
+            source="ci",
+            tags=[],
+            created=now,
+            updated=now,
+            expires=None,
+            data={"description": "ci pattern"},
+        )
+    )
+    trashed = store.soft_delete_by_source("nas")
+    assert trashed == 3
+    assert len(store.get_patterns("nas")) == 0
+    assert len(store.get_patterns("ci")) == 1
+    assert len(store.get_deleted()) == 3
+
+
+def test_soft_delete_by_source_with_type_filter(store):
+    now = now_iso()
+    store.add(
+        Entry(
+            id=make_id(),
+            type=EntryType.PATTERN,
+            source="nas",
+            tags=[],
+            created=now,
+            updated=now,
+            expires=None,
+            data={"description": "pattern"},
+        )
+    )
+    store.upsert_status("nas", ["infra"], {"metrics": {"cpu": 50}, "ttl_sec": 120})
+    trashed = store.soft_delete_by_source("nas", EntryType.PATTERN)
+    assert trashed == 1
+    # Status should still be there
+    assert store.get_latest_status("nas") is not None
+
+
+def test_restore_by_id(store):
+    now = now_iso()
+    entry = Entry(
+        id=make_id(),
+        type=EntryType.PATTERN,
+        source="nas",
+        tags=["infra"],
+        created=now,
+        updated=now,
+        expires=None,
+        data={"description": "restorable"},
+    )
+    store.add(entry)
+    store.soft_delete_by_id(entry.id)
+    assert len(store.get_patterns()) == 0
+    assert store.restore_by_id(entry.id) is True
+    assert len(store.get_patterns()) == 1
+    assert store.get_patterns()[0].data["description"] == "restorable"
+
+
+def test_restore_not_found(store):
+    assert store.restore_by_id("nonexistent") is False
+
+
+def test_soft_deleted_entries_auto_expire(store):
+    """Soft-deleted entries get an expires timestamp and will be purged by cleanup."""
+    now = now_iso()
+    entry = Entry(
+        id=make_id(),
+        type=EntryType.PATTERN,
+        source="nas",
+        tags=[],
+        created=now,
+        updated=now,
+        expires=None,
+        data={"description": "will expire"},
+    )
+    store.add(entry)
+    store.soft_delete_by_id(entry.id)
+    # Entry is in trash
+    assert len(store.get_deleted()) == 1
+    # Simulate expiry by backdating the expires timestamp
+    store._conn.execute(
+        "UPDATE entries SET expires = ? WHERE id = ?",
+        ("2020-01-01T00:00:00+00:00", entry.id),
+    )
+    store._conn.commit()
+    store._last_cleanup = 0.0  # Force cleanup to run
+    store._cleanup_expired()
+    # Now truly gone
+    assert len(store.get_deleted()) == 0
+
+
+def test_double_soft_delete_is_noop(store):
+    now = now_iso()
+    entry = Entry(
+        id=make_id(),
+        type=EntryType.PATTERN,
+        source="nas",
+        tags=[],
+        created=now,
+        updated=now,
+        expires=None,
+        data={"description": "test"},
+    )
+    store.add(entry)
+    assert store.soft_delete_by_id(entry.id) is True
+    assert store.soft_delete_by_id(entry.id) is False
 
 
 def test_clear(store):

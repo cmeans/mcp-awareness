@@ -7,13 +7,13 @@ import json
 import pytest
 
 from mcp_awareness import server as server_mod
-from mcp_awareness.store import AwarenessStore
+from mcp_awareness.store import SQLiteStore
 
 
 @pytest.fixture(autouse=True)
 def _use_temp_store(tmp_path: object, monkeypatch: pytest.MonkeyPatch) -> None:
     """Replace the module-level store with a fresh temp store for each test."""
-    temp_store = AwarenessStore(f"{tmp_path}/test.db")
+    temp_store = SQLiteStore(f"{tmp_path}/test.db")
     monkeypatch.setattr(server_mod, "store", temp_store)
 
 
@@ -22,7 +22,7 @@ def _use_temp_store(tmp_path: object, monkeypatch: pytest.MonkeyPatch) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _store() -> AwarenessStore:
+def _store() -> SQLiteStore:
     return server_mod.store  # type: ignore[return-value]
 
 
@@ -490,3 +490,95 @@ class TestGetSuppressionsTool:
         result = await server_mod.get_suppressions()
         entries = json.loads(result)
         assert len(entries) == 1
+
+
+class TestDeleteEntryTool:
+    @pytest.mark.anyio
+    async def test_delete_by_id(self) -> None:
+        result = await server_mod.learn_pattern(
+            source="nas", tags=["infra"], description="to delete"
+        )
+        entry_id = json.loads(result)["id"]
+        delete_result = await server_mod.delete_entry(entry_id=entry_id)
+        data = json.loads(delete_result)
+        assert data["status"] == "ok"
+        assert data["trashed"] == 1
+        assert data["recoverable_days"] == 30
+        # Not visible in normal queries
+        assert len(_store().get_patterns()) == 0
+        # But in trash
+        assert len(_store().get_deleted()) == 1
+
+    @pytest.mark.anyio
+    async def test_delete_by_id_not_found(self) -> None:
+        result = await server_mod.delete_entry(entry_id="nonexistent")
+        data = json.loads(result)
+        assert data["trashed"] == 0
+
+    @pytest.mark.anyio
+    async def test_dry_run_without_confirm(self) -> None:
+        await server_mod.learn_pattern(source="nas", tags=[], description="p1")
+        await server_mod.learn_pattern(source="nas", tags=[], description="p2")
+        result = await server_mod.delete_entry(source="nas", entry_type="pattern")
+        data = json.loads(result)
+        assert data["status"] == "dry_run"
+        assert data["would_trash"] == 2
+        # Nothing actually trashed
+        assert len(_store().get_patterns("nas")) == 2
+
+    @pytest.mark.anyio
+    async def test_delete_by_source_with_confirm(self) -> None:
+        await server_mod.learn_pattern(source="nas", tags=[], description="p1")
+        await server_mod.learn_pattern(source="nas", tags=[], description="p2")
+        await server_mod.learn_pattern(source="ci", tags=[], description="p3")
+        result = await server_mod.delete_entry(source="nas", entry_type="pattern", confirm=True)
+        data = json.loads(result)
+        assert data["status"] == "ok"
+        assert data["trashed"] == 2
+        assert len(_store().get_patterns("nas")) == 0
+        assert len(_store().get_patterns("ci")) == 1
+
+    @pytest.mark.anyio
+    async def test_delete_requires_source_or_id(self) -> None:
+        result = await server_mod.delete_entry()
+        data = json.loads(result)
+        assert data["status"] == "error"
+
+
+class TestRestoreEntryTool:
+    @pytest.mark.anyio
+    async def test_restore(self) -> None:
+        result = await server_mod.learn_pattern(
+            source="nas", tags=["infra"], description="restorable"
+        )
+        entry_id = json.loads(result)["id"]
+        await server_mod.delete_entry(entry_id=entry_id)
+        assert len(_store().get_patterns()) == 0
+        restore_result = await server_mod.restore_entry(entry_id=entry_id)
+        data = json.loads(restore_result)
+        assert data["status"] == "ok"
+        assert data["restored"] is True
+        assert len(_store().get_patterns()) == 1
+
+    @pytest.mark.anyio
+    async def test_restore_not_found(self) -> None:
+        result = await server_mod.restore_entry(entry_id="nonexistent")
+        data = json.loads(result)
+        assert data["status"] == "not_found"
+        assert data["restored"] is False
+
+
+class TestGetDeletedTool:
+    @pytest.mark.anyio
+    async def test_get_deleted_empty(self) -> None:
+        result = await server_mod.get_deleted()
+        assert json.loads(result) == []
+
+    @pytest.mark.anyio
+    async def test_get_deleted_shows_trashed(self) -> None:
+        result = await server_mod.learn_pattern(source="nas", tags=[], description="trashed")
+        entry_id = json.loads(result)["id"]
+        await server_mod.delete_entry(entry_id=entry_id)
+        trash = json.loads(await server_mod.get_deleted())
+        assert len(trash) == 1
+        assert trash[0]["id"] == entry_id
