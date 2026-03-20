@@ -13,7 +13,7 @@ from mcp_awareness.collator import (
     matches_pattern,
 )
 from mcp_awareness.schema import Entry, EntryType, make_id, now_iso
-from mcp_awareness.store import AwarenessStore
+from mcp_awareness.store import SQLiteStore
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -362,7 +362,7 @@ class TestComposeMention:
 class TestGenerateBriefing:
     @pytest.fixture
     def store(self, tmp_path):
-        return AwarenessStore(tmp_path / "test.json")
+        return SQLiteStore(tmp_path / "test.json")
 
     def test_empty_store(self, store):
         briefing = generate_briefing(store)

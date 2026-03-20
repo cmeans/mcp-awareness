@@ -1,134 +1,234 @@
 # PoC Demo: End-to-End Awareness Briefing
 
-This guide walks through the complete proof of concept — from starting the server to seeing an ambient awareness alert surface during an unrelated conversation in Claude.ai.
+This guide walks through the complete proof of concept — from starting the server to seeing an ambient awareness alert surface during an unrelated conversation in Claude.ai, with secure public access via Cloudflare.
 
 ## Prerequisites
 
 - Python 3.10+ with `mcp-awareness` installed (`pip install -e .`)
-- [cloudflared](https://github.com/cloudflare/cloudflared/releases) installed (for remote access)
+- Docker and Docker Compose
+- [cloudflared](https://github.com/cloudflare/cloudflared/releases) installed
 - A [Claude.ai](https://claude.ai) account (free tier works)
 
-## Step 1: Start the server
+## Quick start (local only)
+
+If you just want to test locally without public access:
 
 ```bash
-# Create a data directory
-mkdir -p /tmp/awareness-demo
-
-# Start the server with HTTP transport
-AWARENESS_TRANSPORT=streamable-http AWARENESS_DATA_DIR=/tmp/awareness-demo mcp-awareness
+pip install -e .
+AWARENESS_TRANSPORT=streamable-http mcp-awareness
+# → Listening on http://0.0.0.0:8420/mcp
 ```
 
-You should see:
-```
-INFO:     Uvicorn running on http://0.0.0.0:8420 (Press CTRL+C to quit)
+Then use `http://localhost:8420/mcp` as the endpoint in Claude Desktop or Claude Code.
+
+## Secure deployment (recommended)
+
+This section sets up a production-ready deployment with Docker Compose, a stable public URL via Cloudflare Tunnel, and access control via a secret path + Cloudflare WAF.
+
+### Step 1: Set up Cloudflare
+
+1. Create a free [Cloudflare account](https://dash.cloudflare.com/sign-up)
+2. Register or connect a domain (Cloudflare is also a registrar — domains at cost, ~$10/year)
+3. Authenticate cloudflared:
+   ```bash
+   cloudflared tunnel login
+   # Opens browser → select your domain → authorize
+   ```
+4. Create a named tunnel:
+   ```bash
+   cloudflared tunnel create my-awareness
+   # Note the tunnel ID and credentials file path
+   ```
+5. Add a CNAME DNS record for your domain pointing to the tunnel:
+   ```bash
+   cloudflared tunnel route dns my-awareness awareness.yourdomain.com
+   ```
+   If your DNS is managed outside Cloudflare, add a CNAME manually:
+   - **Name**: `awareness` (or `@` for root)
+   - **Target**: `<tunnel-id>.cfargotunnel.com`
+
+> **Important**: If your domain's nameservers are not on Cloudflare, the `cloudflared tunnel route dns` command will add the CNAME to Cloudflare's DNS, not your provider. You must add the CNAME at your DNS provider manually.
+
+### Step 2: Configure the tunnel
+
+Create `~/.cloudflared/config.yml`:
+
+```yaml
+tunnel: <your-tunnel-id>
+credentials-file: /etc/cloudflared/credentials.json
+
+ingress:
+  - hostname: awareness.yourdomain.com
+    service: http://mcp-awareness:8420
+  - service: http_status:404
 ```
 
-## Step 2: Populate the store with demo data
+### Step 3: Generate a secret path
 
-In a second terminal:
+The secret path prevents unauthorized access to your MCP endpoint. Only requests to `/<secret>/mcp` are served; everything else gets a 404.
 
 ```bash
-python examples/simulate_edge.py --data-dir /tmp/awareness-demo
+python3 -c "import secrets; print(secrets.token_urlsafe(24))"
+# Example output: XgrEF4N0zpCzJI6gO2Mk-ZWUQ65QuY9N
 ```
 
-This creates a NAS status entry, fires and resolves a CPU alert, and stores a learned pattern. The store ends in an all-clear state.
-
-To add an active alert for the demo:
+Create a `.env` file in your project directory (**do not commit this file**):
 
 ```bash
-python3 -c "
-import sys; sys.path.insert(0, 'src')
-from mcp_awareness.store import AwarenessStore
-store = AwarenessStore('/tmp/awareness-demo/awareness.db')
-store.upsert_status('synology-nas', ['infra', 'nas', 'seedbox'], {
-    'metrics': {'cpu': {'usage_pct': 45}, 'memory': {'usage_pct': 78}},
-    'inventory': {'docker': {'running': ['plex', 'download-station'], 'stopped': ['qbittorrent']}},
-    'ttl_sec': 7200,
+AWARENESS_MOUNT_PATH=/your-generated-secret-here
+```
+
+### Step 4: Start the stack
+
+```bash
+docker compose up -d
+```
+
+This starts:
+- **mcp-awareness** — the MCP server (HTTP transport, secret path mounted)
+- **awareness-tunnel** — named Cloudflare Tunnel to your domain
+
+Verify:
+```bash
+# Should return 404 (blocked — no secret)
+curl -s -o /dev/null -w "%{http_code}" https://yourdomain.com/mcp
+
+# Should return 406 (MCP server responding, rejects plain GET)
+curl -s -o /dev/null -w "%{http_code}" https://yourdomain.com/<your-secret>/mcp
+```
+
+### Step 5: Add Cloudflare WAF rule
+
+The secret path protects at the server level, but without a WAF rule, every request still reaches your machine. Add a WAF rule to block at the edge:
+
+1. Cloudflare dashboard → your domain → **Security** → **Security rules**
+2. **Create rule** → **Custom rules**
+3. Configure:
+   - **Rule name**: `block-without-secret`
+   - **Field**: URI Path
+   - **Operator**: does not start with
+   - **Value**: `/<your-secret>`
+   - **Action**: Block
+4. **Deploy**
+
+Now unauthorized requests are blocked at Cloudflare's edge — they never reach your tunnel or server.
+
+Verify:
+```bash
+# Should return 403 (Cloudflare blocks it)
+curl -s -o /dev/null -w "%{http_code}" https://yourdomain.com/mcp
+
+# Should return 406 (allowed through to MCP server)
+curl -s -o /dev/null -w "%{http_code}" https://yourdomain.com/<your-secret>/mcp
+```
+
+### Step 6: Populate the store
+
+```bash
+python examples/simulate_edge.py --data-dir ~/awareness
+```
+
+Or add an active alert for testing:
+
+```python
+from mcp_awareness.store import SQLiteStore
+
+store = SQLiteStore("~/awareness/awareness.db")
+store.upsert_status("synology-nas", ["infra", "nas", "seedbox"], {
+    "metrics": {"cpu": {"usage_pct": 45}, "memory": {"usage_pct": 78}},
+    "inventory": {"docker": {"running": ["plex"], "stopped": ["qbittorrent"]}},
+    "ttl_sec": 7200,
 })
-store.upsert_alert('synology-nas', ['infra', 'nas', 'docker'], 'struct-qbt-stopped', {
-    'alert_id': 'struct-qbt-stopped',
-    'level': 'warning',
-    'alert_type': 'structural',
-    'message': 'Expected container qbittorrent is not running — disk I/O dropped to 12% (normally 80-90%)',
-    'details': {'expected': 'always_running', 'actual_status': 'exited', 'exit_code': 137},
-    'resolved': False,
+store.upsert_alert("synology-nas", ["infra", "nas", "docker"], "struct-qbt-stopped", {
+    "alert_id": "struct-qbt-stopped",
+    "level": "warning",
+    "alert_type": "structural",
+    "message": "qbittorrent container is not running — disk I/O dropped to 12%",
+    "resolved": False,
 })
-print('Alert created.')
-"
 ```
 
-## Step 3: Expose via Cloudflare Tunnel
+### Step 7: Connect Claude.ai
 
-In a third terminal:
+1. Go to [claude.ai](https://claude.ai) → **Settings** → **Connectors**
+2. Click **Add custom connector**
+3. Enter:
+   - **Name**: `awareness` (Claude uses this name for context)
+   - **URL**: `https://yourdomain.com/<your-secret>/mcp`
+   - Leave OAuth fields **blank**
+4. Click **Add**, then **Connect**
 
-```bash
-cloudflared tunnel --url http://localhost:8420
-```
+### Step 8: Add the memory instruction
 
-Look for the generated URL in the output:
-```
-Your quick Tunnel has been created! Visit it at:
-https://some-random-words.trycloudflare.com
-```
-
-Note this URL — you'll need it in the next step. The tunnel URL changes each time you restart cloudflared.
-
-## Step 4: Add the MCP connector in Claude.ai
-
-1. Go to [claude.ai](https://claude.ai)
-2. Open **Settings** → **Connectors**
-3. Click **Add custom connector**
-4. In the dialog: enter a name (e.g., `mcp-awareness`), enter the URL `https://your-tunnel-url.trycloudflare.com/mcp`, click **Add**
-
-## Step 5: Add the memory instruction
-
-Start a new conversation in Claude.ai and paste:
+Start a new conversation and paste:
 
 > Add this to your Memory:
 >
-> At the start of each conversation, call get_briefing from the mcp-awareness server. If attention_needed is true, briefly mention the suggested_mention or compose your own from the source headlines before responding to my question. If attention_needed is false, say nothing about it. Don't re-check unless I ask. When you learn something about one of my systems from conversation, call learn_pattern to record it. When I ask you to stop alerting about something, use suppress_alert — don't use your own memory for operational knowledge.
+> At the start of each conversation, call get_briefing from the awareness server. If attention_needed is true, briefly mention the suggested_mention or compose your own from the source headlines before responding to my question. If attention_needed is false, say nothing about it. Don't re-check unless I ask. When you learn something about one of my systems from conversation, call learn_pattern to record it. When I ask you to stop alerting about something, use suppress_alert — don't use your own memory for operational knowledge.
 
-Claude should confirm it saved the memory instruction.
-
-## Step 6: Test it
+### Step 9: Test it
 
 Start a **new conversation** and ask something unrelated:
 
 > What's the weather like this weekend?
 
 You should see Claude:
-1. Call `get_briefing` (may show in the thinking/tool use area)
-2. Mention the qBittorrent alert as an FYI before answering your weather question
-3. Answer the weather question normally
+1. Call `get_briefing` (visible in the tool use area)
+2. Mention the alert as an FYI before answering
+3. Answer your question normally
 
 Example output:
 
-> **FYI:** qbittorrent container appears to be down on the NAS — disk I/O has dropped to ~12% (normally 80-90%).
+> **FYI:** qbittorrent container appears to be down on the NAS — disk I/O dropped to ~12% (normally 80-90%).
 >
-> Weekend looks decent for Chicago: Saturday high of ~61°F...
+> Weekend looks decent for Chicago...
 
 ![Demo screenshot](images/android-briefing-demo.png)
 
-## Step 7: Test suppression
+### Step 10: Test suppression
 
-In the same or a new conversation, say:
+Say:
 
 > I know about the qBittorrent issue, suppress it for now
 
-Claude should call `suppress_alert` with appropriate parameters (source, tags, duration). Subsequent new conversations should no longer mention the qBittorrent alert.
+Claude calls `suppress_alert`. Subsequent new conversations no longer mention it.
+
+### Step 11: Test knowledge storage
+
+Say:
+
+> Please save your knowledge about my setup to awareness
+
+Claude calls `learn_pattern` multiple times, writing tagged, searchable knowledge entries to the store. This knowledge is now accessible from any MCP client on any platform.
+
+## Alternative: Quick tunnel (no account needed)
+
+For quick testing without a Cloudflare account or domain:
+
+```bash
+docker compose --profile quick up -d mcp-awareness tunnel-quick
+docker logs awareness-tunnel-quick 2>&1 | grep "trycloudflare.com"
+# → https://some-random-words.trycloudflare.com
+```
+
+Use `https://some-random-words.trycloudflare.com/mcp` as the connector URL. The URL changes on every restart. No WAF protection — suitable for testing only.
 
 ## What's happening under the hood
 
 ```mermaid
 sequenceDiagram
     participant You as You (Claude.ai)
+    participant WAF as Cloudflare WAF
     participant CF as Cloudflare Tunnel
     participant Server as mcp-awareness
     participant Collator as Collator
     participant Store as SQLite Store
 
-    You->>CF: New conversation starts
+    You->>WAF: Request to /secret/mcp
+    WAF->>WAF: Path starts with /secret? ✓
+    WAF->>CF: Forward to tunnel
     CF->>Server: get_briefing tool call
+    Server->>Server: Strip /secret prefix → /mcp
     Server->>Collator: generate_briefing()
     Collator->>Store: Read sources, alerts, suppressions, patterns
     Store-->>Collator: Raw entries
@@ -136,12 +236,43 @@ sequenceDiagram
     Collator-->>Server: Briefing JSON (~200-500 tokens)
     Server-->>CF: Tool result
     CF-->>You: Agent mentions alert (or stays silent if all clear)
+
+    Note over You,WAF: Unauthorized request to /mcp
+    You->>WAF: Request to /mcp (no secret)
+    WAF->>WAF: Path starts with /secret? ✗
+    WAF-->>You: 403 Forbidden (never reaches server)
 ```
+
+## Security considerations
+
+**This is important.** The awareness store may contain personal information — infrastructure details, project knowledge, health data, financial context. Securing the endpoint is not optional.
+
+The current approach uses two layers:
+
+1. **Cloudflare WAF** — blocks requests at the edge if the path doesn't match the secret prefix. Unauthorized traffic never reaches your machine. This is the primary defense.
+
+2. **Server middleware** — `SecretPathMiddleware` strips the secret prefix and routes to `/mcp`. Requests without the prefix get 404. This is the fallback defense if Cloudflare is bypassed.
+
+**What this does NOT protect against:**
+- Someone who obtains your secret URL has full read/write access
+- The secret is transmitted in the URL path (visible in server logs, Cloudflare logs)
+- No per-user authentication — anyone with the URL is "you"
+
+**For production / multi-user use**, implement proper authentication:
+- OAuth 2.0 with token validation
+- API keys in headers (requires MCP client support)
+- Cloudflare Access with compatible identity providers
+
+**Gotchas we discovered:**
+- Claude.ai custom connectors support OAuth Client ID / Secret fields, but these follow standard OAuth flows — they are **not compatible** with Cloudflare Access service tokens (which use `CF-Access-Client-Id` / `CF-Access-Client-Secret` headers)
+- Cloudflare Managed OAuth requires dynamic client registration (RFC 8707), which Claude.ai does not support
+- cloudflared tunnel ingress rules cannot rewrite URL paths — the server must handle path rewriting
+- FastMCP's `mount_path` parameter only works for SSE transport, not streamable-http
 
 ## Notes
 
-- **Tunnel URLs are temporary** — they change each time you restart cloudflared. You'll need to update the Claude.ai connector each time.
 - **The store persists** in the data directory. Restart the server and your data is still there.
-- **Claude.ai exposes tools but not resources** — the MCP spec defines both [resources](https://modelcontextprotocol.io/docs/concepts/resources) (read path) and [tools](https://modelcontextprotocol.io/docs/concepts/tools) (write path) as separate capabilities. During testing, we found that Claude.ai's custom connector surfaces MCP tools to the agent but not MCP resources. The agent could see `report_status`, `suppress_alert`, etc., but had no access to `awareness://briefing` or other resource URIs. We worked around this by adding read tools (`get_briefing`, `get_alerts`, `get_status`, `get_knowledge`, `get_suppressions`) that mirror the resource endpoints. The server exposes both — resources for clients that support them, tools for clients that don't. If you're aware of a configuration we may be missing, or if resource support is planned for custom connectors, we'd appreciate guidance.
-- **Model matters** — during testing, Haiku 4.5 did not follow the memory instruction to call `get_briefing` at conversation start. Sonnet 4.6 and Opus 4.6 both worked reliably.
-- **Suppression matching is content-aware** — a suppression tagged `["qbittorrent"]` will match alerts whose alert_id or message contains "qbittorrent", even if the alert's structural tags are different.
+- **Claude.ai exposes tools but not resources** — the MCP spec defines both [resources](https://modelcontextprotocol.io/docs/concepts/resources) (read path) and [tools](https://modelcontextprotocol.io/docs/concepts/tools) (write path). Claude.ai custom connectors surface tools but not resources. We added read tools (`get_briefing`, `get_alerts`, `get_status`, `get_knowledge`, `get_suppressions`) that mirror the resource endpoints.
+- **Model matters** — Haiku 4.5 did not follow the memory instruction to call `get_briefing` at conversation start. Sonnet 4.6 and Opus 4.6 both worked reliably.
+- **Suppression matching is content-aware** — a suppression tagged `["qbittorrent"]` will match alerts whose alert_id or message contains "qbittorrent", even if the alert's structural tags differ.
+- **Soft delete is safe** — `delete_entry` moves entries to trash (30-day retention). Bulk deletes show a dry-run count first and require `confirm=True`. Use `get_deleted` and `restore_entry` to recover.

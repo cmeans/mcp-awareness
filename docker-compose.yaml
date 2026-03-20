@@ -4,13 +4,58 @@ services:
     container_name: mcp-awareness
     restart: unless-stopped
     volumes:
-      - ./awareness-data:/app/data
+      - ${AWARENESS_DATA:-~/awareness}:/app/data
     ports:
       - "8420:8420"
     environment:
       - AWARENESS_DATA_DIR=/app/data
+      - AWARENESS_MOUNT_PATH=${AWARENESS_MOUNT_PATH:-}
     deploy:
       resources:
         limits:
           cpus: '0.1'
           memory: 64M
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; s = socket.create_connection(('localhost', 8420), timeout=2); s.close()"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
+  # Named tunnel — stable URL at awareness.intfar.com
+  # Requires: cloudflared tunnel login + tunnel create (see docs/poc-demo.md)
+  # To use quick tunnel instead: docker compose up mcp-awareness tunnel-quick
+  tunnel:
+    image: cloudflare/cloudflared:latest
+    container_name: awareness-tunnel
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run
+    volumes:
+      - ${CLOUDFLARED_CONFIG:-~/.cloudflared}/config.yml:/etc/cloudflared/config.yml:ro
+      - ${CLOUDFLARED_CREDS:-~/.cloudflared/6fcef8d8-5be9-46d2-990f-5043e4feb043.json}:/etc/cloudflared/credentials.json:ro
+    depends_on:
+      mcp-awareness:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: '0.05'
+          memory: 64M
+
+  # Quick tunnel — ephemeral URL, no account needed
+  # Usage: docker compose up mcp-awareness tunnel-quick
+  tunnel-quick:
+    image: cloudflare/cloudflared:latest
+    container_name: awareness-tunnel-quick
+    command: tunnel --no-autoupdate --url http://mcp-awareness:8420
+    depends_on:
+      mcp-awareness:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: '0.05'
+          memory: 64M
+    profiles:
+      - quick
+

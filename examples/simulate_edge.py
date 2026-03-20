@@ -22,11 +22,11 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from mcp_awareness.collator import generate_briefing
 from mcp_awareness.schema import Entry, EntryType, make_id, now_iso
-from mcp_awareness.store import AwarenessStore
+from mcp_awareness.store import SQLiteStore
 
 
 def simulate(data_dir: str = "./data") -> None:
-    store = AwarenessStore(Path(data_dir) / "awareness.db")
+    store = SQLiteStore(Path(data_dir) / "awareness.db")
 
     print("=== Simulating edge process: synology-nas ===\n")
 
