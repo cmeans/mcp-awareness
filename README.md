@@ -205,6 +205,7 @@ See [Security considerations](docs/deployment-guide.md#security-considerations) 
 - [Deployment Guide](docs/deployment-guide.md) — deployment walkthrough with Cloudflare Tunnel, WAF, and Claude.ai integration
 - [From Metrics to Mental Models](docs/from-metrics-to-mental-models.md) — core spec: three-layer detection model, API design, data schema
 - [Collation Layer](docs/collation-layer.md) — briefing resource, token optimization, escalation logic
+- [Data Dictionary](docs/data-dictionary.md) — database schema, entry types, data field structures, lifecycle rules
 
 ## What's different
 
