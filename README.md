@@ -160,6 +160,7 @@ docker compose up -d
 
 ## Design docs
 
+- [PoC Demo Guide](docs/poc-demo.md) — step-by-step walkthrough to reproduce the end-to-end demo
 - [From Metrics to Mental Models](docs/from-metrics-to-mental-models.md) — core spec: three-layer detection model, API design, data schema, implementation priorities
 - [Collation Layer](docs/collation-layer.md) — addendum: briefing resource, token optimization, escalation logic, backend placement
 
