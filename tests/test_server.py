@@ -34,7 +34,7 @@ def _store() -> AwarenessStore:
 class TestBriefingResource:
     @pytest.mark.anyio
     async def test_empty_briefing(self) -> None:
-        result = await server_mod.briefing()
+        result = await server_mod.briefing_resource()
         data = json.loads(result)
         assert data["attention_needed"] is False
         assert data["active_alerts"] == 0
@@ -55,7 +55,7 @@ class TestBriefingResource:
                 "resolved": False,
             },
         )
-        result = await server_mod.briefing()
+        result = await server_mod.briefing_resource()
         data = json.loads(result)
         assert data["attention_needed"] is True
         assert data["active_alerts"] == 1
@@ -64,7 +64,7 @@ class TestBriefingResource:
 class TestAlertsResource:
     @pytest.mark.anyio
     async def test_empty_alerts(self) -> None:
-        result = await server_mod.all_alerts()
+        result = await server_mod.alerts_resource()
         assert json.loads(result) == []
 
     @pytest.mark.anyio
@@ -82,7 +82,7 @@ class TestAlertsResource:
                 "resolved": False,
             },
         )
-        result = await server_mod.all_alerts()
+        result = await server_mod.alerts_resource()
         alerts = json.loads(result)
         assert len(alerts) == 1
         assert alerts[0]["data"]["alert_id"] == "a1"
@@ -114,7 +114,7 @@ class TestAlertsResource:
                 "resolved": False,
             },
         )
-        result = await server_mod.source_alerts("nas")
+        result = await server_mod.source_alerts_resource("nas")
         alerts = json.loads(result)
         assert len(alerts) == 1
         assert alerts[0]["source"] == "nas"
@@ -125,14 +125,14 @@ class TestStatusResource:
     async def test_status_found(self) -> None:
         s = _store()
         s.upsert_status("nas", ["infra"], {"metrics": {"cpu": 42}, "ttl_sec": 120})
-        result = await server_mod.source_status("nas")
+        result = await server_mod.source_status_resource("nas")
         data = json.loads(result)
         assert data["source"] == "nas"
         assert data["data"]["metrics"]["cpu"] == 42
 
     @pytest.mark.anyio
     async def test_status_not_found(self) -> None:
-        result = await server_mod.source_status("nonexistent")
+        result = await server_mod.source_status_resource("nonexistent")
         data = json.loads(result)
         assert "error" in data
 
@@ -140,7 +140,7 @@ class TestStatusResource:
 class TestKnowledgeResource:
     @pytest.mark.anyio
     async def test_empty_knowledge(self) -> None:
-        result = await server_mod.knowledge()
+        result = await server_mod.knowledge_resource()
         assert json.loads(result) == []
 
     @pytest.mark.anyio
@@ -152,7 +152,7 @@ class TestKnowledgeResource:
             conditions=None,
             effect="suppress test",
         )
-        result = await server_mod.knowledge()
+        result = await server_mod.knowledge_resource()
         entries = json.loads(result)
         assert len(entries) == 1
         assert entries[0]["data"]["description"] == "test pattern"
@@ -161,7 +161,7 @@ class TestKnowledgeResource:
 class TestSuppressionsResource:
     @pytest.mark.anyio
     async def test_empty_suppressions(self) -> None:
-        result = await server_mod.suppressions()
+        result = await server_mod.suppressions_resource()
         assert json.loads(result) == []
 
     @pytest.mark.anyio
@@ -171,7 +171,7 @@ class TestSuppressionsResource:
             metric="cpu_pct",
             reason="test",
         )
-        result = await server_mod.suppressions()
+        result = await server_mod.suppressions_resource()
         entries = json.loads(result)
         assert len(entries) == 1
 
@@ -380,3 +380,113 @@ class TestSetPreferenceTool:
         )
         data = json.loads(result)
         assert data["scope"] == "nas"
+
+
+# ---------------------------------------------------------------------------
+# Read tool tests (mirrors of resources for tools-only clients)
+# ---------------------------------------------------------------------------
+
+
+class TestGetBriefingTool:
+    @pytest.mark.anyio
+    async def test_get_briefing_empty(self) -> None:
+        result = await server_mod.get_briefing()
+        data = json.loads(result)
+        assert data["attention_needed"] is False
+
+    @pytest.mark.anyio
+    async def test_get_briefing_with_alert(self) -> None:
+        s = _store()
+        s.upsert_status("nas", ["infra"], {"metrics": {}, "ttl_sec": 3600})
+        s.upsert_alert(
+            "nas",
+            ["infra"],
+            "a1",
+            {
+                "alert_id": "a1",
+                "level": "warning",
+                "alert_type": "threshold",
+                "message": "CPU high",
+                "resolved": False,
+            },
+        )
+        result = await server_mod.get_briefing()
+        data = json.loads(result)
+        assert data["attention_needed"] is True
+        assert "suggested_mention" in data
+
+
+class TestGetAlertsTool:
+    @pytest.mark.anyio
+    async def test_get_alerts_empty(self) -> None:
+        result = await server_mod.get_alerts()
+        assert json.loads(result) == []
+
+    @pytest.mark.anyio
+    async def test_get_alerts_filtered(self) -> None:
+        s = _store()
+        s.upsert_alert(
+            "nas",
+            ["infra"],
+            "a1",
+            {
+                "alert_id": "a1",
+                "level": "warning",
+                "alert_type": "threshold",
+                "message": "NAS issue",
+                "resolved": False,
+            },
+        )
+        s.upsert_alert(
+            "ci",
+            ["cicd"],
+            "a2",
+            {
+                "alert_id": "a2",
+                "level": "warning",
+                "alert_type": "threshold",
+                "message": "CI issue",
+                "resolved": False,
+            },
+        )
+        all_result = await server_mod.get_alerts()
+        assert len(json.loads(all_result)) == 2
+        nas_result = await server_mod.get_alerts(source="nas")
+        assert len(json.loads(nas_result)) == 1
+
+
+class TestGetStatusTool:
+    @pytest.mark.anyio
+    async def test_get_status(self) -> None:
+        _store().upsert_status("nas", ["infra"], {"metrics": {"cpu": 42}, "ttl_sec": 120})
+        result = await server_mod.get_status(source="nas")
+        data = json.loads(result)
+        assert data["data"]["metrics"]["cpu"] == 42
+
+    @pytest.mark.anyio
+    async def test_get_status_not_found(self) -> None:
+        result = await server_mod.get_status(source="nonexistent")
+        assert "error" in json.loads(result)
+
+
+class TestGetKnowledgeTool:
+    @pytest.mark.anyio
+    async def test_get_knowledge(self) -> None:
+        await server_mod.learn_pattern(
+            source="nas",
+            tags=["infra"],
+            description="test",
+            effect="suppress test",
+        )
+        result = await server_mod.get_knowledge()
+        entries = json.loads(result)
+        assert len(entries) == 1
+
+
+class TestGetSuppressionsTool:
+    @pytest.mark.anyio
+    async def test_get_suppressions(self) -> None:
+        await server_mod.suppress_alert(source="nas", metric="cpu_pct", reason="test")
+        result = await server_mod.get_suppressions()
+        entries = json.loads(result)
+        assert len(entries) == 1

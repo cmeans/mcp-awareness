@@ -47,12 +47,12 @@ mcp = FastMCP(
 
 
 # ---------------------------------------------------------------------------
-# Resources
+# Resources (for MCP clients that support resource reading)
 # ---------------------------------------------------------------------------
 
 
 @mcp.resource("awareness://briefing")
-async def briefing() -> str:
+async def briefing_resource() -> str:
     """Compact awareness briefing — the ONLY resource to read at conversation start.
     ~200 tokens when all clear, ~500 when issues exist. Pre-filtered through
     patterns and suppressions. If attention_needed is false, nothing to mention.
@@ -62,7 +62,7 @@ async def briefing() -> str:
 
 
 @mcp.resource("awareness://alerts")
-async def all_alerts() -> str:
+async def alerts_resource() -> str:
     """Active alerts across all monitored systems. Empty = all clear.
     This is a drill-down resource — read awareness://briefing first.
     If non-empty, briefly inform user before responding to their question.
@@ -73,7 +73,7 @@ async def all_alerts() -> str:
 
 
 @mcp.resource("awareness://alerts/{source}")
-async def source_alerts(source: str) -> str:
+async def source_alerts_resource(source: str) -> str:
     """Active alerts from a specific source. Drill-down from briefing.
     Read this when the briefing references a drill_down for this source."""
     alerts = store.get_active_alerts(source)
@@ -81,7 +81,7 @@ async def source_alerts(source: str) -> str:
 
 
 @mcp.resource("awareness://status/{source}")
-async def source_status(source: str) -> str:
+async def source_status_resource(source: str) -> str:
     """Full status from a specific source including metrics and inventory.
     Drill-down resource — read when briefing indicates issues with this source
     or when user asks about a specific system."""
@@ -92,7 +92,7 @@ async def source_status(source: str) -> str:
 
 
 @mcp.resource("awareness://knowledge")
-async def knowledge() -> str:
+async def knowledge_resource() -> str:
     """All knowledge entries: learned patterns, historical context, preferences.
     Knowledge belongs to the system, not any specific agent.
     Drill-down resource — read when you need context about a system's
@@ -102,10 +102,63 @@ async def knowledge() -> str:
 
 
 @mcp.resource("awareness://suppressions")
-async def suppressions() -> str:
+async def suppressions_resource() -> str:
     """Active alert suppressions with expiry times and escalation settings.
     Drill-down resource — the briefing already applies suppressions.
     Read this to show the user what's currently being suppressed."""
+    entries = store.get_active_suppressions()
+    return json.dumps([e.to_dict() for e in entries], indent=2)
+
+
+# ---------------------------------------------------------------------------
+# Read tools (mirrors of resources, for MCP clients that only support tools)
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool()
+async def get_briefing() -> str:
+    """Get the awareness briefing. Call this at conversation start.
+    Returns a compact summary (~200 tokens all-clear, ~500 with issues).
+    If attention_needed is true, mention the suggested_mention or compose
+    your own from the source headlines. If false, nothing to report.
+    Pre-filtered through patterns and suppressions — no further processing needed."""
+    return json.dumps(generate_briefing(store), indent=2)
+
+
+@mcp.tool()
+async def get_alerts(source: str | None = None) -> str:
+    """Get active alerts, optionally filtered by source.
+    Drill-down from briefing — call when briefing shows attention_needed
+    and you want alert details. Returns full alert entries with diagnostics."""
+    alerts = store.get_active_alerts(source)
+    return json.dumps([a.to_dict() for a in alerts], indent=2)
+
+
+@mcp.tool()
+async def get_status(source: str) -> str:
+    """Get full status for a specific source including metrics and inventory.
+    Call when the briefing indicates issues with a source or user asks
+    about a specific system."""
+    entry = store.get_latest_status(source)
+    if entry:
+        return json.dumps(entry.to_dict(), indent=2)
+    return json.dumps({"error": f"No status found for source: {source}"})
+
+
+@mcp.tool()
+async def get_knowledge() -> str:
+    """Get all knowledge entries: learned patterns, historical context, preferences.
+    Knowledge belongs to the system, not any specific agent. Call when you need
+    context about a system's normal behavior or operational patterns."""
+    entries = store.get_knowledge()
+    return json.dumps([e.to_dict() for e in entries], indent=2)
+
+
+@mcp.tool()
+async def get_suppressions() -> str:
+    """Get active alert suppressions with expiry times and escalation settings.
+    The briefing already applies suppressions — call this to show the user
+    what's currently being suppressed."""
     entries = store.get_active_suppressions()
     return json.dumps([e.to_dict() for e in entries], indent=2)
 
