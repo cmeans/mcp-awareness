@@ -1,0 +1,70 @@
+name: Platform Test Report
+description: Report results from testing with an MCP client or platform
+labels: ["testing", "platform-compat"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Help us build the compatibility matrix! Report what works (or doesn't) on your setup.
+  - type: dropdown
+    id: client
+    attributes:
+      label: MCP Client
+      options:
+        - Claude.ai (custom connector)
+        - Claude Desktop
+        - Claude Code
+        - Cursor
+        - ChatGPT
+        - Other (describe below)
+    validations:
+      required: true
+  - type: input
+    id: client_version
+    attributes:
+      label: Client version
+      description: Version or build number if known
+      placeholder: "e.g., Claude Desktop 1.2.3, Cursor 0.45"
+    validations:
+      required: false
+  - type: dropdown
+    id: transport
+    attributes:
+      label: Transport
+      options:
+        - stdio
+        - streamable-http (local)
+        - streamable-http (Cloudflare Tunnel)
+    validations:
+      required: true
+  - type: dropdown
+    id: plan
+    attributes:
+      label: Account plan (if applicable)
+      options:
+        - Free
+        - Pro
+        - Max
+        - Team / Enterprise
+        - N/A
+    validations:
+      required: false
+  - type: checkboxes
+    id: features
+    attributes:
+      label: What worked?
+      options:
+        - label: "Tools visible to the client"
+        - label: "Resources visible to the client"
+        - label: "`get_briefing` returns data"
+        - label: "`learn_pattern` writes successfully"
+        - label: "Memory instruction followed (auto-calls `get_briefing`)"
+        - label: "`suppress_alert` works"
+        - label: "Soft delete / restore works"
+  - type: textarea
+    id: notes
+    attributes:
+      label: Notes
+      description: Anything else — quirks, workarounds, screenshots, model behavior differences.
+    validations:
+      required: false

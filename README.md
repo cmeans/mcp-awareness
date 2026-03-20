@@ -115,7 +115,7 @@ AWARENESS_TRANSPORT=streamable-http mcp-awareness
 docker compose up -d
 ```
 
-See the [PoC Demo Guide](docs/poc-demo.md) for secure deployment with Cloudflare Tunnel, WAF rules, and secret path auth.
+See the [Deployment Guide](docs/poc-demo.md) for secure deployment with Cloudflare Tunnel, WAF rules, and secret path auth.
 
 ### Environment variables
 
@@ -160,7 +160,7 @@ See the [PoC Demo Guide](docs/poc-demo.md) for secure deployment with Cloudflare
 ### Docker
 
 ```bash
-# Named Cloudflare tunnel (stable URL, requires cloudflared setup — see PoC guide)
+# Named Cloudflare tunnel (stable URL, requires cloudflared setup — see Deployment Guide)
 docker compose up -d
 
 # Quick tunnel (ephemeral URL, no account needed — testing only)
@@ -174,7 +174,7 @@ The awareness store may contain personal information. Securing the endpoint is n
 1. **Cloudflare WAF** — blocks requests at the edge if the URL path doesn't match the secret prefix. Unauthorized traffic never reaches your machine.
 2. **Server middleware** — strips the secret prefix and routes to `/mcp`. Requests without it get 404.
 
-See [Security considerations](docs/poc-demo.md#security-considerations) in the PoC guide for details, limitations, and what's planned.
+See [Security considerations](docs/poc-demo.md#security-considerations) in the Deployment Guide for details, limitations, and what's planned.
 
 ## Current status
 
@@ -202,7 +202,7 @@ See [Security considerations](docs/poc-demo.md#security-considerations) in the P
 
 ## Design docs
 
-- [PoC Demo Guide](docs/poc-demo.md) — secure deployment walkthrough with Cloudflare Tunnel, WAF, and Claude.ai integration
+- [Deployment Guide](docs/poc-demo.md) — deployment walkthrough with Cloudflare Tunnel, WAF, and Claude.ai integration
 - [From Metrics to Mental Models](docs/from-metrics-to-mental-models.md) — core spec: three-layer detection model, API design, data schema
 - [Collation Layer](docs/collation-layer.md) — briefing resource, token optimization, escalation logic
 

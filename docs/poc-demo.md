@@ -1,13 +1,17 @@
-# PoC Demo: End-to-End Awareness Briefing
+# Deployment Guide
 
-This guide walks through the complete proof of concept — from starting the server to seeing an ambient awareness alert surface during an unrelated conversation in Claude.ai, with secure public access via Cloudflare.
+This guide walks through deploying mcp-awareness — from starting the server to seeing an ambient awareness alert surface during an unrelated conversation in Claude.ai.
+
+The examples below use Cloudflare Tunnel and WAF for public access, but any reverse proxy that terminates TLS will work (nginx, Caddy, Tailscale, ngrok, etc.). The core requirement is HTTPS between your MCP client and the server.
 
 ## Prerequisites
+
+> **Platform note:** These instructions were developed on Fedora Linux. Other Linux distributions and macOS should work with minor adjustments. Windows is untested and likely requires WSL or similar.
 
 - Python 3.10+ with `mcp-awareness` installed (`pip install -e .`)
 - Docker and Docker Compose
 - [cloudflared](https://github.com/cloudflare/cloudflared/releases) installed
-- A [Claude.ai](https://claude.ai) account (free tier works)
+- A [Claude.ai](https://claude.ai) account (Pro plan or higher recommended; free plan may work but is unverified)
 
 ## Quick start (local only)
 
@@ -23,7 +27,7 @@ Then use `http://localhost:8420/mcp` as the endpoint in Claude Desktop or Claude
 
 ## Secure deployment (recommended)
 
-This section sets up a production-ready deployment with Docker Compose, a stable public URL via Cloudflare Tunnel, and access control via a secret path + Cloudflare WAF.
+This section sets up a publicly accessible deployment with Docker Compose, a stable URL via Cloudflare Tunnel, and basic access control via a secret path + Cloudflare WAF. This is suitable for personal use and testing — not production-grade security.
 
 ### Step 1: Set up Cloudflare
 
@@ -69,7 +73,7 @@ The secret path prevents unauthorized access to your MCP endpoint. Only requests
 
 ```bash
 python3 -c "import secrets; print(secrets.token_urlsafe(24))"
-# Example output: XgrEF4N0zpCzJI6gO2Mk-ZWUQ65QuY9N
+# Example output: a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6
 ```
 
 Create a `.env` file in your project directory (**do not commit this file**):
@@ -164,7 +168,12 @@ Start a new conversation and paste:
 
 > Add this to your Memory:
 >
-> At the start of each conversation, call get_briefing from the awareness server. If attention_needed is true, briefly mention the suggested_mention or compose your own from the source headlines before responding to my question. If attention_needed is false, say nothing about it. Don't re-check unless I ask. When you learn something about one of my systems from conversation, call learn_pattern to record it. When I ask you to stop alerting about something, use suppress_alert — don't use your own memory for operational knowledge.
+> **Awareness** is my portable knowledge store at `awareness`. Use it instead of your memory for anything about me, my systems, family, projects, or preferences.
+>
+> - **Start of conversation:** Call `get_briefing`. Mention only if `attention_needed` is true.
+> - **I tell you something worth remembering:** Store it — `learn_pattern` for permanent facts, `add_context` for time-limited, `set_preference` for behavior. Set `learned_from` to your platform (e.g., "claude.ai", "claude-code", "claude-desktop").
+> - **My question might have stored context:** Call `get_knowledge` before answering.
+> - **I say stop alerting:** Use `suppress_alert`.
 
 ### Step 9: Test it
 

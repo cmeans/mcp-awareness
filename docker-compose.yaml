@@ -23,7 +23,7 @@ services:
       start_period: 5s
 
   # Named tunnel — stable URL at awareness.intfar.com
-  # Requires: cloudflared tunnel login + tunnel create (see docs/poc-demo.md)
+  # Requires: cloudflared tunnel login + tunnel create (see Deployment Guide)
   # To use quick tunnel instead: docker compose up mcp-awareness tunnel-quick
   tunnel:
     image: cloudflare/cloudflared:latest
