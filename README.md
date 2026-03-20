@@ -137,17 +137,24 @@ docker compose up -d
 
 ## Current status
 
+**Working end-to-end** — tested from an Android phone via Cloudflare Tunnel → HTTP transport → Claude.ai reading a structural alert briefing:
+
+<p align="center">
+  <img src="docs/images/android-briefing-demo.png" alt="Claude on Android displaying a structural alert from mcp-awareness" width="300">
+</p>
+
 **Implemented:**
-- Awareness service with SQLite store (WAL mode), collation engine, and full MCP API (6 resources, 6 tools)
+- Awareness service with SQLite store (WAL mode), collation engine, and full MCP API (6 resources + 11 tools)
+- Dual read path: MCP resources for clients that support them, read tools (`get_briefing`, `get_alerts`, etc.) for tools-only clients like Claude.ai
+- Streamable HTTP transport (`AWARENESS_TRANSPORT=streamable-http`) alongside stdio
 - Layer 1 (threshold) detection via alert levels from edge processes
 - Layer 3 (knowledge) detection via keyword-based pattern matching — learned patterns suppress expected anomalies
 - Suppression system with time-based expiry and escalation overrides (critical breaks through warning-level suppression)
 - Briefing generation targeting ~200 tokens all-clear, ~500 with issues
-- 99 tests, 99% coverage, strict type checking, CI pipeline
+- 107 tests, strict type checking, CI pipeline
 
 **Not yet implemented:**
 - Layer 2 (baseline) detection — rolling averages and deviation calculation are planned but not built
-- ~~HTTP transport~~ — **implemented** (set `AWARENESS_TRANSPORT=streamable-http`)
 - Edge processes — no producers exist yet; the store works but nothing writes to it in production ([example script](examples/simulate_edge.py) demonstrates the write path)
 - Semantic pattern matching — current matching is keyword-based; RAG/vector similarity is a future consideration for complex natural-language patterns
 
