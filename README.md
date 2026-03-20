@@ -137,7 +137,7 @@ docker compose up -d
 
 ## Current status
 
-**Working end-to-end** — tested from an Android phone via Cloudflare Tunnel → HTTP transport → Claude.ai reading a structural alert briefing:
+**Working end-to-end** — tested from an Android phone via Cloudflare Tunnel → HTTP transport → Claude.ai reading a structural alert briefing. See the [PoC Demo Guide](docs/poc-demo.md) to reproduce this yourself.
 
 <p align="center">
   <img src="docs/images/android-briefing-demo.png" alt="Claude on Android displaying a structural alert from mcp-awareness" width="300">
