@@ -168,7 +168,7 @@ Start a new conversation and paste:
 
 > Add this to your Memory:
 >
-> **Awareness** is my portable knowledge store at `awareness`. Use it instead of your memory for anything about me, my systems, family, projects, or preferences.
+> **Awareness** is my portable knowledge store at `awareness`. Use it in conjunction with your memory for anything about me, my systems, family, projects, or preferences.
 >
 > - **Start of conversation:** Call `get_briefing`. Mention only if `attention_needed` is true.
 > - **I tell you something worth remembering:** Store it — `learn_pattern` for permanent facts, `add_context` for time-limited, `set_preference` for behavior. Set `learned_from` to your platform (e.g., "claude.ai", "claude-code", "claude-desktop").
