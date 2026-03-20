@@ -119,26 +119,23 @@ Claude should call `suppress_alert` with appropriate parameters (source, tags, d
 
 ## What's happening under the hood
 
-```
-You (Claude.ai) → Cloudflare Tunnel → mcp-awareness HTTP server
-                                            │
-                                    ┌───────┴────────┐
-                                    │   get_briefing  │
-                                    │   tool call     │
-                                    └───────┬────────┘
-                                            │
-                                    ┌───────┴────────┐
-                                    │   Collator      │
-                                    │   • reads store │
-                                    │   • applies     │
-                                    │     suppressions│
-                                    │   • generates   │
-                                    │     briefing    │
-                                    └───────┬────────┘
-                                            │
-                                    JSON briefing returned
-                                    (~200 tokens all-clear,
-                                     ~500 with issues)
+```mermaid
+sequenceDiagram
+    participant You as You (Claude.ai)
+    participant CF as Cloudflare Tunnel
+    participant Server as mcp-awareness
+    participant Collator as Collator
+    participant Store as SQLite Store
+
+    You->>CF: New conversation starts
+    CF->>Server: get_briefing tool call
+    Server->>Collator: generate_briefing()
+    Collator->>Store: Read sources, alerts, suppressions, patterns
+    Store-->>Collator: Raw entries
+    Note over Collator: Apply suppressions<br/>Apply patterns<br/>Evaluate escalation<br/>Compose summary
+    Collator-->>Server: Briefing JSON (~200-500 tokens)
+    Server-->>CF: Tool result
+    CF-->>You: Agent mentions alert (or stays silent if all clear)
 ```
 
 ## Notes
