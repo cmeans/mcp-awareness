@@ -111,6 +111,10 @@ Written by agents via `set_preference`. Keyed by `key` + `scope` (upserted). Por
 - **Staleness:** Status entries with `ttl_sec` are marked stale in the briefing if no update arrives within the TTL window. The entry itself is not deleted — it remains as the last known state.
 - **Hard deletes:** The API only performs soft deletes. If you delete the SQLite database file or run manual SQL `DELETE` statements, that data is gone permanently — there is no recovery mechanism beyond your own backups. Back up `awareness.db` regularly.
 
+### Known limitation: cleanup blocks requests
+
+The `_cleanup_expired` pass runs synchronously inside the write lock, meaning it blocks the request that triggers it. The 10-second debounce limits frequency, but when it fires, the caller waits for the `DELETE` to complete before getting their response. For a small single-user database this is negligible, but it will not scale. A future improvement should either move cleanup to a background task or filter expired entries at query time and purge asynchronously.
+
 ## SQLite configuration
 
 - **WAL mode** enabled for concurrent read/write safety
