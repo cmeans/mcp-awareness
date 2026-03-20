@@ -531,9 +531,7 @@ class TestDeleteEntryTool:
         await server_mod.learn_pattern(source="nas", tags=[], description="p1")
         await server_mod.learn_pattern(source="nas", tags=[], description="p2")
         await server_mod.learn_pattern(source="ci", tags=[], description="p3")
-        result = await server_mod.delete_entry(
-            source="nas", entry_type="pattern", confirm=True
-        )
+        result = await server_mod.delete_entry(source="nas", entry_type="pattern", confirm=True)
         data = json.loads(result)
         assert data["status"] == "ok"
         assert data["trashed"] == 2
@@ -578,9 +576,7 @@ class TestGetDeletedTool:
 
     @pytest.mark.anyio
     async def test_get_deleted_shows_trashed(self) -> None:
-        result = await server_mod.learn_pattern(
-            source="nas", tags=[], description="trashed"
-        )
+        result = await server_mod.learn_pattern(source="nas", tags=[], description="trashed")
         entry_id = json.loads(result)["id"]
         await server_mod.delete_entry(entry_id=entry_id)
         trash = json.loads(await server_mod.get_deleted())

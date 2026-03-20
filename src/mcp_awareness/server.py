@@ -354,32 +354,38 @@ async def delete_entry(
     or 'remove everything about Y'. Entries auto-purge after 30 days."""
     if entry_id:
         trashed = store.soft_delete_by_id(entry_id)
-        return json.dumps({
-            "status": "ok",
-            "trashed": 1 if trashed else 0,
-            "entry_id": entry_id,
-            "recoverable_days": 30,
-        })
+        return json.dumps(
+            {
+                "status": "ok",
+                "trashed": 1 if trashed else 0,
+                "entry_id": entry_id,
+                "recoverable_days": 30,
+            }
+        )
     if not source:
         return json.dumps({"status": "error", "message": "Provide entry_id or source"})
     et = EntryType(entry_type) if entry_type else None
     if not confirm:
         entries = store.get_entries(entry_type=et, source=source)
-        return json.dumps({
-            "status": "dry_run",
-            "would_trash": len(entries),
+        return json.dumps(
+            {
+                "status": "dry_run",
+                "would_trash": len(entries),
+                "source": source,
+                "entry_type": entry_type,
+                "message": "Set confirm=True to move to trash. Show the user this count first.",
+            }
+        )
+    count = store.soft_delete_by_source(source, et)
+    return json.dumps(
+        {
+            "status": "ok",
+            "trashed": count,
             "source": source,
             "entry_type": entry_type,
-            "message": "Set confirm=True to move to trash. Show the user this count first.",
-        })
-    count = store.soft_delete_by_source(source, et)
-    return json.dumps({
-        "status": "ok",
-        "trashed": count,
-        "source": source,
-        "entry_type": entry_type,
-        "recoverable_days": 30,
-    })
+            "recoverable_days": 30,
+        }
+    )
 
 
 @mcp.tool()
@@ -387,11 +393,13 @@ async def restore_entry(entry_id: str) -> str:
     """Restore a soft-deleted entry from the trash. Requires the entry ID.
     Call get_deleted first to see what's in the trash and get the IDs."""
     restored = store.restore_by_id(entry_id)
-    return json.dumps({
-        "status": "ok" if restored else "not_found",
-        "restored": restored,
-        "entry_id": entry_id,
-    })
+    return json.dumps(
+        {
+            "status": "ok" if restored else "not_found",
+            "restored": restored,
+            "entry_id": entry_id,
+        }
+    )
 
 
 @mcp.tool()
