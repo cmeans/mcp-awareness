@@ -259,7 +259,9 @@ Awareness started as a system monitoring tool, but that's just one source of con
 
 Take meeting notes in Notion — an edge process summarizes them and stores them in awareness. Next time you open Claude Code to implement what was discussed, it already knows the decisions and context. Update a ticket in Linear, and your AI knows the priority changed. Merge a PR in GitHub, and every platform knows the feature shipped.
 
-Notion, Slack, Linear, Jira, Google Docs, health trackers, calendars, infrastructure monitors — any tool with an API becomes a source. Your AI becomes the integration layer between everything you use, with context that flows automatically instead of requiring you to repeat yourself.
+Notion, Slack, Linear, Jira, Google Docs, health trackers, calendars, infrastructure monitors — any tool with an API becomes a source.
+
+And it flows both ways. Knowledge doesn't just come *in* — it goes *out*. Update a memory prompt in awareness, and an edge process auto-commits the change to your GitHub docs. Change your project status, and it shows up in Notion or Slack without anyone posting. Awareness becomes the hub, not a silo — your AI is the integration layer between everything you use, with context that flows automatically in both directions.
 
 ### What makes this different from a wiki
 
