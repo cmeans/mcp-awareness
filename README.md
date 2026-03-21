@@ -243,9 +243,13 @@ Today, `mcp-awareness` is personal — one person's AI tools sharing a single kn
 
 **Personal** (now): Your AIs share memory across every platform you use. Plan on your phone, implement on your laptop, review from your desktop. Context follows you, not the app.
 
-**Team** (next): A shared awareness store for your team. Your AI knows the on-call runbook, the architecture decisions, the coding conventions — not because someone wrote a doc, but because the team's AIs have been accumulating knowledge through daily work. New team member's AI is productive on day one. Temporary context like "code freeze until Thursday" is automatically known by everyone's AI and automatically forgotten when it lifts.
+**Family** (next): A shared store for your household. Birthdays, wishlists, dietary restrictions, who's allergic to what, which kid has practice on Thursdays. "Plan a birthday dinner for Mom" and your AI already knows the date, her favorite restaurant, and who's in town. No shared spreadsheet to maintain — knowledge accumulates as family members mention things to their own AIs.
 
-**Organization** (future): Multiple teams, scoped access. Engineering, ops, product — each with their own store, plus cross-team shared knowledge. Access controls determine what each person's AI can see. Your AI has the context it needs without exposing what it shouldn't.
+**Team** (next): A shared awareness store for your team at work. Your AI knows the on-call runbook, the architecture decisions, the coding conventions — not because someone wrote a doc, but because the team's AIs have been accumulating knowledge through daily work. New team member's AI is productive on day one. Temporary context like "code freeze until Thursday" is automatically known by everyone's AI and automatically forgotten when it lifts.
+
+**Organization** (future): Multiple teams, scoped access. Engineering, ops, product — each with their own store, plus cross-team shared knowledge.
+
+Shared stores require trust boundaries — ownership, audit history, edit/view permissions, the ability to revert changes. The `_changelog` is a starting point; full multi-user access control is on the roadmap alongside OAuth and the managed service.
 
 ### Universal context, not just monitoring
 
