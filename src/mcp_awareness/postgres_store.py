@@ -246,11 +246,13 @@ class PostgresStore:
         if source is not None:
             clauses.append("source = %s")
             params.append(source)
-        where = " AND ".join(clauses) if clauses else "1=1"
-        results = self._query_entries(where, tuple(params))
         if tags:
-            results = [e for e in results if any(t in e.tags for t in tags)]
-        return results
+            # Use GIN-indexed @> operator: match entries containing ANY of the tags
+            tag_clauses = ["tags @> %s::jsonb" for _ in tags]
+            clauses.append(f"({' OR '.join(tag_clauses)})")
+            params.extend(json.dumps([t]) for t in tags)
+        where = " AND ".join(clauses) if clauses else "1=1"
+        return self._query_entries(where, tuple(params))
 
     def get_sources(self) -> list[str]:
         """Get all unique sources that have reported status."""
@@ -308,16 +310,21 @@ class PostgresStore:
         self, tags: list[str] | None = None, include_history: str | None = None
     ) -> list[Entry]:
         """Get knowledge entries (patterns, context, preferences, notes)."""
-        types = (
+        types = [
             EntryType.PATTERN.value,
             EntryType.CONTEXT.value,
             EntryType.PREFERENCE.value,
             EntryType.NOTE.value,
-        )
+        ]
         placeholders = ",".join("%s" for _ in types)
-        entries = self._query_entries(f"type IN ({placeholders})", types)
+        clauses = [f"type IN ({placeholders})"]
+        params: list[Any] = list(types)
         if tags:
-            entries = [e for e in entries if any(t in e.tags for t in tags)]
+            tag_clauses = ["tags @> %s::jsonb" for _ in tags]
+            clauses.append(f"({' OR '.join(tag_clauses)})")
+            params.extend(json.dumps([t]) for t in tags)
+        where = " AND ".join(clauses)
+        entries = self._query_entries(where, tuple(params))
         if include_history == "only":
             entries = [e for e in entries if e.data.get("changelog")]
         elif include_history != "true":
