@@ -79,9 +79,10 @@ class Entry:
     updated: datetime
     expires: datetime | None
     data: dict[str, Any]
+    logical_key: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        d: dict[str, Any] = {
             "id": self.id,
             "type": self.type.value if isinstance(self.type, EntryType) else self.type,
             "source": self.source,
@@ -91,6 +92,9 @@ class Entry:
             "expires": to_iso(self.expires) if self.expires else None,
             "data": self.data,
         }
+        if self.logical_key is not None:
+            d["logical_key"] = self.logical_key
+        return d
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> Entry:
@@ -103,6 +107,7 @@ class Entry:
             updated=ensure_dt(d["updated"]),
             expires=ensure_dt_optional(d.get("expires")),
             data=d.get("data", {}),
+            logical_key=d.get("logical_key"),
         )
 
     def is_expired(self) -> bool:

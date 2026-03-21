@@ -70,6 +70,7 @@ If you have access to the awareness MCP server while working on this repo:
 - **Check context:** Call `get_knowledge(tags=["mcp-awareness"])` to see if other agents or platforms left relevant context.
 - **Maintain status:** Keep a single permanent status note for this project using `remember`, then update it with `update_entry` as work progresses. Use tags `["mcp-awareness", "project", "status"]`. The `changelog` tracks history automatically.
 - **Record milestones:** When finishing significant work (PR merged, release tagged), update the status note so other platforms know what happened.
+- **Code ships before prompts.** Never update awareness prompt entries for features that aren't deployed yet. Agents will try to use tools that don't exist on the running server. Merge PR → rebuild Docker → verify deployment → then update prompts.
 
 ## Naming
 

@@ -838,3 +838,103 @@ class TestGetTagsTool:
         assert tags[0]["tag"] == "infra"
         assert tags[0]["count"] == 2
         assert len(tags) == 3
+
+
+class TestLogicalKeyUpsert:
+    @pytest.mark.anyio
+    async def test_remember_with_logical_key_creates(self) -> None:
+        result = await server_mod.remember(
+            source="project",
+            tags=["status"],
+            description="initial status",
+            logical_key="project-status",
+        )
+        data = json.loads(result)
+        assert data["status"] == "ok"
+        assert data["action"] == "created"
+
+    @pytest.mark.anyio
+    async def test_remember_with_logical_key_upserts(self) -> None:
+        await server_mod.remember(
+            source="project",
+            tags=["status"],
+            description="v1",
+            logical_key="project-status",
+        )
+        result = await server_mod.remember(
+            source="project",
+            tags=["status"],
+            description="v2",
+            logical_key="project-status",
+        )
+        data = json.loads(result)
+        assert data["status"] == "ok"
+        assert data["action"] == "updated"
+        # Only one entry should exist
+        entries = json.loads(await server_mod.get_knowledge(entry_type="note"))
+        assert len(entries) == 1
+        assert entries[0]["data"]["description"] == "v2"
+
+    @pytest.mark.anyio
+    async def test_logical_key_tracks_changelog(self) -> None:
+        await server_mod.remember(
+            source="project",
+            tags=["status"],
+            description="original",
+            logical_key="my-key",
+        )
+        await server_mod.remember(
+            source="project",
+            tags=["status"],
+            description="updated",
+            logical_key="my-key",
+        )
+        entries = json.loads(
+            await server_mod.get_knowledge(entry_type="note", include_history="true")
+        )
+        assert len(entries) == 1
+        changelog = entries[0]["data"]["changelog"]
+        assert len(changelog) == 1
+        assert changelog[0]["changed"]["description"] == "original"
+
+    @pytest.mark.anyio
+    async def test_different_logical_keys_no_conflict(self) -> None:
+        await server_mod.remember(
+            source="project", tags=["a"], description="one", logical_key="key-1"
+        )
+        await server_mod.remember(
+            source="project", tags=["b"], description="two", logical_key="key-2"
+        )
+        entries = json.loads(await server_mod.get_knowledge(entry_type="note"))
+        assert len(entries) == 2
+
+    @pytest.mark.anyio
+    async def test_same_key_different_source_no_conflict(self) -> None:
+        await server_mod.remember(
+            source="project-a", tags=["s"], description="a", logical_key="status"
+        )
+        await server_mod.remember(
+            source="project-b", tags=["s"], description="b", logical_key="status"
+        )
+        entries = json.loads(await server_mod.get_knowledge(entry_type="note"))
+        assert len(entries) == 2
+
+    @pytest.mark.anyio
+    async def test_no_logical_key_no_upsert(self) -> None:
+        await server_mod.remember(source="s", tags=["t"], description="first")
+        await server_mod.remember(source="s", tags=["t"], description="second")
+        entries = json.loads(await server_mod.get_knowledge(entry_type="note"))
+        assert len(entries) == 2  # no dedup without logical_key
+
+    @pytest.mark.anyio
+    async def test_upsert_noop_same_content(self) -> None:
+        await server_mod.remember(source="project", tags=["s"], description="same", logical_key="k")
+        result = await server_mod.remember(
+            source="project", tags=["s"], description="same", logical_key="k"
+        )
+        data = json.loads(result)
+        assert data["action"] == "updated"  # matched, but no changelog since nothing changed
+        entries = json.loads(
+            await server_mod.get_knowledge(entry_type="note", include_history="true")
+        )
+        assert "changelog" not in entries[0]["data"]
