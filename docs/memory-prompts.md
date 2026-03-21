@@ -183,3 +183,21 @@ The project CLAUDE.md is scoped and defensive:
 | Project CLAUDE.md | `CLAUDE.md` in repo root | Anyone working on that repo | Project-specific: verify connection, maintain status, record milestones |
 
 The three levels complement each other. Platform memory handles the basics. Global CLAUDE.md adds depth for Claude Code. Project CLAUDE.md ensures project-specific workflow without assuming awareness is available.
+
+## Tuning the prompts
+
+These prompts are not static — they're the result of an ongoing audit-learn-improve cycle. The process:
+
+1. **Deploy the prompts** across platforms
+2. **Let agents use them** for real work over days/weeks
+3. **Audit the data** — pull `get_stats` and `get_tags`, look for drift, misuse, and inconsistency
+4. **Identify patterns** — what went wrong and why the prompt didn't prevent it
+5. **Update the prompts** — make rules more explicit, add conventions, remove ambiguity
+6. **Repeat**
+
+For example, the first audit of this project's data found:
+- 53 out of 56 `learn_pattern` entries had empty conditions/effects — they should have been `remember` (notes). The prompt didn't clearly distinguish when to use which.
+- Tag drift: `infrastructure` vs `infra`, `torrent` vs `torrents`. The prompt said "check get_tags" but agents weren't doing it consistently — the wording wasn't forceful enough.
+- Source naming chaos: `chris-personal`, `chris-career`, `chris-health` instead of one `personal` source with domain tags. The prompt lacked explicit naming conventions.
+
+Each finding led to a prompt update. The current prompts reflect these lessons — but they'll continue to evolve as usage patterns reveal new gaps. Expect to run this cycle periodically, especially after adding new platforms or onboarding new users.
