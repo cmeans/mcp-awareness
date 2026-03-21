@@ -1,28 +1,31 @@
 # Data Dictionary
 
-All data in mcp-awareness is stored in a single SQLite table using a common envelope pattern. Every record — whether it's a system status report, an alert, a piece of knowledge, or a preference — shares the same columns. The `type` field determines the semantics, and the `data` column holds type-specific JSON.
+All data in mcp-awareness is stored in a single `entries` table using a common envelope pattern. Every record — whether it's a system status report, an alert, a piece of knowledge, or a preference — shares the same columns. The `type` field determines the semantics, and the `data` column holds type-specific fields.
+
+The schema is identical across both storage backends (SQLite and PostgreSQL). The difference is in column types and indexing — see [Backend-specific details](#backend-specific-details) below.
 
 ## Table: `entries`
 
-| Column | Type | Nullable | Description |
-|--------|------|----------|-------------|
-| `id` | TEXT | No | Primary key. UUID v4, generated via `uuid.uuid4()`. |
-| `type` | TEXT | No | Entry type. One of: `status`, `alert`, `pattern`, `suppression`, `context`, `preference`. |
-| `source` | TEXT | No | Origin identifier. Free-form string chosen by the writer (e.g., `"home-nas"`, `"user-preferences"`, `"family"`). Used for grouping and filtering. |
-| `created` | TEXT | No | ISO 8601 UTC timestamp. Set once when the entry is first created. |
-| `updated` | TEXT | No | ISO 8601 UTC timestamp. Updated on every upsert. |
-| `expires` | TEXT | Yes | ISO 8601 UTC timestamp. When set, the entry is eligible for cleanup after this time. `NULL` means permanent (until explicitly deleted). |
-| `deleted` | TEXT | Yes | ISO 8601 UTC timestamp of soft deletion. `NULL` means active. Non-null means trashed — recoverable for 30 days, then auto-purged. |
-| `tags` | TEXT | No | JSON array of strings (e.g., `["infra", "nas", "docker"]`). Used for filtering, suppression matching, and knowledge retrieval. Default: `[]`. |
-| `data` | TEXT | No | JSON object with type-specific fields. Structure depends on `type` — see below. Default: `{}`. |
+| Column | SQLite Type | Postgres Type | Nullable | Description |
+|--------|-------------|---------------|----------|-------------|
+| `id` | TEXT | TEXT | No | Primary key. UUID v4, generated via `uuid.uuid4()`. |
+| `type` | TEXT | TEXT | No | Entry type. One of: `status`, `alert`, `pattern`, `suppression`, `context`, `preference`, `note`. |
+| `source` | TEXT | TEXT | No | Origin identifier. Describes the subject, not the owner (e.g., `"personal"`, `"synology-nas"`, `"mcp-awareness-project"`). |
+| `created` | TEXT | TEXT | No | ISO 8601 UTC timestamp. Set once when the entry is first created. |
+| `updated` | TEXT | TEXT | No | ISO 8601 UTC timestamp. Updated on every upsert or `update_entry` call. |
+| `expires` | TEXT | TEXT | Yes | ISO 8601 UTC timestamp. When set, the entry is eligible for cleanup after this time. `NULL` means permanent (until explicitly deleted). |
+| `deleted` | TEXT | TEXT | Yes | ISO 8601 UTC timestamp of soft deletion. `NULL` means active. Non-null means trashed — recoverable for 30 days, then auto-purged. |
+| `tags` | TEXT (JSON) | JSONB | No | Array of strings (e.g., `["infra", "nas", "docker"]`). Used for filtering, suppression matching, and knowledge retrieval. Default: `[]`. |
+| `data` | TEXT (JSON) | JSONB | No | Object with type-specific fields. Structure depends on `type` — see below. Default: `{}`. |
 
 ### Indexes
 
-| Index | Columns | Purpose |
-|-------|---------|---------|
-| `idx_entries_type` | `type` | Filter by entry type |
-| `idx_entries_source` | `source` | Filter by source |
-| `idx_entries_type_source` | `type`, `source` | Combined filter (e.g., all alerts for a source) |
+| Index | Columns | SQLite | Postgres | Purpose |
+|-------|---------|--------|----------|---------|
+| `idx_entries_type` | `type` | B-tree | B-tree | Filter by entry type |
+| `idx_entries_source` | `source` | B-tree | B-tree | Filter by source |
+| `idx_entries_type_source` | `type`, `source` | B-tree | B-tree | Combined filter (e.g., all alerts for a source) |
+| `idx_entries_tags_gin` | `tags` | — | GIN | Fast tag containment queries (Postgres only) |
 
 ## Entry types
 
@@ -48,24 +51,38 @@ Written by edge processes via `report_alert`. Keyed by `source` + `alert_id` (up
 |-------|------|----------|-------------|
 | `alert_id` | string | Yes | Unique identifier within the source (e.g., `"struct-pihole-stopped"`). Used for upsert matching. |
 | `level` | string | Yes | Severity: `"warning"` or `"critical"`. Critical alerts break through warning-level suppressions. |
-| `alert_type` | string | Yes | Detection method: `"threshold"` (metric exceeded limit), `"structural"` (expected process/state missing), or `"baseline"` (deviation from normal — planned). |
+| `alert_type` | string | Yes | Detection method: `"threshold"`, `"structural"`, or `"baseline"`. |
 | `message` | string | Yes | Human-readable alert description. Used in briefing summaries and suppression matching. |
 | `resolved` | boolean | Yes | `false` = active, `true` = resolved. Resolved alerts are excluded from the briefing. |
 | `details` | object | No | Additional structured context (e.g., affected resources, thresholds). |
-| `diagnostics` | object | No | Evidence captured at detection time (e.g., top processes, I/O stats). Should be recorded when the alert fires — the evidence may be transient. |
+| `diagnostics` | object | No | Evidence captured at detection time. Should be recorded when the alert fires — the evidence may be transient. |
 
-### `pattern` — Permanent knowledge
+### `pattern` — Operational knowledge
 
-Written by agents via `learn_pattern`. Permanent unless explicitly deleted. This is the primary knowledge store — personal facts, system behavior, preferences, anything worth remembering across agent platforms.
+Written by agents via `learn_pattern`. Use ONLY for knowledge with conditions and/or effects relevant to the alert collator. For general-purpose knowledge, use `note` instead.
 
 **`data` fields:**
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `description` | string | Yes | Human-readable description of the knowledge (e.g., `"Home network runs Ubiquiti UniFi. VLAN 10 is IoT, VLAN 20 is trusted."`). |
-| `conditions` | object | No | When this knowledge applies. Can include temporal conditions like `{"day_of_week": "friday"}` or `{"hour_range": [2, 6]}`. Default: `{}`. |
-| `effect` | string | No | For operational patterns: what this knowledge implies for alerting (e.g., `"suppress qbittorrent_stopped"`). Used by the collator for pattern-based suppression. Default: `""`. |
-| `learned_from` | string | No | Where this knowledge was recorded. Should identify the platform (e.g., `"claude.ai"`, `"claude-code"`, `"claude-desktop"`, `"conversation"`). Default: `"conversation"`. |
+| `description` | string | Yes | Human-readable description of the operational pattern. |
+| `conditions` | object | No | When this pattern applies. Temporal conditions: `{"day_of_week": "friday"}`, `{"hour_range": [2, 6]}`. Default: `{}`. |
+| `effect` | string | No | What this pattern implies for alerting (e.g., `"suppress qbittorrent_stopped"`). Used by the collator for pattern-based suppression. Default: `""`. |
+| `learned_from` | string | No | Platform that recorded this (e.g., `"claude-code"`, `"claude-ai"`). Default: `"conversation"`. |
+
+### `note` — General-purpose knowledge
+
+Written by agents via `remember`. Permanent unless explicitly deleted. The default choice for storing knowledge — personal facts, project notes, skill backups, config snapshots, anything that doesn't need conditions/effects for alert matching.
+
+**`data` fields:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `description` | string | Yes | Short summary of what this note contains. |
+| `content` | string | No | Optional payload — the actual data. Can be plain text, JSON, markdown, etc. |
+| `content_type` | string | No | MIME type of the content (e.g., `"text/plain"`, `"application/json"`, `"text/markdown"`). Default: `"text/plain"`. |
+| `learned_from` | string | No | Platform that recorded this. Default: `"conversation"`. |
+| `changelog` | array | No | Change history. Populated automatically by `update_entry`. Each element: `{"updated": "<timestamp>", "changed": {"<field>": "<old_value>"}}`. |
 
 ### `suppression` — Alert suppressions
 
@@ -78,8 +95,7 @@ Written by agents via `suppress_alert`. Time-limited — always has an `expires`
 | `metric` | string | No | Specific metric to suppress (e.g., `"cpu_pct"`). `null` means match by tags/source. |
 | `suppress_level` | string | Yes | Maximum alert level to suppress: `"warning"` or `"critical"`. Default: `"warning"`. |
 | `escalation_override` | boolean | Yes | If `true`, critical alerts break through even when the suppression matches. Default: `true`. |
-| `reason` | string | No | Why the suppression was created (e.g., `"Known maintenance window"`). Default: `""`. |
-| `tags` | array | No | Tags to match against alerts. Suppression matching checks for word overlap between these tags and alert fields. |
+| `reason` | string | No | Why the suppression was created. Default: `""`. |
 
 ### `context` — Time-limited knowledge
 
@@ -89,11 +105,11 @@ Written by agents via `add_context`. Always has an `expires` timestamp (default:
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `description` | string | Yes | Human-readable description (e.g., `"Kitchen renovation in progress — expect Home Assistant sensors to go offline"`). |
+| `description` | string | Yes | Human-readable description of the context. |
 
 ### `preference` — User preferences
 
-Written by agents via `set_preference`. Keyed by `key` + `scope` (upserted). Portable across agent platforms — any agent reads the same preferences.
+Written by agents via `set_preference`. Keyed by `key` + `scope` (upserted). Portable across agent platforms.
 
 **`data` fields:**
 
@@ -101,18 +117,67 @@ Written by agents via `set_preference`. Keyed by `key` + `scope` (upserted). Por
 |-------|------|----------|-------------|
 | `key` | string | Yes | Preference name (e.g., `"alert_verbosity"`, `"check_frequency"`). |
 | `value` | string | Yes | Preference value (e.g., `"one_sentence_warnings"`, `"first_turn_only"`). |
-| `scope` | string | Yes | Scope of the preference. Default: `"global"`. Could be used for per-source or per-agent scoping. |
+| `scope` | string | Yes | Scope of the preference. Default: `"global"`. |
 
 ## Lifecycle
 
 - **Upsert behavior:** `status` entries are upserted by `source`. `alert` entries by `source` + `alert_id`. `preference` entries by `key` + `scope`. Other types always insert new rows.
 - **Soft delete:** `delete_entry` sets the `deleted` timestamp. Entry remains in the database for 30 days, recoverable via `restore_entry`. Bulk deletes require `confirm=True` (dry-run by default).
-- **Auto-purge:** Expired entries (`expires < now`) and old soft-deleted entries (`deleted` > 30 days ago) are cleaned up by `_cleanup_expired`, which runs on a background thread triggered by write operations, debounced to at most every 10 seconds. Cleanup never blocks the request that triggers it — the debounce check is instant, and the actual DELETE runs on a separate thread with its own SQLite connection. Read operations do not trigger cleanup. If the server receives no write traffic, expired entries remain in the database until the next write. **Note:** auto-purge performs a hard `DELETE`, not a soft delete. Expired entries bypass the trash entirely — once past their expiry, they are permanently removed on the next cleanup pass.
-- **Staleness:** Status entries with `ttl_sec` are marked stale in the briefing if no update arrives within the TTL window. The entry itself is not deleted — it remains as the last known state.
-- **Hard deletes:** The API only performs soft deletes. If you delete the SQLite database file or run manual SQL `DELETE` statements, that data is gone permanently — there is no recovery mechanism beyond your own backups. Back up `awareness.db` regularly.
+- **Auto-purge:** Expired entries (`expires < now`) and old soft-deleted entries are cleaned up by `_cleanup_expired`, which runs on a background thread triggered by write operations, debounced to at most every 10 seconds. Cleanup never blocks the request. **Note:** auto-purge performs a hard `DELETE`. Expired entries bypass the trash entirely.
+- **Staleness:** Status entries with `ttl_sec` are marked stale in the briefing if no update arrives within the TTL window. The entry itself is not deleted.
+- **Change tracking:** `update_entry` appends previous field values to the `changelog` array in `data`. Use `get_knowledge(include_history="true")` to see changes, or `include_history="only"` to find entries that have been modified.
+- **Hard deletes:** The API only performs soft deletes. If you delete the database file or run manual SQL `DELETE` statements, that data is gone permanently. Back up regularly.
 
-## SQLite configuration
+## Backend-specific details
+
+### SQLite
 
 - **WAL mode** enabled for concurrent read/write safety
-- **Thread safety:** Write operations are protected by `threading.Lock` for async compatibility
-- **Background cleanup:** `_cleanup_expired` spawns a daemon thread with its own SQLite connection, debounced to at most every 10 seconds, triggered only by writes
+- **Thread safety:** Write operations protected by `threading.Lock` for async compatibility
+- **Tags/data stored as:** TEXT columns containing JSON strings, queried via `json_each()`
+- **Background cleanup:** Daemon thread with its own SQLite connection, debounced, triggered only by writes
+- **File location:** Configured via `AWARENESS_DATA_DIR` (default `./data/awareness.db`)
+
+### PostgreSQL
+
+- **Version:** PostgreSQL 17 recommended (matches RDS support, pgvector 0.8.1)
+- **Driver:** psycopg (sync) — matches the synchronous Store protocol
+- **Tags/data stored as:** JSONB columns, queried via `jsonb_array_elements_text()`
+- **GIN index** on `tags` column for fast tag containment queries
+- **pgvector extension:** Installed via `pgvector/pgvector:pg17` Docker image. Not yet used — ready for future embedding/RAG support.
+- **WAL level:** `wal_level=logical` configured for Debezium CDC readiness and logical replication
+- **Replication slots:** `max_replication_slots=4` for future replication/CDC
+- **Background cleanup:** Daemon thread with its own psycopg connection, same debounce pattern as SQLite
+- **Connection string:** Configured via `AWARENESS_DATABASE_URL` (e.g., `postgresql://user:pass@localhost:5432/awareness`)
+- **Docker image:** `pgvector/pgvector:pg17` (PostgreSQL 17 with pgvector pre-installed)
+
+### RDS compatibility
+
+The PostgreSQL backend is designed for a clean migration path to AWS RDS:
+
+- **All extensions used are RDS-compatible:** pgvector, pg_trgm, btree_gin, pg_cron
+- **TimescaleDB intentionally avoided** (not available on RDS due to license restrictions)
+- **Logical replication** supported via `wal_level=logical` (RDS parameter group setting)
+- **Migration:** `pg_dump` / `pg_restore` with `CREATE EXTENSION` statements
+- **No unlogged tables, no large objects** — replication-safe by design
+
+### Migrating from SQLite to PostgreSQL
+
+Use the migration script to copy existing data:
+
+```bash
+# Start Postgres
+docker compose --profile postgres up -d postgres
+
+# Run migration
+python examples/migrate_sqlite_to_postgres.py \
+    --sqlite ~/awareness/awareness.db \
+    --postgres postgresql://awareness:awareness-dev@localhost:5432/awareness
+
+# Switch the server to Postgres
+# Add to .env:
+#   AWARENESS_BACKEND=postgres
+#   AWARENESS_DATABASE_URL=postgresql://awareness:awareness-dev@localhost:5432/awareness
+```
+
+The migration script uses `INSERT ... ON CONFLICT DO NOTHING` — safe to run multiple times.
