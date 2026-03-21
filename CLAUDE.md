@@ -43,7 +43,7 @@ src/mcp_awareness/
 - Pattern matching uses word-overlap between effect string and alert fields (hyphens/dashes normalized); hour ranges handle overnight wraparound
 - Soft delete: `delete_entry` moves to trash (30-day retention), `restore_entry` recovers, `get_deleted` lists trash. Bulk deletes require `confirm=True` (dry-run by default). Auto-purged by existing `_cleanup_expired`.
 - Resource descriptions carry behavioral hints — duplicate guidance in both server instructions and docstrings
-- Store uses threading.Lock on writes for async safety; _cleanup_expired is debounced (10s interval)
+- Store uses threading.Lock on writes for async safety; _cleanup_expired spawns a background daemon thread (never blocks the caller), debounced (10s interval), only triggered by writes
 - Transport: stdio (default) or streamable-http via AWARENESS_TRANSPORT env var; HTTP on AWARENESS_HOST:AWARENESS_PORT/mcp
 - Secret path auth: `AWARENESS_MOUNT_PATH` env var (e.g., `/my-secret`) rewrites `/my-secret/mcp` → `/mcp`, returns 404 for all other paths. Used with Cloudflare WAF to block unauthenticated traffic at the edge.
 

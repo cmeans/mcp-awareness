@@ -122,7 +122,9 @@ async def get_briefing() -> str:
     Returns a compact summary (~200 tokens all-clear, ~500 with issues).
     If attention_needed is true, mention the suggested_mention or compose
     your own from the source headlines. If false, nothing to report.
-    Pre-filtered through patterns and suppressions — no further processing needed."""
+    Pre-filtered through patterns and suppressions — no further processing needed.
+    This tool always returns structured JSON. If you receive an unstructured
+    error, the failure is in the transport or platform layer, not in awareness."""
     return json.dumps(generate_briefing(store), indent=2)
 
 
@@ -130,7 +132,9 @@ async def get_briefing() -> str:
 async def get_alerts(source: str | None = None) -> str:
     """Get active alerts, optionally filtered by source.
     Drill-down from briefing — call when briefing shows attention_needed
-    and you want alert details. Returns full alert entries with diagnostics."""
+    and you want alert details. Returns full alert entries with diagnostics.
+    This tool always returns structured JSON. If you receive an unstructured
+    error, the failure is in the transport or platform layer, not in awareness."""
     alerts = store.get_active_alerts(source)
     return json.dumps([a.to_dict() for a in alerts], indent=2)
 
@@ -139,7 +143,9 @@ async def get_alerts(source: str | None = None) -> str:
 async def get_status(source: str) -> str:
     """Get full status for a specific source including metrics and inventory.
     Call when the briefing indicates issues with a source or user asks
-    about a specific system."""
+    about a specific system. This tool always returns structured JSON.
+    If you receive an unstructured error, the failure is in the transport
+    or platform layer, not in awareness."""
     entry = store.get_latest_status(source)
     if entry:
         return json.dumps(entry.to_dict(), indent=2)
@@ -147,11 +153,26 @@ async def get_status(source: str) -> str:
 
 
 @mcp.tool()
-async def get_knowledge() -> str:
-    """Get all knowledge entries: learned patterns, historical context, preferences.
+async def get_knowledge(
+    source: str | None = None,
+    tags: list[str] | None = None,
+    entry_type: str | None = None,
+) -> str:
+    """Get knowledge entries: learned patterns, historical context, preferences.
     Knowledge belongs to the system, not any specific agent. Call when you need
-    context about a system's normal behavior or operational patterns."""
-    entries = store.get_knowledge()
+    context about a system's normal behavior or operational patterns.
+    Filter by source, tags, and/or entry_type to reduce response size.
+    Valid entry_type values: 'pattern', 'context', 'preference'.
+    This tool always returns JSON with a status field or an entry list.
+    If you receive an unstructured error, the failure is in the transport
+    or platform layer, not in awareness."""
+    if entry_type:
+        et = EntryType(entry_type)
+        entries = store.get_entries(entry_type=et, source=source, tags=tags)
+    else:
+        entries = store.get_knowledge(tags=tags)
+        if source:
+            entries = [e for e in entries if e.source == source]
     return json.dumps([e.to_dict() for e in entries], indent=2)
 
 
@@ -232,7 +253,9 @@ async def learn_pattern(
     Any agent can write; any agent can read. Knowledge is portable across platforms.
     Use this when you learn something about a system's normal behavior —
     e.g., 'qBittorrent sometimes stopped for maintenance on Fridays'.
-    Do NOT use agent memory for this — use this tool so all agents benefit."""
+    Do NOT use agent memory for this — use this tool so all agents benefit.
+    Returns JSON with status and entry id. If you receive an unstructured
+    error, the failure is in the transport or platform layer, not in awareness."""
     now = now_iso()
     entry = Entry(
         id=make_id(),
@@ -283,7 +306,6 @@ async def suppress_alert(
             "suppress_level": level,
             "escalation_override": escalation_override,
             "reason": reason,
-            "tags": tags,
         },
     )
     store.add(entry)
@@ -351,7 +373,9 @@ async def delete_entry(
     For bulk deletes (by source), set confirm=True. Without it, a dry-run count
     is returned so the user can verify before committing.
     Use when the user says 'forget that', 'delete the pattern about X',
-    or 'remove everything about Y'. Entries auto-purge after 30 days."""
+    or 'remove everything about Y'. Entries auto-purge after 30 days.
+    Returns JSON with status and count. If you receive an unstructured
+    error, the failure is in the transport or platform layer, not in awareness."""
     if entry_id:
         trashed = store.soft_delete_by_id(entry_id)
         return json.dumps(

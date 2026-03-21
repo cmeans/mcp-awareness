@@ -482,6 +482,56 @@ class TestGetKnowledgeTool:
         entries = json.loads(result)
         assert len(entries) == 1
 
+    @pytest.mark.anyio
+    async def test_get_knowledge_filtered_by_source(self) -> None:
+        await server_mod.learn_pattern(source="nas", tags=["infra"], description="nas pattern")
+        await server_mod.learn_pattern(source="ci", tags=["infra"], description="ci pattern")
+        result = await server_mod.get_knowledge(source="nas")
+        entries = json.loads(result)
+        assert len(entries) == 1
+        assert entries[0]["data"]["description"] == "nas pattern"
+
+    @pytest.mark.anyio
+    async def test_get_knowledge_filtered_by_tags(self) -> None:
+        await server_mod.learn_pattern(source="nas", tags=["infra"], description="infra pattern")
+        await server_mod.learn_pattern(
+            source="nas", tags=["personal"], description="personal pattern"
+        )
+        result = await server_mod.get_knowledge(tags=["personal"])
+        entries = json.loads(result)
+        assert len(entries) == 1
+        assert entries[0]["data"]["description"] == "personal pattern"
+
+    @pytest.mark.anyio
+    async def test_get_knowledge_filtered_by_entry_type(self) -> None:
+        await server_mod.learn_pattern(source="nas", tags=["infra"], description="a pattern")
+        await server_mod.add_context(source="nas", tags=["infra"], description="a context")
+        result = await server_mod.get_knowledge(entry_type="context")
+        entries = json.loads(result)
+        assert len(entries) == 1
+        assert entries[0]["data"]["description"] == "a context"
+
+    @pytest.mark.anyio
+    async def test_get_knowledge_combined_filters(self) -> None:
+        await server_mod.learn_pattern(source="nas", tags=["infra"], description="nas infra")
+        await server_mod.learn_pattern(source="ci", tags=["infra"], description="ci infra")
+        await server_mod.add_context(source="nas", tags=["infra"], description="nas context")
+        result = await server_mod.get_knowledge(source="nas", entry_type="pattern")
+        entries = json.loads(result)
+        assert len(entries) == 1
+        assert entries[0]["data"]["description"] == "nas infra"
+
+
+class TestSuppressAlertTagsNotDuplicated:
+    @pytest.mark.anyio
+    async def test_suppression_data_has_no_tags_field(self) -> None:
+        """Tags should only be in the entry envelope, not duplicated in data."""
+        await server_mod.suppress_alert(source="nas", tags=["infra", "docker"], reason="test")
+        supps = _store().get_active_suppressions()
+        assert len(supps) == 1
+        assert supps[0].tags == ["infra", "docker"]
+        assert "tags" not in supps[0].data
+
 
 class TestGetSuppressionsTool:
     @pytest.mark.anyio

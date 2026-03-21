@@ -71,7 +71,6 @@ def _make_suppression(
             "metric": metric,
             "suppress_level": suppress_level,
             "escalation_override": escalation_override,
-            "tags": tags,
         },
     )
 

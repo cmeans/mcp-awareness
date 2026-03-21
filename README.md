@@ -7,21 +7,21 @@
 
 ## What this is
 
+<img src="docs/images/android-briefing-demo.png" alt="Claude on Android surfacing an infrastructure alert during an unrelated conversation" width="220" align="right">
+
 `mcp-awareness` is a portable knowledge and awareness layer for AI agents. It gives any MCP-compatible AI assistant — Claude, ChatGPT, Cursor, or whatever comes next — access to a shared store of knowledge, system status, and operational context that *you* own and control.
 
 **The problem it solves:** Every AI platform has its own memory silo. Knowledge you build up in Claude doesn't exist in ChatGPT. Context from your desktop assistant doesn't follow you to mobile. If you switch platforms, you start over. Your AI knows you — but only within its walled garden.
 
 **What `mcp-awareness` does:** It externalizes that knowledge into a self-hosted service that any agent can read from and write to, using the open [Model Context Protocol](https://modelcontextprotocol.io/) (MCP). Tell one agent about your infrastructure, your projects, your preferences — and every agent knows it. Permanently, portably, privately.
 
+<br clear="both">
+
 ### What it looks like in practice
 
 In a single prompt — *"save your knowledge about me to awareness"* — Claude.ai wrote 39 tagged, searchable knowledge entries covering infrastructure, projects, family, health, finances, and operational patterns. Those entries are immediately accessible from Claude Code, Claude Desktop, or any other MCP client. The knowledge doesn't belong to Claude anymore. It belongs to the system.
 
 That same store also provides ambient system awareness: edge processes report status and alerts, a collation engine applies suppressions and patterns, and agents receive a pre-computed briefing (~200 tokens) at conversation start. If something needs attention, the agent mentions it. If not, silence.
-
-<p align="center">
-  <img src="docs/images/android-briefing-demo.png" alt="Claude on Android surfacing an infrastructure alert during an unrelated conversation" width="300">
-</p>
 
 ## How it started
 
@@ -166,6 +166,41 @@ docker compose up -d
 # Quick tunnel (ephemeral URL, no account needed — testing only)
 docker compose --profile quick up -d mcp-awareness tunnel-quick
 ```
+
+## Tools
+
+The server exposes 14 MCP tools. Clients that support MCP resources also get 6 read-only resources, but since many clients (including Claude.ai) only surface tools, every resource has a tool mirror.
+
+### Read tools
+
+| Tool | Description |
+|------|-------------|
+| `get_briefing` | Compact awareness summary (~200 tokens all-clear, ~500 with issues). Call at conversation start. Pre-filtered through patterns and suppressions. |
+| `get_alerts` | Active alerts, optionally filtered by source. Drill-down from briefing. |
+| `get_status` | Full status for a specific source including metrics and inventory. |
+| `get_knowledge` | All knowledge entries: learned patterns, historical context, preferences. |
+| `get_suppressions` | Active alert suppressions with expiry times and escalation settings. |
+
+### Write tools
+
+| Tool | Description |
+|------|-------------|
+| `report_status` | Report system status. Called periodically by edge processes. Upserts one entry per source; stale if TTL expires without refresh. |
+| `report_alert` | Report or resolve an alert. Captures diagnostics at detection time. Levels: `warning`, `critical`. Types: `threshold`, `structural`, `baseline`. |
+| `learn_pattern` | Record permanent knowledge from conversation. Tagged and searchable. Any agent writes; any agent reads. Set `learned_from` to your platform. |
+| `add_context` | Record time-limited knowledge (default 30 days). Use for events, temporary situations, or facts that lose relevance. |
+| `set_preference` | Set a portable presentation preference (e.g., `alert_verbosity`, `check_frequency`). Upserts by key + scope. |
+| `suppress_alert` | Suppress alerts by source/tags/metric. Time-limited with escalation override — critical alerts can break through. |
+
+### Data management tools
+
+| Tool | Description |
+|------|-------------|
+| `delete_entry` | Soft-delete entries (30-day trash). By ID, by source + type, or by source. Bulk deletes require `confirm=True` (dry-run by default). |
+| `restore_entry` | Restore a soft-deleted entry from trash. |
+| `get_deleted` | List all entries in trash with IDs for restore. |
+
+See the [Data Dictionary](docs/data-dictionary.md) for full schema documentation.
 
 ## Security
 

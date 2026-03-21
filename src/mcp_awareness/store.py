@@ -138,16 +138,31 @@ class SQLiteStore:
         )
 
     def _cleanup_expired(self) -> None:
-        """Delete entries whose expires timestamp is in the past (debounced)."""
-        if time.monotonic() - self._last_cleanup < self._cleanup_interval:
+        """Schedule cleanup of expired entries on a background thread (debounced).
+
+        Never blocks the calling request. The actual DELETE runs in a
+        separate thread with its own SQLite connection.
+        """
+        now = time.monotonic()
+        if now - self._last_cleanup < self._cleanup_interval:
             return
-        now = datetime.now(timezone.utc).isoformat()
-        self._conn.execute(
-            "DELETE FROM entries WHERE expires IS NOT NULL AND expires <= ?",
-            (now,),
-        )
-        self._conn.commit()
-        self._last_cleanup = time.monotonic()
+        self._last_cleanup = now  # claim the slot immediately to prevent races
+        thread = threading.Thread(target=self._do_cleanup, name="awareness-cleanup", daemon=True)
+        thread.start()
+
+    def _do_cleanup(self) -> None:
+        """Run the actual DELETE on a dedicated connection (background thread)."""
+        try:
+            conn = sqlite3.connect(str(self.path))
+            now = datetime.now(timezone.utc).isoformat()
+            conn.execute(
+                "DELETE FROM entries WHERE expires IS NOT NULL AND expires <= ?",
+                (now,),
+            )
+            conn.commit()
+            conn.close()
+        except Exception:
+            pass  # best-effort cleanup — next debounce window will retry
 
     # Base filter for all normal reads — excludes soft-deleted entries
     _ACTIVE = "deleted IS NULL"
@@ -272,7 +287,6 @@ class SQLiteStore:
         source: str | None = None,
         tags: list[str] | None = None,
     ) -> list[Entry]:
-        self._cleanup_expired()
         clauses: list[str] = []
         params: list[str] = []
         if entry_type is not None:
@@ -305,7 +319,6 @@ class SQLiteStore:
         return self._row_to_entry(row) if row else None
 
     def get_active_alerts(self, source: str | None = None) -> list[Entry]:
-        self._cleanup_expired()
         clauses = ["type = ?"]
         params: list[str] = [EntryType.ALERT.value]
         if source:
@@ -316,7 +329,6 @@ class SQLiteStore:
         return [a for a in alerts if not a.data.get("resolved")]
 
     def get_active_suppressions(self, source: str | None = None) -> list[Entry]:
-        self._cleanup_expired()
         entries = self._query_entries("type = ?", (EntryType.SUPPRESSION.value,))
         if source:
             entries = [s for s in entries if s.source == source or s.source == ""]
@@ -331,7 +343,6 @@ class SQLiteStore:
         return self._query_entries("type = ?", (EntryType.PATTERN.value,))
 
     def count_active_suppressions(self) -> int:
-        self._cleanup_expired()
         cur = self._conn.execute(
             f"SELECT COUNT(*) FROM entries WHERE type = ? AND {self._ACTIVE}",
             (EntryType.SUPPRESSION.value,),
