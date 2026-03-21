@@ -199,7 +199,7 @@ Example output:
 >
 > Weekend looks decent for Chicago...
 
-![Demo screenshot](images/android-briefing-demo.png)
+<img src="images/android-briefing-demo.png" alt="Demo screenshot" width="300">
 
 ### Step 10: Test suppression
 
