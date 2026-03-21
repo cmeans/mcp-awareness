@@ -113,23 +113,35 @@ flowchart TB
 ## Quick start
 
 ```bash
-# Install
-pip install -e .
-
-# Run via stdio (for Claude Desktop / Claude Code)
-mcp-awareness
-
-# Run via HTTP (for remote clients, mobile, Claude.ai)
-AWARENESS_TRANSPORT=streamable-http mcp-awareness
-# → Listening on http://0.0.0.0:8420/mcp
-
-# Docker with Cloudflare Tunnel (recommended for remote access)
+git clone https://github.com/cmeans/mcp-awareness.git
+cd mcp-awareness
 docker compose up -d
 ```
 
-See the [Deployment Guide](docs/deployment-guide.md) for secure deployment with Cloudflare Tunnel, WAF rules, and secret path auth.
+That's it. The server is running on port 8420. Point any MCP client at `http://localhost:8420/mcp`.
 
-### Environment variables
+For remote access via Cloudflare Tunnel and secure deployment, see the [Deployment Guide](docs/deployment-guide.md).
+
+### Connect your AI
+
+**Claude Desktop / Claude Code** (local):
+```json
+{
+  "mcpServers": {
+    "awareness": {
+      "url": "http://localhost:8420/mcp"
+    }
+  }
+}
+```
+
+**Claude.ai** (remote, requires [Deployment Guide](docs/deployment-guide.md) setup):
+1. Settings → Connectors → Add custom connector
+2. Name: `awareness`
+3. URL: `https://your-domain.com/your-secret/mcp`
+4. Leave OAuth fields blank
+
+### Configuration
 
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -139,44 +151,13 @@ See the [Deployment Guide](docs/deployment-guide.md) for secure deployment with 
 | `AWARENESS_DATA_DIR` | `./data` | SQLite database directory |
 | `AWARENESS_MOUNT_PATH` | _(none)_ | Secret path prefix for access control (e.g., `/my-secret`). When set, only `/<secret>/mcp` is served; all other paths return 404. Use with a Cloudflare WAF rule. |
 
-### Client configuration
-
-**Claude Desktop / Claude Code** (stdio, local):
-```json
-{
-  "mcpServers": {
-    "awareness": {
-      "command": "mcp-awareness"
-    }
-  }
-}
-```
-
-**Claude Desktop / Claude Code** (HTTP, remote):
-```json
-{
-  "mcpServers": {
-    "awareness": {
-      "url": "https://your-domain.com/your-secret/mcp"
-    }
-  }
-}
-```
-
-**Claude.ai** (custom connector):
-1. Settings → Connectors → Add custom connector
-2. Name: `awareness`
-3. URL: `https://your-domain.com/your-secret/mcp`
-4. Leave OAuth fields blank
-
-### Docker
+### Development
 
 ```bash
-# Named Cloudflare tunnel (stable URL, requires cloudflared setup — see Deployment Guide)
-docker compose up -d
-
-# Quick tunnel (ephemeral URL, no account needed — testing only)
-docker compose --profile quick up -d mcp-awareness tunnel-quick
+pip install -e ".[dev]"    # install with dev dependencies
+python -m pytest tests/    # run tests
+ruff check src/ tests/     # lint
+mypy src/mcp_awareness/    # type check
 ```
 
 ## Tools
