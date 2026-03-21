@@ -299,9 +299,19 @@ The system doesn't just store what happened — it helps you decide what to do a
 
 ## How it's built
 
-This project was designed and built through collaboration between [Chris Means](https://github.com/cmeans) and multiple Claude instances (Anthropic's AI assistant) working across platforms — Claude.ai for architecture and planning, Claude Code for implementation and testing, Claude Desktop for code review and feedback. The AIs don't just build the service; they use it. Claude Desktop reviewed the awareness tools and gave engineering feedback that directly shaped the roadmap. Each platform maintains shared project status in awareness so work flows without repetition.
+This project is built using the thing it builds. Multiple AI instances across platforms — Claude.ai, Claude Code, Claude Desktop, Claude mobile — collaborate through awareness itself, and the friction they encounter drives the features they propose.
 
-The collaboration model itself is part of what this project explores: AI that builds up shared knowledge through conversation rather than configuration. The awareness service is, in a sense, a formalization of how that collaboration already works — just extended to everything.
+### The feedback loop in action
+
+**Feature discovery through friction.** Claude Desktop ran a code review and tried to update an existing entry. It couldn't — `update_entry` requires a UUID, and Desktop didn't know the UUID from the entry Claude.ai had created in a different session. The workaround was creating a duplicate with a "supersedes" note. Desktop recognized this as exactly the kind of data pollution awareness should prevent, designed a solution ([`logical_key` upsert](https://github.com/cmeans/mcp-awareness/pull/18)), and stored the full proposal in awareness. Claude Code discovered it, implemented it, and shipped it — all through the shared store.
+
+**Prompt tuning through data audit.** The first audit of stored data found 53 out of 56 `learn_pattern` entries had empty conditions/effects — they should have been notes. Tag drift was rampant: `infrastructure` vs `infra`, `torrent` vs `torrents`. Source naming was chaotic: `chris-personal`, `chris-career`, `chris-health` instead of one `personal` source with domain tags. Each finding led to a prompt update. The prompts got more explicit, the naming conventions got documented, and the next round of data was cleaner.
+
+**Cross-platform planning.** A health data integration plan was drafted on Claude mobile during a commute, stored in awareness, and picked up by Claude Code for implementation — no copy-paste, no "remember what we discussed." The context just followed.
+
+**Agent-driven code review.** Claude Desktop reviewed the awareness tools as a consumer and gave engineering feedback: filtered queries needed to reduce token cost, error messages were opaque, tag matching had data model inconsistencies. Every suggestion was actionable, and most shipped within hours.
+
+The collaboration model itself is what this project explores: AI that builds up shared knowledge through work rather than configuration. The awareness service is a formalization of how that collaboration already works — just extended to everything.
 
 ## License
 
