@@ -51,8 +51,6 @@ class PostgresStore:
                 CREATE INDEX IF NOT EXISTS idx_entries_source ON entries(source);
                 CREATE INDEX IF NOT EXISTS idx_entries_type_source ON entries(type, source);
                 CREATE INDEX IF NOT EXISTS idx_entries_tags_gin ON entries USING GIN (tags);
-                CREATE UNIQUE INDEX IF NOT EXISTS idx_entries_source_logical_key
-                    ON entries(source, logical_key) WHERE logical_key IS NOT NULL;
             """)
         # Migration: add logical_key column if missing (existing databases)
         cur.execute(
@@ -61,10 +59,11 @@ class PostgresStore:
         )
         if not cur.fetchone():
             cur.execute("ALTER TABLE entries ADD COLUMN logical_key TEXT")
-            cur.execute(
-                "CREATE UNIQUE INDEX IF NOT EXISTS idx_entries_source_logical_key "
-                "ON entries(source, logical_key) WHERE logical_key IS NOT NULL"
-            )
+        # Always ensure the index exists (covers both fresh and migrated DBs)
+        cur.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_entries_source_logical_key "
+            "ON entries(source, logical_key) WHERE logical_key IS NOT NULL"
+        )
         self._conn.commit()
 
     # ------------------------------------------------------------------
