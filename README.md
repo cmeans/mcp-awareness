@@ -7,7 +7,7 @@
 
 ## What this is
 
-`mcp-awareness` is shared memory for every AI you use. It's a self-hosted service where any AI assistant can store and retrieve knowledge using the open [Model Context Protocol](https://modelcontextprotocol.io/) (MCP). It works today with Claude.ai, Claude Code, Claude Desktop, Claude mobile (Android/iOS), Cursor, and any other MCP-compatible client.
+`mcp-awareness` is shared memory for every AI you use. Any AI assistant can store and retrieve knowledge through it using the open [Model Context Protocol](https://modelcontextprotocol.io/) (MCP). Self-host it today, or use the managed service when it launches. It works with Claude.ai, Claude Code, Claude Desktop, Claude mobile (Android/iOS), Cursor, and any other MCP-compatible client.
 
 **The problem:** Every AI platform keeps its own memory silo. What you teach Claude doesn't exist in ChatGPT. Your desktop assistant's context doesn't follow you to mobile. Switch platforms, and you start over.
 
