@@ -275,6 +275,7 @@ The system doesn't just store what happened — it helps you decide what to do a
 - [From Metrics to Mental Models](docs/from-metrics-to-mental-models.md) — core spec: three-layer detection model, API design, data schema
 - [Collation Layer](docs/collation-layer.md) — briefing resource, token optimization, escalation logic
 - [Data Dictionary](docs/data-dictionary.md) — database schema, entry types, data field structures, lifecycle rules
+- [Memory Prompts](docs/memory-prompts.md) — how to configure your AI to use awareness (platform memory, global CLAUDE.md, project CLAUDE.md)
 - [Changelog](CHANGELOG.md) — version history
 
 ## What's different

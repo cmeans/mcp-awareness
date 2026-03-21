@@ -182,6 +182,8 @@ It will retrieve the full prompt entries and can add them to its memory. Alterna
 > - **I say stop alerting:** Use `suppress_alert`.
 > - **If a tool call fails:** Retry once. If it fails again, the service may be restarting — try later.
 
+For the full prompt with all sections, platform-specific notes, and Claude Code integration (global and project CLAUDE.md), see [Memory Prompts](memory-prompts.md).
+
 ### Step 9: Test it
 
 Start a **new conversation** and ask something unrelated:
