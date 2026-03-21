@@ -18,12 +18,12 @@ The examples below use Cloudflare Tunnel and WAF for public access, but any reve
 If you just want to test locally without public access:
 
 ```bash
-pip install -e .
-AWARENESS_TRANSPORT=streamable-http mcp-awareness
-# → Listening on http://0.0.0.0:8420/mcp
+git clone https://github.com/cmeans/mcp-awareness.git
+cd mcp-awareness
+docker compose up -d
 ```
 
-Then use `http://localhost:8420/mcp` as the endpoint in Claude Desktop or Claude Code.
+The server is running on port 8420. Use `http://localhost:8420/mcp` as the endpoint in Claude Desktop or Claude Code. Data is stored in `~/awareness/awareness.db` by default.
 
 ## Secure deployment (recommended)
 
@@ -164,16 +164,23 @@ store.upsert_alert("synology-nas", ["infra", "nas", "docker"], "struct-qbt-stopp
 
 ### Step 8: Add the memory instruction
 
-Start a new conversation and paste:
+The awareness prompt is stored in the awareness service itself. Once connected, ask your AI:
+
+> Check awareness for the memory prompt — `get_knowledge(source="awareness-prompt")`
+
+It will retrieve the full prompt entries and can add them to its memory. Alternatively, start a new conversation and paste:
 
 > Add this to your Memory:
 >
-> **Awareness** is my portable knowledge store at `awareness`. Use it in conjunction with your memory for anything about me, my systems, family, projects, or preferences.
+> **Awareness** is a portable knowledge store (MCP server). Use it in conjunction with your memory for anything worth remembering.
 >
 > - **Start of conversation:** Call `get_briefing`. Mention only if `attention_needed` is true.
-> - **I tell you something worth remembering:** Store it — `learn_pattern` for permanent facts, `add_context` for time-limited, `set_preference` for behavior. Set `learned_from` to your platform (e.g., "claude.ai", "claude-code", "claude-desktop").
-> - **My question might have stored context:** Call `get_knowledge` before answering.
+> - **I tell you something worth remembering:** Store it — `remember` for general notes, `learn_pattern` for operational facts, `add_context` for time-limited, `set_preference` for behavior. Set `learned_from` to your platform name.
+> - **My question might have stored context:** Call `get_knowledge` before answering. Use source, tags, and entry_type filters.
+> - **Before creating tags:** Call `get_tags` to check what exists and prevent drift.
+> - **Updating knowledge:** Use `update_entry` to modify in place — changes tracked in `_changelog`.
 > - **I say stop alerting:** Use `suppress_alert`.
+> - **If a tool call fails:** Retry once. If it fails again, the service may be restarting — try later.
 
 ### Step 9: Test it
 
@@ -208,7 +215,17 @@ Say:
 
 > Please save your knowledge about my setup to awareness
 
-Claude calls `learn_pattern` multiple times, writing tagged, searchable knowledge entries to the store. This knowledge is now accessible from any MCP client on any platform.
+Claude calls `remember` and `learn_pattern` to write tagged, searchable knowledge entries to the store. `remember` stores general-purpose notes; `learn_pattern` stores operational knowledge with conditions and effects for alert matching. This knowledge is now accessible from any MCP client on any platform.
+
+You can also test the new tools:
+
+> How many entries are in awareness?
+
+Claude calls `get_stats` and reports entry counts by type.
+
+> What tags are in use?
+
+Claude calls `get_tags` and lists all tags with usage counts.
 
 ## Alternative: Quick tunnel (no account needed)
 
@@ -281,7 +298,8 @@ The current approach uses two layers:
 ## Notes
 
 - **The store persists** in the data directory. Restart the server and your data is still there.
-- **Claude.ai exposes tools but not resources** — the MCP spec defines both [resources](https://modelcontextprotocol.io/docs/concepts/resources) (read path) and [tools](https://modelcontextprotocol.io/docs/concepts/tools) (write path). Claude.ai custom connectors surface tools but not resources. We added read tools (`get_briefing`, `get_alerts`, `get_status`, `get_knowledge`, `get_suppressions`) that mirror the resource endpoints.
+- **Claude.ai exposes tools but not resources** — the MCP spec defines both [resources](https://modelcontextprotocol.io/docs/concepts/resources) (read path) and [tools](https://modelcontextprotocol.io/docs/concepts/tools) (write path). Claude.ai custom connectors surface tools but not resources. We added read tools (`get_briefing`, `get_alerts`, `get_status`, `get_knowledge`, `get_suppressions`, `get_stats`, `get_tags`) that mirror the resource endpoints.
+- **18 tools available** — includes `remember` (general notes), `learn_pattern` (operational knowledge), `add_context` (time-limited), `update_entry` (in-place updates with changelog), `get_stats` (store summary), `get_tags` (tag discovery), plus all the alerting and data management tools. See the [README](../README.md#tools) for the full list.
 - **Model matters** — Haiku 4.5 did not follow the memory instruction to call `get_briefing` at conversation start. Sonnet 4.6 and Opus 4.6 both worked reliably.
 - **Suppression matching is content-aware** — a suppression tagged `["qbittorrent"]` will match alerts whose alert_id or message contains "qbittorrent", even if the alert's structural tags differ.
 - **Soft delete is safe** — `delete_entry` moves entries to trash (30-day retention). Bulk deletes show a dry-run count first and require `confirm=True`. Use `get_deleted` and `restore_entry` to recover.
