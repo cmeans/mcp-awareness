@@ -62,6 +62,10 @@ class Store(Protocol):
 
     def update_entry(self, entry_id: str, updates: dict[str, Any]) -> Entry | None: ...
 
+    def upsert_by_logical_key(
+        self, source: str, logical_key: str, entry: Entry
+    ) -> tuple[Entry, bool]: ...
+
     def get_stats(self) -> dict[str, Any]: ...
 
     def get_tags(self) -> list[dict[str, Any]]: ...
@@ -107,11 +111,17 @@ class SQLiteStore:
             CREATE INDEX IF NOT EXISTS idx_entries_source ON entries(source);
             CREATE INDEX IF NOT EXISTS idx_entries_type_source ON entries(type, source);
         """)
-        # Migration: add deleted column if missing (existing databases)
+        # Migrations for existing databases
         cur = self._conn.execute("PRAGMA table_info(entries)")
         columns = {row["name"] for row in cur.fetchall()}
         if "deleted" not in columns:
             self._conn.execute("ALTER TABLE entries ADD COLUMN deleted TEXT")
+        if "logical_key" not in columns:
+            self._conn.execute("ALTER TABLE entries ADD COLUMN logical_key TEXT")
+            self._conn.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_entries_source_logical_key "
+                "ON entries(source, logical_key) WHERE logical_key IS NOT NULL"
+            )
         self._conn.commit()
 
     # ------------------------------------------------------------------
@@ -129,12 +139,14 @@ class SQLiteStore:
             updated=ensure_dt(row["updated"]),
             expires=ensure_dt_optional(row["expires"]),
             data=json.loads(row["data"]),
+            logical_key=row["logical_key"] if "logical_key" in dict(row) else None,
         )
 
     def _insert_entry(self, entry: Entry) -> None:
         self._conn.execute(
-            """INSERT INTO entries (id, type, source, created, updated, expires, tags, data)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            """INSERT INTO entries
+               (id, type, source, created, updated, expires, tags, data, logical_key)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 entry.id,
                 entry.type.value if isinstance(entry.type, EntryType) else entry.type,
@@ -144,6 +156,7 @@ class SQLiteStore:
                 to_iso(entry.expires) if entry.expires else None,
                 json.dumps(entry.tags),
                 json.dumps(entry.data),
+                entry.logical_key,
             ),
         )
 
@@ -442,6 +455,35 @@ class SQLiteStore:
             )
             self._conn.commit()
             return entry
+
+    def upsert_by_logical_key(
+        self, source: str, logical_key: str, entry: Entry
+    ) -> tuple[Entry, bool]:
+        """Upsert by source + logical_key. Returns (entry, created).
+
+        If an entry with the same source + logical_key exists, updates it
+        (with changelog tracking). Otherwise inserts the new entry.
+        """
+        existing = self._query_entries("source = ? AND logical_key = ?", (source, logical_key))
+        if existing:
+            old = existing[0]
+            updates: dict[str, Any] = {}
+            if entry.tags != old.tags:
+                updates["tags"] = entry.tags
+            for field in ("description", "content", "content_type"):
+                new_val = entry.data.get(field)
+                old_val = old.data.get(field)
+                if new_val is not None and new_val != old_val:
+                    updates[field] = new_val
+            if updates:
+                result = self.update_entry(old.id, updates)
+                return (result or old, False)
+            return (old, False)
+        with self._write_lock:
+            self._cleanup_expired()
+            self._insert_entry(entry)
+            self._conn.commit()
+        return (entry, True)
 
     def get_stats(self) -> dict[str, Any]:
         """Get entry counts by type, list of sources, and total count."""

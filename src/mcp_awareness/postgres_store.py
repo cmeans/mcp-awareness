@@ -44,12 +44,15 @@ class PostgresStore:
                     expires  TIMESTAMPTZ,
                     deleted  TIMESTAMPTZ,
                     tags     JSONB NOT NULL DEFAULT '[]',
-                    data     JSONB NOT NULL DEFAULT '{}'
+                    data     JSONB NOT NULL DEFAULT '{}',
+                    logical_key TEXT
                 );
                 CREATE INDEX IF NOT EXISTS idx_entries_type ON entries(type);
                 CREATE INDEX IF NOT EXISTS idx_entries_source ON entries(source);
                 CREATE INDEX IF NOT EXISTS idx_entries_type_source ON entries(type, source);
                 CREATE INDEX IF NOT EXISTS idx_entries_tags_gin ON entries USING GIN (tags);
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_entries_source_logical_key
+                    ON entries(source, logical_key) WHERE logical_key IS NOT NULL;
             """)
         self._conn.commit()
 
@@ -75,12 +78,14 @@ class PostgresStore:
             updated=ensure_dt(row["updated"]),
             expires=ensure_dt_optional(row["expires"]),
             data=data,
+            logical_key=row.get("logical_key"),
         )
 
     def _insert_entry(self, cur: psycopg.Cursor[Any], entry: Entry) -> None:
         cur.execute(
-            """INSERT INTO entries (id, type, source, created, updated, expires, tags, data)
-               VALUES (%s, %s, %s, %s, %s, %s, %s::jsonb, %s::jsonb)""",
+            """INSERT INTO entries
+               (id, type, source, created, updated, expires, tags, data, logical_key)
+               VALUES (%s, %s, %s, %s, %s, %s, %s::jsonb, %s::jsonb, %s)""",
             (
                 entry.id,
                 entry.type.value if isinstance(entry.type, EntryType) else entry.type,
@@ -90,6 +95,7 @@ class PostgresStore:
                 entry.expires,
                 json.dumps(entry.tags),
                 json.dumps(entry.data),
+                entry.logical_key,
             ),
         )
 
@@ -375,6 +381,31 @@ class PostgresStore:
             )
         self._conn.commit()
         return entry
+
+    def upsert_by_logical_key(
+        self, source: str, logical_key: str, entry: Entry
+    ) -> tuple[Entry, bool]:
+        """Upsert by source + logical_key. Returns (entry, created)."""
+        existing = self._query_entries("source = %s AND logical_key = %s", (source, logical_key))
+        if existing:
+            old = existing[0]
+            updates: dict[str, Any] = {}
+            if entry.tags != old.tags:
+                updates["tags"] = entry.tags
+            for field in ("description", "content", "content_type"):
+                new_val = entry.data.get(field)
+                old_val = old.data.get(field)
+                if new_val is not None and new_val != old_val:
+                    updates[field] = new_val
+            if updates:
+                result = self.update_entry(old.id, updates)
+                return (result or old, False)
+            return (old, False)
+        self._cleanup_expired()
+        with self._conn.cursor() as cur:
+            self._insert_entry(cur, entry)
+        self._conn.commit()
+        return (entry, True)
 
     def get_stats(self) -> dict[str, Any]:
         """Get entry counts by type, list of sources, and total count."""

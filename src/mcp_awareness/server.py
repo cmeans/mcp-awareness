@@ -344,12 +344,17 @@ async def remember(
     content: str | None = None,
     content_type: str = "text/plain",
     learned_from: str = "conversation",
+    logical_key: str | None = None,
 ) -> str:
     """Store a general-purpose note. Use this for any knowledge that doesn't fit
     operational patterns (learn_pattern) or time-limited context (add_context).
     Examples: personal facts, project notes, skill backups, config snapshots.
     description is a short summary; content is the optional payload (text, JSON, etc.).
     content_type is a MIME type (default text/plain). Set learned_from to your platform.
+    logical_key is an optional identifier for upsert behavior — if a note with the
+    same source + logical_key exists, it will be updated in place (with changelog
+    tracking) instead of creating a duplicate. Use for living documents like
+    project status notes.
     Returns JSON with status and entry id. If you receive an unstructured
     error, the failure is in the transport or platform layer, not in awareness."""
     now = now_utc()
@@ -369,7 +374,14 @@ async def remember(
         updated=now,
         expires=None,
         data=data,
+        logical_key=logical_key,
     )
+    if logical_key:
+        result, created = store.upsert_by_logical_key(source, logical_key, entry)
+        action = "created" if created else "updated"
+        return json.dumps(
+            {"status": "ok", "id": result.id, "action": action, "description": description}
+        )
     store.add(entry)
     return json.dumps({"status": "ok", "id": entry.id, "description": description})
 
