@@ -178,7 +178,7 @@ It will retrieve the full prompt entries and can add them to its memory. Alterna
 > - **I tell you something worth remembering:** Store it — `remember` for general notes, `learn_pattern` for operational facts, `add_context` for time-limited, `set_preference` for behavior. Set `learned_from` to your platform name.
 > - **My question might have stored context:** Call `get_knowledge` before answering. Use source, tags, and entry_type filters.
 > - **Before creating tags:** Call `get_tags` to check what exists and prevent drift.
-> - **Updating knowledge:** Use `update_entry` to modify in place — changes tracked in `_changelog`.
+> - **Updating knowledge:** Use `update_entry` to modify in place — changes tracked in `changelog`.
 > - **I say stop alerting:** Use `suppress_alert`.
 > - **If a tool call fails:** Retry once. If it fails again, the service may be restarting — try later.
 

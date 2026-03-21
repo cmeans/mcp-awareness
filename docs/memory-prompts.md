@@ -26,7 +26,7 @@ Or you can paste the sections into your platform's memory manually:
 
 ### Entry 3: Writing
 
-> Store knowledge: remember for general notes (the default for most knowledge), learn_pattern ONLY for operational facts with conditions/effects used by the alert collator, add_context for time-limited, set_preference for behavior. Set learned_from to your platform name. Set source to the subject — not the owner. Use existing sources from get_stats before creating new ones. No user-name prefixes (e.g. personal, not chris-personal). People go under source personal with their name as a tag. Projects use *-project suffix. Use update_entry to modify in place — changes tracked in _changelog.
+> Store knowledge: remember for general notes (the default for most knowledge), learn_pattern ONLY for operational facts with conditions/effects used by the alert collator, add_context for time-limited, set_preference for behavior. Set learned_from to your platform name. Set source to the subject — not the owner. Use existing sources from get_stats before creating new ones. No user-name prefixes (e.g. personal, not chris-personal). People go under source personal with their name as a tag. Projects use *-project suffix. Use update_entry to modify in place — changes tracked in changelog.
 
 ### Entry 4: Quality
 
@@ -38,7 +38,7 @@ Or you can paste the sections into your platform's memory manually:
 
 ### Entry 6: Status
 
-> Maintain a single permanent status note per project using remember, then update it in place with update_entry as work progresses. The _changelog tracks history automatically. Use tags ["project", "status"] plus the repo name. Don't create expiring status entries — use one living document per project that any agent can update.
+> Maintain a single permanent status note per project using remember, then update it in place with update_entry as work progresses. The changelog tracks history automatically. Use tags ["project", "status"] plus the repo name. Don't create expiring status entries — use one living document per project that any agent can update.
 
 ### Entry 7: Resilience
 
@@ -113,7 +113,7 @@ in conjunction with your auto-memory for anything worth remembering.
   major bug fixed), write an `add_context` entry so other platforms know what happened.
 - **Maintain status:** Maintain a single permanent status note per project using
   `remember`, then update it in place with `update_entry` as work progresses.
-  The `_changelog` tracks history automatically. Use tags `["project", "status"]`
+  The `changelog` tracks history automatically. Use tags `["project", "status"]`
   plus the repo name. Don't create expiring status entries — use one living
   document per project that any agent can update.
 
@@ -160,7 +160,7 @@ If you have access to the awareness MCP server while working on this repo:
   other agents or platforms left relevant context.
 - **Maintain status:** Keep a single permanent status note for this project
   using `remember`, then update it with `update_entry` as work progresses.
-  Use tags `["mcp-awareness", "project", "status"]`. The `_changelog` tracks
+  Use tags `["mcp-awareness", "project", "status"]`. The `changelog` tracks
   history automatically.
 - **Record milestones:** When finishing significant work (PR merged, release
   tagged), update the status note so other platforms know what happened.

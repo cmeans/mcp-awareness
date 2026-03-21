@@ -194,7 +194,7 @@ The server exposes 18 MCP tools. Clients that support MCP resources also get 6 r
 
 | Tool | Description |
 |------|-------------|
-| `update_entry` | Update a knowledge entry in place (note, pattern, context, preference). Tracks changes in `_changelog`. Status/alert/suppression are immutable. |
+| `update_entry` | Update a knowledge entry in place (note, pattern, context, preference). Tracks changes in `changelog`. Status/alert/suppression are immutable. |
 | `delete_entry` | Soft-delete entries (30-day trash). By ID, by source + type, or by source. Bulk deletes require `confirm=True` (dry-run by default). |
 | `restore_entry` | Restore a soft-deleted entry from trash. |
 | `get_deleted` | List all entries in trash with IDs for restore. |
@@ -251,7 +251,7 @@ Today, `mcp-awareness` is personal — one person's AI tools sharing a single kn
 
 **Organization** (future): Multiple teams, scoped access. Engineering, ops, product — each with their own store, plus cross-team shared knowledge.
 
-Shared stores require trust boundaries — ownership, audit history, edit/view permissions, the ability to revert changes. The `_changelog` is a starting point; full multi-user access control is on the roadmap alongside OAuth and the managed service.
+Shared stores require trust boundaries — ownership, audit history, edit/view permissions, the ability to revert changes. The `changelog` is a starting point; full multi-user access control is on the roadmap alongside OAuth and the managed service.
 
 ### Universal context, not just monitoring
 
@@ -287,7 +287,7 @@ The system doesn't just store what happened — it helps you decide what to do a
 | **Portable** | Any MCP client | Locked to one platform | Framework-specific API |
 | **Self-hosted** | Yes, with managed option planned | No | SaaS only (Mem0) |
 | **Bidirectional** | Read and write from any client | Read-only recall | Varies |
-| **Change tracking** | `_changelog` on every update | None | None |
+| **Change tracking** | `changelog` on every update | None | None |
 | **Open protocol** | MCP (open standard) | Proprietary | Proprietary |
 | **Awareness** | Knowledge + system monitoring | Memory only | Memory only |
 | **You own the data** | Yes | No | Depends |
