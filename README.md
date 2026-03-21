@@ -254,6 +254,26 @@ See [Security considerations](docs/deployment-guide.md#security-considerations) 
 - Semantic search — current knowledge retrieval is tag/keyword-based; vector similarity is planned
 - OAuth / API key authentication — current auth is secret-path-based; proper token auth requires MCP client support for auth flows
 
+## Vision
+
+Today, `mcp-awareness` is personal — one person's AI tools sharing a single knowledge store. That's where it starts, not where it ends.
+
+### Personal → Team → Organization
+
+**Personal** (now): Your AIs share memory across every platform you use. Plan on your phone, implement on your laptop, review from your desktop. Context follows you, not the app.
+
+**Team** (next): A shared awareness store for your team. Your AI knows the on-call runbook, the architecture decisions, the coding conventions — not because someone wrote a doc, but because the team's AIs have been accumulating knowledge through daily work. New team member's AI is productive on day one. Temporary context like "code freeze until Thursday" is automatically known by everyone's AI and automatically forgotten when it lifts.
+
+**Organization** (future): Multiple teams, scoped access. Engineering, ops, product — each with their own store, plus cross-team shared knowledge. Access controls determine what each person's AI can see. Your AI has the context it needs without exposing what it shouldn't.
+
+### What makes this different from a wiki
+
+Knowledge accumulates through conversation, not documentation. Nobody has to stop working to write things down — the AI does it as part of the work. And unlike a wiki that someone has to remember to check, your AI reads from awareness automatically. The result is a living knowledge base that grows as people work, not as a separate task they avoid.
+
+### Proactive awareness
+
+The alerting layer evolves too. Baseline detection learns what "normal" looks like for your systems and flags deviations — not just "CPU is high" but "CPU is unusually low, which means something probably stopped." Cross-domain inference connects data across sources: bad sleep from your health tracker + a packed calendar = a recommendation to reschedule the afternoon meeting. The system doesn't just tell you what happened — it helps you decide what to do about it.
+
 ## Design docs
 
 - [Deployment Guide](docs/deployment-guide.md) — deployment walkthrough with Cloudflare Tunnel, WAF, and Claude.ai integration
