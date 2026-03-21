@@ -623,6 +623,13 @@ def _health_response() -> dict[str, Any]:
 
 
 def main() -> None:
+    try:
+        _run()
+    except KeyboardInterrupt:
+        print("Shutdown requested — exiting.", flush=True)
+
+
+def _run() -> None:
     if TRANSPORT == "streamable-http" and MOUNT_PATH:
         import uvicorn
         from starlette.responses import JSONResponse, Response
