@@ -105,11 +105,14 @@ class SQLiteStore:
                 expires  TEXT,
                 deleted  TEXT,
                 tags     TEXT NOT NULL DEFAULT '[]',
-                data     TEXT NOT NULL DEFAULT '{}'
+                data     TEXT NOT NULL DEFAULT '{}',
+                logical_key TEXT
             );
             CREATE INDEX IF NOT EXISTS idx_entries_type ON entries(type);
             CREATE INDEX IF NOT EXISTS idx_entries_source ON entries(source);
             CREATE INDEX IF NOT EXISTS idx_entries_type_source ON entries(type, source);
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_entries_source_logical_key
+                ON entries(source, logical_key) WHERE logical_key IS NOT NULL;
         """)
         # Migrations for existing databases
         cur = self._conn.execute("PRAGMA table_info(entries)")
