@@ -26,15 +26,15 @@ Or you can paste the sections into your platform's memory manually:
 
 ### Entry 3: Writing
 
-> Store knowledge: remember for general notes, learn_pattern for operational facts with conditions/effects, add_context for time-limited, set_preference for behavior. Set learned_from to your platform name. Set source to the subject (e.g. personal, nas, mcp-awareness-project) — source is how queries filter, so be consistent with existing sources. Use update_entry to modify entries in place — changes tracked in _changelog.
+> Store knowledge: remember for general notes (the default for most knowledge), learn_pattern ONLY for operational facts with conditions/effects used by the alert collator, add_context for time-limited, set_preference for behavior. Set learned_from to your platform name. Set source to the subject — not the owner. Use existing sources from get_stats before creating new ones. No user-name prefixes (e.g. personal, not chris-personal). People go under source personal with their name as a tag. Projects use *-project suffix. Use update_entry to modify in place — changes tracked in _changelog.
 
 ### Entry 4: Quality
 
-> Call get_tags before creating new tags to prevent drift. Call get_knowledge with relevant tags before writing to deduplicate. When the user corrects you or reveals a preference, store to both your memory AND awareness. On work milestones (PR merged, bug fixed), write add_context so other platforms know. Tag with repo name for project knowledge.
+> You MUST call get_tags before creating any new tag — prefer existing tags over creating new ones, even if yours is slightly more descriptive. Tags are for retrieval, not description — if you wouldn't search for it, don't tag it. Call get_stats to check existing sources before creating new ones. Call get_knowledge with relevant tags before writing to deduplicate. Store corrections/preferences to both your memory AND awareness. Tag project knowledge with the repo name.
 
 ### Entry 5: Tag conventions
 
-> Use consistent tags: repo names (mcp-awareness, synology-mcp), domains (infra, personal, project, preference), systems (nas, homeassistant, garmin). Check get_tags for existing tags before creating new ones.
+> Use consistent tags. Repo names: mcp-awareness, synology-mcp, clipboard-mcp. Domains: infra, personal, project, preference. Systems: nas, homeassistant, garmin. Use singular forms (infra not infrastructure, project not projects). People go under source=personal with name as tag (e.g. tags=[family, logan]). Check get_tags first — always.
 
 ### Entry 6: Status
 
@@ -86,10 +86,17 @@ in conjunction with your auto-memory for anything worth remembering.
   for permanent operational facts, `remember` for general-purpose notes,
   `add_context` for time-limited, `set_preference` for behavior. Always set
   `learned_from` to `"claude-code"`.
+- **`learn_pattern` vs `remember`:** `learn_pattern` is ONLY for entries with
+  conditions/effects that the alert collator uses for matching. Everything
+  else — personal facts, project notes, tool knowledge, preferences — uses
+  `remember`. When in doubt, use `remember`.
 - **Set `source` correctly:** Use a descriptive source that identifies the
   subject — e.g., `"mcp-awareness-project"` for project knowledge, `"personal"`
   for personal facts, `"nas"` for infrastructure. The `source` field is how
-  queries filter entries, so be consistent with existing sources.
+  queries filter entries, so be consistent with existing sources. No user-name
+  prefixes (e.g., `"personal"` not `"chris-personal"`). People go under
+  `"personal"` with their name as a tag. Projects use `*-project` suffix.
+  Call `get_stats` to check existing sources before creating new ones.
 - **Cross-platform sync:** When the user corrects you or reveals a preference,
   store to both auto-memory AND awareness. Auto-memory is local to Claude Code;
   awareness is cross-platform so all agents benefit.
@@ -98,7 +105,10 @@ in conjunction with your auto-memory for anything worth remembering.
 - **Deduplicate:** Call `get_knowledge` with relevant tags before writing to
   avoid storing what's already there.
 - **Check existing tags:** Call `get_tags` before creating new tags to prevent
-  drift (e.g., `"infrastructure"` vs `"infra"`).
+  drift (e.g., `"infrastructure"` vs `"infra"`). You MUST call `get_tags`
+  before creating any new tag. Prefer existing tags over creating new ones,
+  even if yours is slightly more descriptive. Tags are for retrieval, not
+  description — if you wouldn't search for it, don't tag it.
 - **Work milestones:** When finishing significant work (PR merged, release tagged,
   bug fixed), write an `add_context` entry so other platforms know what happened.
 - **Maintain status:** Maintain a single permanent status note per project using
@@ -120,6 +130,9 @@ Use consistent tags so knowledge is findable across platforms:
 - Repo names: `["mcp-awareness"]`, `["synology-mcp"]`, `["clipboard-mcp"]`
 - Domains: `["infra"]`, `["personal"]`, `["project"]`, `["preference"]`
 - Systems: `["nas"]`, `["homeassistant"]`, `["garmin"]`
+- Use singular forms (`infra` not `infrastructure`, `project` not `projects`)
+- People go under source `"personal"` with name as tag (e.g., `["family", "logan"]`)
+- Check `get_tags` first — always
 ```
 
 ### How it differs from platform memory
