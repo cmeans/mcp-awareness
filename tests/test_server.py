@@ -692,7 +692,7 @@ class TestUpdateEntryTool:
         )
         assert entries[0]["data"]["description"] == "updated"
         # Check changelog
-        changelog = entries[0]["data"]["_changelog"]
+        changelog = entries[0]["data"]["changelog"]
         assert len(changelog) == 1
         assert changelog[0]["changed"]["description"] == "original"
 
@@ -703,7 +703,7 @@ class TestUpdateEntryTool:
         await server_mod.update_entry(entry_id=entry_id, tags=["new-tag"])
         entries = json.loads(await server_mod.get_knowledge(include_history="true"))
         assert entries[0]["tags"] == ["new-tag"]
-        assert entries[0]["data"]["_changelog"][0]["changed"]["tags"] == ["old-tag"]
+        assert entries[0]["data"]["changelog"][0]["changed"]["tags"] == ["old-tag"]
 
     @pytest.mark.anyio
     async def test_update_immutable_type_rejected(self) -> None:
@@ -743,7 +743,7 @@ class TestUpdateEntryTool:
         assert data["status"] == "ok"
         # No changelog since nothing changed
         entries = json.loads(await server_mod.get_knowledge(include_history="true"))
-        assert "_changelog" not in entries[0]["data"]
+        assert "changelog" not in entries[0]["data"]
 
     @pytest.mark.anyio
     async def test_update_pattern(self) -> None:
@@ -758,13 +758,13 @@ class TestUpdateEntryTool:
         assert entries[0]["data"]["description"] == "refined pattern"
 
     @pytest.mark.anyio
-    async def test_multiple_updates_accumulate_changelog(self) -> None:
+    async def test_multiple_updates_accumulatechangelog(self) -> None:
         result = await server_mod.remember(source="personal", tags=["test"], description="v1")
         entry_id = json.loads(result)["id"]
         await server_mod.update_entry(entry_id=entry_id, description="v2")
         await server_mod.update_entry(entry_id=entry_id, description="v3")
         entries = json.loads(await server_mod.get_knowledge(include_history="true"))
-        changelog = entries[0]["data"]["_changelog"]
+        changelog = entries[0]["data"]["changelog"]
         assert len(changelog) == 2
         assert changelog[0]["changed"]["description"] == "v1"
         assert changelog[1]["changed"]["description"] == "v2"
@@ -777,7 +777,7 @@ class TestGetKnowledgeHistory:
         entry_id = json.loads(result)["id"]
         await server_mod.update_entry(entry_id=entry_id, description="v2")
         entries = json.loads(await server_mod.get_knowledge())
-        assert "_changelog" not in entries[0]["data"]
+        assert "changelog" not in entries[0]["data"]
 
     @pytest.mark.anyio
     async def test_history_included_when_true(self) -> None:
@@ -785,7 +785,7 @@ class TestGetKnowledgeHistory:
         entry_id = json.loads(result)["id"]
         await server_mod.update_entry(entry_id=entry_id, description="v2")
         entries = json.loads(await server_mod.get_knowledge(include_history="true"))
-        assert "_changelog" in entries[0]["data"]
+        assert "changelog" in entries[0]["data"]
 
     @pytest.mark.anyio
     async def test_history_only(self) -> None:

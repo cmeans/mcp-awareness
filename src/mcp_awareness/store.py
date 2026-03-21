@@ -365,8 +365,8 @@ class SQLiteStore:
     ) -> list[Entry]:
         """Get knowledge entries (patterns, context, preferences, notes).
 
-        include_history: None/false = strip _changelog from results,
-                         "true" = include _changelog, "only" = only entries with changelog.
+        include_history: None/false = strip changelog from results,
+                         "true" = include changelog, "only" = only entries with changelog.
         """
         types = (
             EntryType.PATTERN.value,
@@ -379,11 +379,11 @@ class SQLiteStore:
         if tags:
             entries = [e for e in entries if any(t in e.tags for t in tags)]
         if include_history == "only":
-            entries = [e for e in entries if e.data.get("_changelog")]
+            entries = [e for e in entries if e.data.get("changelog")]
         elif include_history != "true":
-            # Strip _changelog from results by default
+            # Strip changelog from results by default
             for e in entries:
-                e.data.pop("_changelog", None)
+                e.data.pop("changelog", None)
         return entries
 
     def get_entry_by_id(self, entry_id: str) -> Entry | None:
@@ -392,7 +392,7 @@ class SQLiteStore:
         return results[0] if results else None
 
     def update_entry(self, entry_id: str, updates: dict[str, Any]) -> Entry | None:
-        """Update an entry in place, appending previous values to _changelog.
+        """Update an entry in place, appending previous values to changelog.
 
         Only works on knowledge types (note, pattern, context, preference).
         Returns the updated entry, or None if not found or type is immutable.
@@ -426,7 +426,7 @@ class SQLiteStore:
                 return entry  # nothing actually changed
 
             # Append to changelog
-            changelog = entry.data.setdefault("_changelog", [])
+            changelog = entry.data.setdefault("changelog", [])
             changelog.append({"updated": now, "changed": changed})
             entry.updated = now
 

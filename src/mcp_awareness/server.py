@@ -371,7 +371,7 @@ async def update_entry(
     Only works on knowledge types: note, pattern, context, preference.
     Status, alert, and suppression entries are immutable.
     Only provided fields are updated — omit fields to leave them unchanged.
-    Changes are tracked in a _changelog array within the entry data.
+    Changes are tracked in a changelog array within the entry data.
     Use get_knowledge(include_history='true') to see change history.
     Returns JSON with status. If you receive an unstructured error, the failure
     is in the transport or platform layer, not in awareness."""

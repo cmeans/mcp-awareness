@@ -41,7 +41,7 @@ src/mcp_awareness/
 - Seven entry types: status, alert, pattern, suppression, context, preference, note
 - One status entry per source (upsert), alerts keyed by source + alert_id, preferences upsert by key + scope
 - Notes support optional content payload with MIME content_type
-- update_entry works on knowledge types only (note/pattern/context/preference); status/alert/suppression are immutable. Changes tracked in _changelog array
+- update_entry works on knowledge types only (note/pattern/context/preference); status/alert/suppression are immutable. Changes tracked in changelog array
 - Suppressions use expiry timestamps + escalation override (critical breaks through warning-level suppression)
 - Pattern matching uses word-overlap between effect string and alert fields (hyphens/dashes normalized); hour ranges handle overnight wraparound
 - Soft delete: `delete_entry` moves to trash (30-day retention), `restore_entry` recovers, `get_deleted` lists trash. Bulk deletes require `confirm=True` (dry-run by default). Auto-purged by existing `_cleanup_expired`.
@@ -67,7 +67,7 @@ Docker Compose runs both the server and a Cloudflare named tunnel. See `docker-c
 If you have access to the awareness MCP server while working on this repo:
 - **Verify connection:** Call `get_briefing` at the start of work. If it fails or returns an unstructured error, awareness is not reachable — skip the remaining steps.
 - **Check context:** Call `get_knowledge(tags=["mcp-awareness"])` to see if other agents or platforms left relevant context.
-- **Maintain status:** Keep a single permanent status note for this project using `remember`, then update it with `update_entry` as work progresses. Use tags `["mcp-awareness", "project", "status"]`. The `_changelog` tracks history automatically.
+- **Maintain status:** Keep a single permanent status note for this project using `remember`, then update it with `update_entry` as work progresses. Use tags `["mcp-awareness", "project", "status"]`. The `changelog` tracks history automatically.
 - **Record milestones:** When finishing significant work (PR merged, release tagged), update the status note so other platforms know what happened.
 
 ## Naming
