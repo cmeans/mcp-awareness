@@ -54,7 +54,17 @@ class Store(Protocol):
 
     def count_active_suppressions(self) -> int: ...
 
-    def get_knowledge(self, tags: list[str] | None = None) -> list[Entry]: ...
+    def get_knowledge(
+        self, tags: list[str] | None = None, include_history: str | None = None
+    ) -> list[Entry]: ...
+
+    def get_entry_by_id(self, entry_id: str) -> Entry | None: ...
+
+    def update_entry(self, entry_id: str, updates: dict[str, Any]) -> Entry | None: ...
+
+    def get_stats(self) -> dict[str, Any]: ...
+
+    def get_tags(self) -> list[dict[str, Any]]: ...
 
     def soft_delete_by_id(self, entry_id: str) -> bool: ...
 
@@ -350,14 +360,106 @@ class SQLiteStore:
         result: int = cur.fetchone()[0]
         return result
 
-    def get_knowledge(self, tags: list[str] | None = None) -> list[Entry]:
-        """Get knowledge entries (patterns, context, preferences)."""
-        types = (EntryType.PATTERN.value, EntryType.CONTEXT.value, EntryType.PREFERENCE.value)
+    def get_knowledge(
+        self, tags: list[str] | None = None, include_history: str | None = None
+    ) -> list[Entry]:
+        """Get knowledge entries (patterns, context, preferences, notes).
+
+        include_history: None/false = strip _changelog from results,
+                         "true" = include _changelog, "only" = only entries with changelog.
+        """
+        types = (
+            EntryType.PATTERN.value,
+            EntryType.CONTEXT.value,
+            EntryType.PREFERENCE.value,
+            EntryType.NOTE.value,
+        )
         placeholders = ",".join("?" * len(types))
         entries = self._query_entries(f"type IN ({placeholders})", types)
         if tags:
             entries = [e for e in entries if any(t in e.tags for t in tags)]
+        if include_history == "only":
+            entries = [e for e in entries if e.data.get("_changelog")]
+        elif include_history != "true":
+            # Strip _changelog from results by default
+            for e in entries:
+                e.data.pop("_changelog", None)
         return entries
+
+    def get_entry_by_id(self, entry_id: str) -> Entry | None:
+        """Get a single entry by ID (active only)."""
+        results = self._query_entries("id = ?", (entry_id,))
+        return results[0] if results else None
+
+    def update_entry(self, entry_id: str, updates: dict[str, Any]) -> Entry | None:
+        """Update an entry in place, appending previous values to _changelog.
+
+        Only works on knowledge types (note, pattern, context, preference).
+        Returns the updated entry, or None if not found or type is immutable.
+        """
+        entry = self.get_entry_by_id(entry_id)
+        if entry is None:
+            return None
+        immutable = {EntryType.STATUS, EntryType.ALERT, EntryType.SUPPRESSION}
+        if entry.type in immutable:
+            return None
+
+        with self._write_lock:
+            self._cleanup_expired()
+            now = now_iso()
+            # Build changelog record of changed fields
+            changed: dict[str, Any] = {}
+            # Envelope fields
+            for field in ("source", "tags"):
+                if field in updates and updates[field] != getattr(entry, field):
+                    changed[field] = getattr(entry, field)
+                    setattr(entry, field, updates[field])
+            # Data fields
+            for field in ("description", "content", "content_type"):
+                if field in updates and updates[field] != entry.data.get(field):
+                    old_val = entry.data.get(field)
+                    if old_val is not None:
+                        changed[field] = old_val
+                    entry.data[field] = updates[field]
+
+            if not changed:
+                return entry  # nothing actually changed
+
+            # Append to changelog
+            changelog = entry.data.setdefault("_changelog", [])
+            changelog.append({"updated": now, "changed": changed})
+            entry.updated = now
+
+            self._conn.execute(
+                "UPDATE entries SET updated = ?, source = ?, tags = ?, data = ? WHERE id = ?",
+                (now, entry.source, json.dumps(entry.tags), json.dumps(entry.data), entry.id),
+            )
+            self._conn.commit()
+            return entry
+
+    def get_stats(self) -> dict[str, Any]:
+        """Get entry counts by type, list of sources, and total count."""
+        cur = self._conn.execute(
+            f"SELECT type, COUNT(*) FROM entries WHERE {self._ACTIVE} GROUP BY type"
+        )
+        counts = {row[0]: row[1] for row in cur.fetchall()}
+        cur2 = self._conn.execute(
+            f"SELECT DISTINCT source FROM entries WHERE {self._ACTIVE} ORDER BY source"
+        )
+        sources = [row[0] for row in cur2.fetchall()]
+        return {
+            "entries": {t.value: counts.get(t.value, 0) for t in EntryType},
+            "sources": sources,
+            "total": sum(counts.values()),
+        }
+
+    def get_tags(self) -> list[dict[str, Any]]:
+        """Get all tags in use with usage counts."""
+        cur = self._conn.execute(
+            f"SELECT value, COUNT(*) as cnt FROM entries, json_each(entries.tags) "
+            f"WHERE {self._ACTIVE} GROUP BY value ORDER BY cnt DESC"
+        )
+        return [{"tag": row[0], "count": row[1]} for row in cur.fetchall()]
 
     # ------------------------------------------------------------------
     # Soft delete / trash
