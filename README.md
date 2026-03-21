@@ -153,6 +153,8 @@ For remote access via Cloudflare Tunnel and secure deployment, see the [Deployme
 | `AWARENESS_HOST` | `0.0.0.0` | Bind address (HTTP mode) |
 | `AWARENESS_PORT` | `8420` | Port (HTTP mode) |
 | `AWARENESS_DATA_DIR` | `./data` | SQLite database directory |
+| `AWARENESS_BACKEND` | `sqlite` | Storage backend: `sqlite` or `postgres` |
+| `AWARENESS_DATABASE_URL` | _(none)_ | PostgreSQL connection string (required when backend is `postgres`). Example: `postgresql://user:pass@localhost:5432/awareness` |
 | `AWARENESS_MOUNT_PATH` | _(none)_ | Secret path prefix for access control (e.g., `/my-secret`). When set, only `/<secret>/mcp` is served; all other paths return 404. Use with a Cloudflare WAF rule. |
 
 ### Development
@@ -222,7 +224,8 @@ See [Security considerations](docs/deployment-guide.md#security-considerations) 
 - Store introspection: `get_stats` for entry counts, `get_tags` for tag discovery
 - General-purpose notes with optional content payload and MIME type
 - Ambient awareness: status reporting, alert detection, suppression, briefing generation
-- Storage abstraction: `Store` protocol with `SQLiteStore` default — designed for future Postgres/vector backends
+- Storage backends: SQLite (default) and PostgreSQL with pgvector (opt-in via `AWARENESS_BACKEND=postgres`)
+- Storage abstraction: `Store` protocol — backends are swappable without changing server or collator logic
 - Full MCP API: 6 resources + 18 tools (read mirrors for tools-only clients like Claude.ai)
 - Soft delete with 30-day trash, dry-run confirmation for bulk operations
 - Request timing instrumentation and `/health` endpoint for latency analysis

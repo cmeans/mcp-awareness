@@ -27,14 +27,15 @@ CI runs all three (ruff, mypy, pytest) on push/PR to main via `.github/workflows
 src/mcp_awareness/
 ├── schema.py      # Entry types (status/alert/pattern/suppression/context/preference/note),
 │                  # common envelope, validation, TTL/expiry logic, severity ranking
-├── store.py       # Store protocol + SQLiteStore implementation (WAL mode), CRUD, soft delete, TTL cleanup
-├── collator.py    # Briefing generation: applies suppressions + patterns, composes summary/mention
-└── server.py      # FastMCP server wiring — resources (read) + tools (write/update) + secret path middleware
+├── store.py           # Store protocol + SQLiteStore implementation (WAL mode), CRUD, soft delete, TTL cleanup
+├── postgres_store.py  # PostgresStore implementation (psycopg, JSONB, GIN indexes, pgvector-ready)
+├── collator.py        # Briefing generation: applies suppressions + patterns, composes summary/mention
+└── server.py          # FastMCP server wiring — resources (read) + tools (write/update) + secret path middleware
 ```
 
 **Data flow**: Edge processes → tools (`report_status`, `report_alert`) → `store` → `collator.generate_briefing()` → `awareness://briefing` resource
 
-**Storage abstraction**: `Store` protocol defines the interface; `SQLiteStore` is the default implementation. `AwarenessStore` is a backward-compat alias. The collator depends on the protocol, not the concrete class — future backends (Postgres, hybrid) can be swapped without changing collator or server logic.
+**Storage abstraction**: `Store` protocol defines the interface; `SQLiteStore` (default) and `PostgresStore` (opt-in) implement it. Backend selected via `AWARENESS_BACKEND` env var. The collator depends on the protocol, not the concrete class. PostgresStore uses JSONB with GIN indexes for tags, psycopg sync driver, and pgvector extension (installed, ready for RAG). `wal_level=logical` configured for Debezium CDC readiness.
 
 **Key design decisions**:
 - Briefing is computed on-demand per read (not background task) — fine for SQLite with WAL

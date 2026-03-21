@@ -30,8 +30,25 @@ TRANSPORT: Literal["stdio", "streamable-http"] = os.environ.get(  # type: ignore
 HOST = os.environ.get("AWARENESS_HOST", "0.0.0.0")
 PORT = int(os.environ.get("AWARENESS_PORT", "8420"))
 MOUNT_PATH = os.environ.get("AWARENESS_MOUNT_PATH", "")
+BACKEND = os.environ.get("AWARENESS_BACKEND", "sqlite")
+DATABASE_URL = os.environ.get("AWARENESS_DATABASE_URL", "")
 
-store: Store = SQLiteStore(os.path.join(DATA_DIR, "awareness.db"))
+
+def _create_store() -> Store:
+    """Create the storage backend based on AWARENESS_BACKEND env var."""
+    if BACKEND == "postgres":
+        if not DATABASE_URL:
+            raise ValueError(
+                "AWARENESS_DATABASE_URL is required when AWARENESS_BACKEND=postgres. "
+                "Example: postgresql://user:pass@localhost:5432/awareness"
+            )
+        from .postgres_store import PostgresStore
+
+        return PostgresStore(DATABASE_URL)
+    return SQLiteStore(os.path.join(DATA_DIR, "awareness.db"))
+
+
+store: Store = _create_store()
 
 
 def _log_timing(tool_name: str, elapsed_ms: float) -> None:
