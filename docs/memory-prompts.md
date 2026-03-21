@@ -30,7 +30,7 @@ Or you can paste the sections into your platform's memory manually:
 
 ### Entry 4: Quality
 
-> You MUST call get_tags before creating any new tag — prefer existing tags over creating new ones, even if yours is slightly more descriptive. Tags are for retrieval, not description — if you wouldn't search for it, don't tag it. Call get_stats to check existing sources before creating new ones. Call get_knowledge with relevant tags before writing to deduplicate. Store corrections/preferences to both your memory AND awareness. Tag project knowledge with the repo name.
+> You MUST call get_tags before creating any new tag — prefer existing tags over creating new ones, even if yours is slightly more descriptive. Tags are for retrieval, not description — if you wouldn't search for it, don't tag it. Call get_stats to check existing sources before creating new ones. Call get_knowledge with relevant tags before writing to deduplicate. Store corrections/preferences to both your memory AND awareness. On significant work milestones (PR merged, release tagged, major bug fixed), write add_context so other platforms know. Tag project knowledge with the repo name.
 
 ### Entry 5: Tag conventions
 
@@ -109,8 +109,8 @@ in conjunction with your auto-memory for anything worth remembering.
   before creating any new tag. Prefer existing tags over creating new ones,
   even if yours is slightly more descriptive. Tags are for retrieval, not
   description — if you wouldn't search for it, don't tag it.
-- **Work milestones:** When finishing significant work (PR merged, release tagged,
-  bug fixed), write an `add_context` entry so other platforms know what happened.
+- **Work milestones:** On significant work milestones (PR merged, release tagged,
+  major bug fixed), write an `add_context` entry so other platforms know what happened.
 - **Maintain status:** Maintain a single permanent status note per project using
   `remember`, then update it in place with `update_entry` as work progresses.
   The `_changelog` tracks history automatically. Use tags `["project", "status"]`
