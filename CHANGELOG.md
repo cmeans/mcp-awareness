@@ -15,6 +15,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`get_tags` tool**: All tags with usage counts — prevents tag drift across platforms
 - **`/health` endpoint**: Pure HTTP health check (no MCP overhead) returning uptime, timestamp, transport
 - **Request timing**: `@_timed` decorator on all 18 tools and 6 resources logs wall-clock time per call to stdout
+- **PostgreSQL backend**: `PostgresStore` with JSONB, GIN indexes, pgvector-ready. Opt-in via `AWARENESS_BACKEND=postgres`
+- **Docker Compose Postgres service**: `pgvector/pgvector:pg17` with `wal_level=logical` for Debezium CDC readiness
+- **Migration script**: `examples/migrate_sqlite_to_postgres.py` for SQLite → Postgres data migration
 - **`include_history` param** on `get_knowledge`: omit (strip changelog), `"true"` (include), `"only"` (only entries with changes)
 - **Memory prompts documentation** (`docs/memory-prompts.md`): three tiers of prompt integration (platform memory, global CLAUDE.md, project CLAUDE.md) with tuning cycle guidance
 - **Awareness workflow in project CLAUDE.md**: verify connection, check context, maintain status, record milestones

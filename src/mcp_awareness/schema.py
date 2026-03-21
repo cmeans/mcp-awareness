@@ -34,12 +34,37 @@ def make_id() -> str:
     return str(uuid.uuid4())
 
 
-def now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
+def now_utc() -> datetime:
+    """Return the current time as a timezone-aware UTC datetime."""
+    return datetime.now(timezone.utc)
 
 
 def parse_iso(s: str) -> datetime:
     return datetime.fromisoformat(s)
+
+
+def to_iso(dt: datetime) -> str:
+    """Convert a datetime to ISO 8601 string for JSON serialization."""
+    return dt.isoformat()
+
+
+def ensure_dt(val: str | datetime) -> datetime:
+    """Coerce a string or datetime to a timezone-aware datetime."""
+    if isinstance(val, datetime):
+        return val
+    return parse_iso(val)
+
+
+def ensure_dt_optional(val: str | datetime | None) -> datetime | None:
+    """Coerce a string/datetime/None to a timezone-aware datetime or None."""
+    if val is None:
+        return None
+    return ensure_dt(val)
+
+
+# Keep backward compat for any code still calling now_iso()
+def now_iso() -> str:
+    return now_utc().isoformat()
 
 
 @dataclass
@@ -50,9 +75,9 @@ class Entry:
     type: EntryType
     source: str
     tags: list[str]
-    created: str
-    updated: str
-    expires: str | None
+    created: datetime
+    updated: datetime
+    expires: datetime | None
     data: dict[str, Any]
 
     def to_dict(self) -> dict[str, Any]:
@@ -61,9 +86,9 @@ class Entry:
             "type": self.type.value if isinstance(self.type, EntryType) else self.type,
             "source": self.source,
             "tags": self.tags,
-            "created": self.created,
-            "updated": self.updated,
-            "expires": self.expires,
+            "created": to_iso(self.created),
+            "updated": to_iso(self.updated),
+            "expires": to_iso(self.expires) if self.expires else None,
             "data": self.data,
         }
 
@@ -74,16 +99,16 @@ class Entry:
             type=EntryType(d["type"]),
             source=d["source"],
             tags=d.get("tags", []),
-            created=d["created"],
-            updated=d["updated"],
-            expires=d.get("expires"),
+            created=ensure_dt(d["created"]),
+            updated=ensure_dt(d["updated"]),
+            expires=ensure_dt_optional(d.get("expires")),
             data=d.get("data", {}),
         )
 
     def is_expired(self) -> bool:
         if not self.expires:
             return False
-        return datetime.now(timezone.utc) >= parse_iso(self.expires)
+        return datetime.now(timezone.utc) >= self.expires
 
     def is_stale(self) -> bool:
         """For status entries: check if TTL has expired since last update."""
@@ -96,7 +121,7 @@ class Entry:
 
     @property
     def age_sec(self) -> float:
-        return (datetime.now(timezone.utc) - parse_iso(self.updated)).total_seconds()
+        return (datetime.now(timezone.utc) - self.updated).total_seconds()
 
 
 def validate_entry_data(data: dict[str, Any]) -> list[str]:

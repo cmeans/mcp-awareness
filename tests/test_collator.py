@@ -12,7 +12,7 @@ from mcp_awareness.collator import (
     is_suppressed,
     matches_pattern,
 )
-from mcp_awareness.schema import Entry, EntryType, make_id, now_iso
+from mcp_awareness.schema import Entry, EntryType, make_id, now_utc
 from mcp_awareness.store import SQLiteStore
 
 # ---------------------------------------------------------------------------
@@ -29,7 +29,7 @@ def _make_alert(
     alert_type="threshold",
     tags=None,
 ):
-    now = now_iso()
+    now = now_utc()
     return Entry(
         id=make_id(),
         type=EntryType.ALERT,
@@ -58,14 +58,14 @@ def _make_suppression(
     tags=None,
 ):
     now = datetime.now(timezone.utc)
-    expires = (now + timedelta(hours=hours_remaining)).isoformat()
+    expires = now + timedelta(hours=hours_remaining)
     return Entry(
         id=make_id(),
         type=EntryType.SUPPRESSION,
         source=source,
         tags=tags or [],
-        created=now.isoformat(),
-        updated=now.isoformat(),
+        created=now,
+        updated=now,
         expires=expires,
         data={
             "metric": metric,
@@ -76,7 +76,7 @@ def _make_suppression(
 
 
 def _make_pattern(source="nas", effect="suppress cpu_pct", conditions=None, tags=None):
-    now = now_iso()
+    now = now_utc()
     return Entry(
         id=make_id(),
         type=EntryType.PATTERN,
@@ -432,15 +432,15 @@ class TestGenerateBriefing:
             },
         )
         now = datetime.now(timezone.utc)
-        expires = (now + timedelta(hours=1)).isoformat()
+        expires = now + timedelta(hours=1)
         store.add(
             Entry(
                 id=make_id(),
                 type=EntryType.SUPPRESSION,
                 source="nas",
                 tags=[],
-                created=now.isoformat(),
-                updated=now.isoformat(),
+                created=now,
+                updated=now,
                 expires=expires,
                 data={
                     "metric": "cpu_pct",
@@ -470,15 +470,15 @@ class TestGenerateBriefing:
             },
         )
         now = datetime.now(timezone.utc)
-        expires = (now + timedelta(hours=1)).isoformat()
+        expires = now + timedelta(hours=1)
         store.add(
             Entry(
                 id=make_id(),
                 type=EntryType.SUPPRESSION,
                 source="nas",
                 tags=[],
-                created=now.isoformat(),
-                updated=now.isoformat(),
+                created=now,
+                updated=now,
                 expires=expires,
                 data={
                     "metric": "cpu_pct",
@@ -505,7 +505,7 @@ class TestGenerateBriefing:
                 "resolved": False,
             },
         )
-        now = now_iso()
+        now = now_utc()
         store.add(
             Entry(
                 id=make_id(),
@@ -528,7 +528,7 @@ class TestGenerateBriefing:
         assert briefing["active_alerts"] == 0
 
     def test_stale_source_detection(self, store):
-        old = (datetime.now(timezone.utc) - timedelta(seconds=300)).isoformat()
+        old = datetime.now(timezone.utc) - timedelta(seconds=300)
         store.upsert_status("nas", ["infra"], {"metrics": {}, "ttl_sec": 120})
         store._conn.execute(
             "UPDATE entries SET updated = ?, created = ? WHERE type = 'status' AND source = 'nas'",
@@ -593,7 +593,7 @@ class TestGenerateBriefing:
 
     def test_suppression_count(self, store):
         now = datetime.now(timezone.utc)
-        expires = (now + timedelta(hours=1)).isoformat()
+        expires = now + timedelta(hours=1)
         for i in range(3):
             store.add(
                 Entry(
@@ -601,8 +601,8 @@ class TestGenerateBriefing:
                     type=EntryType.SUPPRESSION,
                     source="nas",
                     tags=[],
-                    created=now.isoformat(),
-                    updated=now.isoformat(),
+                    created=now,
+                    updated=now,
                     expires=expires,
                     data={"metric": f"m{i}", "suppress_level": "warning"},
                 )

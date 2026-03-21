@@ -10,7 +10,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
-from .schema import Entry, severity_rank
+from .schema import Entry, severity_rank, to_iso
 from .store import Store
 
 
@@ -259,7 +259,7 @@ def generate_briefing(store: Store) -> dict[str, Any]:
             age = int(status.age_sec)
             briefing["sources"][source] = {
                 "status": "stale",
-                "last_report": status.updated,
+                "last_report": to_iso(status.updated),
                 "headline": f"{source} has not reported in {age}s",
                 "drill_down": f"awareness://status/{source}",
             }
@@ -283,7 +283,7 @@ def generate_briefing(store: Store) -> dict[str, Any]:
 
         source_entry: dict[str, Any] = {
             "status": source_status,
-            "last_report": status.updated if status else None,
+            "last_report": to_iso(status.updated) if status else None,
         }
 
         if active_alerts:

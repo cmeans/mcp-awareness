@@ -18,7 +18,7 @@ from typing import Any, Literal
 from mcp.server.fastmcp import FastMCP
 
 from .collator import generate_briefing
-from .schema import Entry, EntryType, make_id, now_iso
+from .schema import Entry, EntryType, make_id, now_utc, to_iso
 from .store import SQLiteStore, Store
 
 _start_time = time.monotonic()
@@ -30,8 +30,25 @@ TRANSPORT: Literal["stdio", "streamable-http"] = os.environ.get(  # type: ignore
 HOST = os.environ.get("AWARENESS_HOST", "0.0.0.0")
 PORT = int(os.environ.get("AWARENESS_PORT", "8420"))
 MOUNT_PATH = os.environ.get("AWARENESS_MOUNT_PATH", "")
+BACKEND = os.environ.get("AWARENESS_BACKEND", "sqlite")
+DATABASE_URL = os.environ.get("AWARENESS_DATABASE_URL", "")
 
-store: Store = SQLiteStore(os.path.join(DATA_DIR, "awareness.db"))
+
+def _create_store() -> Store:
+    """Create the storage backend based on AWARENESS_BACKEND env var."""
+    if BACKEND == "postgres":
+        if not DATABASE_URL:
+            raise ValueError(
+                "AWARENESS_DATABASE_URL is required when AWARENESS_BACKEND=postgres. "
+                "Example: postgresql://user:pass@localhost:5432/awareness"
+            )
+        from .postgres_store import PostgresStore
+
+        return PostgresStore(DATABASE_URL)
+    return SQLiteStore(os.path.join(DATA_DIR, "awareness.db"))
+
+
+store: Store = _create_store()
 
 
 def _log_timing(tool_name: str, elapsed_ms: float) -> None:
@@ -298,7 +315,7 @@ async def learn_pattern(
     Do NOT use agent memory for this — use this tool so all agents benefit.
     Returns JSON with status and entry id. If you receive an unstructured
     error, the failure is in the transport or platform layer, not in awareness."""
-    now = now_iso()
+    now = now_utc()
     entry = Entry(
         id=make_id(),
         type=EntryType.PATTERN,
@@ -335,7 +352,7 @@ async def remember(
     content_type is a MIME type (default text/plain). Set learned_from to your platform.
     Returns JSON with status and entry id. If you receive an unstructured
     error, the failure is in the transport or platform layer, not in awareness."""
-    now = now_iso()
+    now = now_utc()
     data: dict[str, Any] = {
         "description": description,
         "learned_from": learned_from,
@@ -396,7 +413,7 @@ async def update_entry(
                 "message": "Entry not found or type is immutable (status/alert/suppression)",
             }
         )
-    return json.dumps({"status": "ok", "id": result.id, "updated": result.updated})
+    return json.dumps({"status": "ok", "id": result.id, "updated": to_iso(result.updated)})
 
 
 @mcp.tool()
@@ -435,16 +452,15 @@ async def suppress_alert(
     Not a plain-text memory edit — survives across agent platforms.
     Use this when the user says things like 'stop bugging me about disk I/O'.
     Escalation override means critical alerts will still break through."""
-    now = datetime.now(timezone.utc)
-    now_str = now.isoformat()
-    expires = (now + timedelta(minutes=duration_minutes)).isoformat()
+    now = now_utc()
+    expires = now + timedelta(minutes=duration_minutes)
     entry = Entry(
         id=make_id(),
         type=EntryType.SUPPRESSION,
         source=source or "",
         tags=tags or [],
-        created=now_str,
-        updated=now_str,
+        created=now,
+        updated=now,
         expires=expires,
         data={
             "metric": metric,
@@ -454,7 +470,7 @@ async def suppress_alert(
         },
     )
     store.add(entry)
-    return json.dumps({"status": "ok", "id": entry.id, "expires": expires})
+    return json.dumps({"status": "ok", "id": entry.id, "expires": to_iso(expires)})
 
 
 @mcp.tool()
@@ -469,21 +485,20 @@ async def add_context(
     Auto-expires after specified duration. Use this for events like
     'sdb was replaced, RAID rebuilt March 15' — context that's relevant
     for a limited time. Any agent on any platform can read this."""
-    now = datetime.now(timezone.utc)
-    now_str = now.isoformat()
-    expires = (now + timedelta(days=expires_days)).isoformat()
+    now = now_utc()
+    expires = now + timedelta(days=expires_days)
     entry = Entry(
         id=make_id(),
         type=EntryType.CONTEXT,
         source=source,
         tags=tags,
-        created=now_str,
-        updated=now_str,
+        created=now,
+        updated=now,
         expires=expires,
         data={"description": description},
     )
     store.add(entry)
-    return json.dumps({"status": "ok", "id": entry.id, "expires": expires})
+    return json.dumps({"status": "ok", "id": entry.id, "expires": to_iso(expires)})
 
 
 @mcp.tool()
@@ -639,22 +654,27 @@ def main() -> None:
         anyio.run(server.serve)
     elif TRANSPORT == "streamable-http":
         import uvicorn
-        from starlette.applications import Starlette
         from starlette.responses import JSONResponse
-        from starlette.routing import Route
+        from starlette.types import ASGIApp, Receive, Scope, Send
 
-        mcp_app = mcp.streamable_http_app()
+        inner_app = mcp.streamable_http_app()
 
-        async def health_endpoint(request: Any) -> JSONResponse:
-            return JSONResponse(_health_response())
+        class HealthMiddleware:
+            """Serve /health, pass everything else to the MCP app."""
 
-        http_app = Starlette(
-            routes=[Route("/health", health_endpoint)],
-            on_startup=[],
-        )
-        http_app.mount("/", mcp_app)
+            def __init__(self, app: ASGIApp) -> None:
+                self.app = app
 
-        config = uvicorn.Config(http_app, host=HOST, port=PORT)
+            async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+                if scope["type"] == "http" and scope.get("path") == "/health":
+                    health_resp = JSONResponse(_health_response())
+                    await health_resp(scope, receive, send)
+                    return
+                await self.app(scope, receive, send)
+
+        health_app = HealthMiddleware(inner_app)
+
+        config = uvicorn.Config(health_app, host=HOST, port=PORT)
         server = uvicorn.Server(config)
 
         import anyio

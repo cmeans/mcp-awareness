@@ -13,7 +13,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
-from .schema import Entry, EntryType, make_id, now_iso
+from .schema import Entry, EntryType, ensure_dt, ensure_dt_optional, make_id, now_utc, to_iso
 
 # How long soft-deleted entries remain recoverable before auto-purge
 TRASH_RETENTION_DAYS = 30
@@ -125,9 +125,9 @@ class SQLiteStore:
             type=EntryType(row["type"]),
             source=row["source"],
             tags=json.loads(row["tags"]),
-            created=row["created"],
-            updated=row["updated"],
-            expires=row["expires"],
+            created=ensure_dt(row["created"]),
+            updated=ensure_dt(row["updated"]),
+            expires=ensure_dt_optional(row["expires"]),
             data=json.loads(row["data"]),
         )
 
@@ -139,9 +139,9 @@ class SQLiteStore:
                 entry.id,
                 entry.type.value if isinstance(entry.type, EntryType) else entry.type,
                 entry.source,
-                entry.created,
-                entry.updated,
-                entry.expires,
+                to_iso(entry.created),
+                to_iso(entry.updated),
+                to_iso(entry.expires) if entry.expires else None,
                 json.dumps(entry.tags),
                 json.dumps(entry.data),
             ),
@@ -198,7 +198,7 @@ class SQLiteStore:
         """Upsert a status entry for a source (one active status per source)."""
         with self._write_lock:
             self._cleanup_expired()
-            now = now_iso()
+            now = now_utc()
             self._conn.execute(
                 f"DELETE FROM entries WHERE type = ? AND source = ? AND {self._ACTIVE}",
                 (EntryType.STATUS.value, source),
@@ -223,7 +223,7 @@ class SQLiteStore:
         """Upsert an alert by source + alert_id."""
         with self._write_lock:
             self._cleanup_expired()
-            now = now_iso()
+            now = now_utc()
             existing = self._query_entries(
                 "type = ? AND source = ?",
                 (EntryType.ALERT.value, source),
@@ -260,7 +260,7 @@ class SQLiteStore:
         """Upsert a preference by key + scope."""
         with self._write_lock:
             self._cleanup_expired()
-            now = now_iso()
+            now = now_utc()
             existing = self._query_entries(
                 "type = ?",
                 (EntryType.PREFERENCE.value,),
@@ -406,7 +406,7 @@ class SQLiteStore:
 
         with self._write_lock:
             self._cleanup_expired()
-            now = now_iso()
+            now = now_utc()
             # Build changelog record of changed fields
             changed: dict[str, Any] = {}
             # Envelope fields
@@ -425,14 +425,20 @@ class SQLiteStore:
             if not changed:
                 return entry  # nothing actually changed
 
-            # Append to changelog
+            # Append to changelog (ISO string in JSON data)
             changelog = entry.data.setdefault("changelog", [])
-            changelog.append({"updated": now, "changed": changed})
+            changelog.append({"updated": to_iso(now), "changed": changed})
             entry.updated = now
 
             self._conn.execute(
                 "UPDATE entries SET updated = ?, source = ?, tags = ?, data = ? WHERE id = ?",
-                (now, entry.source, json.dumps(entry.tags), json.dumps(entry.data), entry.id),
+                (
+                    to_iso(now),
+                    entry.source,
+                    json.dumps(entry.tags),
+                    json.dumps(entry.data),
+                    entry.id,
+                ),
             )
             self._conn.commit()
             return entry

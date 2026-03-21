@@ -231,6 +231,31 @@ Claude calls `get_stats` and reports entry counts by type.
 
 Claude calls `get_tags` and lists all tags with usage counts.
 
+## Alternative: PostgreSQL backend
+
+For better concurrency, JSONB queries, and future RAG support, switch to PostgreSQL:
+
+```bash
+# Start Postgres (pgvector pre-installed)
+docker compose --profile postgres up -d postgres
+
+# Migrate existing SQLite data (optional, safe to run multiple times)
+python examples/migrate_sqlite_to_postgres.py \
+    --sqlite ~/awareness/awareness.db \
+    --postgres postgresql://awareness:awareness-dev@localhost:5432/awareness
+```
+
+Add to your `.env` file:
+
+```bash
+AWARENESS_BACKEND=postgres
+AWARENESS_DATABASE_URL=postgresql://awareness:awareness-dev@localhost:5432/awareness
+```
+
+Then restart the awareness server (`docker compose up -d`). All tools work identically — the `Store` protocol abstracts the backend.
+
+See the [Data Dictionary](data-dictionary.md#backend-specific-details) for PostgreSQL-specific details including RDS compatibility and replication readiness.
+
 ## Alternative: Quick tunnel (no account needed)
 
 For quick testing without a Cloudflare account or domain:
@@ -252,7 +277,7 @@ sequenceDiagram
     participant CF as Cloudflare Tunnel
     participant Server as mcp-awareness
     participant Collator as Collator
-    participant Store as SQLite Store
+    participant Store as Store (SQLite or Postgres)
 
     You->>WAF: Request to /secret/mcp
     WAF->>WAF: Path starts with /secret? ✓
