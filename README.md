@@ -7,21 +7,21 @@
 
 ## What this is
 
+<img src="docs/images/android-briefing-demo.png" alt="Claude on Android surfacing an infrastructure alert during an unrelated conversation" width="220" align="right">
+
 `mcp-awareness` is a portable knowledge and awareness layer for AI agents. It gives any MCP-compatible AI assistant — Claude, ChatGPT, Cursor, or whatever comes next — access to a shared store of knowledge, system status, and operational context that *you* own and control.
 
 **The problem it solves:** Every AI platform has its own memory silo. Knowledge you build up in Claude doesn't exist in ChatGPT. Context from your desktop assistant doesn't follow you to mobile. If you switch platforms, you start over. Your AI knows you — but only within its walled garden.
 
 **What `mcp-awareness` does:** It externalizes that knowledge into a self-hosted service that any agent can read from and write to, using the open [Model Context Protocol](https://modelcontextprotocol.io/) (MCP). Tell one agent about your infrastructure, your projects, your preferences — and every agent knows it. Permanently, portably, privately.
 
+<br clear="both">
+
 ### What it looks like in practice
 
 In a single prompt — *"save your knowledge about me to awareness"* — Claude.ai wrote 39 tagged, searchable knowledge entries covering infrastructure, projects, family, health, finances, and operational patterns. Those entries are immediately accessible from Claude Code, Claude Desktop, or any other MCP client. The knowledge doesn't belong to Claude anymore. It belongs to the system.
 
 That same store also provides ambient system awareness: edge processes report status and alerts, a collation engine applies suppressions and patterns, and agents receive a pre-computed briefing (~200 tokens) at conversation start. If something needs attention, the agent mentions it. If not, silence.
-
-<p align="center">
-  <img src="docs/images/android-briefing-demo.png" alt="Claude on Android surfacing an infrastructure alert during an unrelated conversation" width="400">
-</p>
 
 ## How it started
 
