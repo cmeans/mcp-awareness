@@ -654,22 +654,27 @@ def main() -> None:
         anyio.run(server.serve)
     elif TRANSPORT == "streamable-http":
         import uvicorn
-        from starlette.applications import Starlette
         from starlette.responses import JSONResponse
-        from starlette.routing import Route
+        from starlette.types import ASGIApp, Receive, Scope, Send
 
-        mcp_app = mcp.streamable_http_app()
+        inner_app = mcp.streamable_http_app()
 
-        async def health_endpoint(request: Any) -> JSONResponse:
-            return JSONResponse(_health_response())
+        class HealthMiddleware:
+            """Serve /health, pass everything else to the MCP app."""
 
-        http_app = Starlette(
-            routes=[Route("/health", health_endpoint)],
-            on_startup=[],
-        )
-        http_app.mount("/", mcp_app)
+            def __init__(self, app: ASGIApp) -> None:
+                self.app = app
 
-        config = uvicorn.Config(http_app, host=HOST, port=PORT)
+            async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+                if scope["type"] == "http" and scope.get("path") == "/health":
+                    health_resp = JSONResponse(_health_response())
+                    await health_resp(scope, receive, send)
+                    return
+                await self.app(scope, receive, send)
+
+        health_app = HealthMiddleware(inner_app)
+
+        config = uvicorn.Config(health_app, host=HOST, port=PORT)
         server = uvicorn.Server(config)
 
         import anyio
