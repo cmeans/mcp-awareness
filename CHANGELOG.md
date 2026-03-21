@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-03-21
+
 ### Added
 - **`note` entry type**: General-purpose permanent knowledge with optional `content` payload and MIME `content_type`
 - **`remember` tool**: Create notes — personal facts, project notes, skill backups, config snapshots
@@ -36,6 +38,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Quick Start simplified to `docker compose up -d` (moved pip install to Development section)
 - Docker health check: `start_period` 5s→15s, `timeout` 5s→10s to prevent false failures on startup
 - Deployment guide updated with Docker quick start, current tool surface, memory prompt link
+- Entry timestamps migrated from `str` to `datetime` objects — PostgreSQL uses `TIMESTAMPTZ`, SQLite converts at boundary
+- PostgresStore uses GIN-indexed `@>` operator for tag filtering (pushed from Python to SQL)
 
 ### Fixed
 - Data model inconsistency: suppression tag matching now uses envelope `tags` instead of `data.tags`
@@ -82,6 +86,7 @@ Initial implementation.
 - **Dockerfile** for container deployment
 - Design docs: core spec and collation layer
 
-[Unreleased]: https://github.com/cmeans/mcp-awareness/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/cmeans/mcp-awareness/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/cmeans/mcp-awareness/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/cmeans/mcp-awareness/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/cmeans/mcp-awareness/releases/tag/v0.1.0
