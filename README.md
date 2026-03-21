@@ -11,7 +11,7 @@
 
 **The problem:** Every AI platform keeps its own memory silo. What you teach Claude doesn't exist in ChatGPT. Your desktop assistant's context doesn't follow you to mobile. Switch platforms, and you start over.
 
-**The fix:** Externalize that knowledge into a service *you* own. Tell one AI about your infrastructure, your projects, your preferences — and every AI knows it. Permanently, portably, privately.
+**The fix:** Externalize that knowledge into a service you control. Self-host it, or use the managed service when it launches. Tell one AI about your infrastructure, your projects, your preferences — and every AI knows it. Permanently, portably, privately.
 
 ### What this looks like in practice
 
@@ -20,6 +20,8 @@
 This morning, a plan was drafted on Claude Android during a commute. Claude Desktop picked it up and gave engineering feedback that shaped the project roadmap. Claude Code implemented the changes, tested them, and deployed — updating the shared project status so every platform knows what happened. No copy-paste. No "remember what we discussed." The knowledge just flows.
 
 The store also provides ambient system awareness: edge processes report status and alerts, a collation engine applies suppressions and learned patterns, and your AI receives a compact briefing (~200 tokens) at the start of each conversation. If something needs attention, it says so. If not, silence.
+
+<br clear="both">
 
 ## How it started
 
@@ -51,7 +53,7 @@ This is the key differentiator from platform-specific memory: the knowledge belo
 
 ### Cross-platform continuity
 
-Every AI you use shares the same knowledge base. Plan on your phone, implement on your laptop, review from your desktop — context follows automatically. Agents can also maintain shared project status, so any AI on any platform knows what's been done and what's next.
+Every AI you use shares the same knowledge base. Plan on your phone, implement on your laptop, review from your desktop — context follows automatically. Your AIs can also maintain shared project status, so any platform knows what's been done and what's next.
 
 ### Ambient system awareness
 
@@ -210,7 +212,7 @@ See [Security considerations](docs/deployment-guide.md#security-considerations) 
 
 ## Current status
 
-**Working end-to-end** — deployed on `mcpawareness.com` via Cloudflare Tunnel with WAF protection. Actively used across Claude.ai, Claude Code, Claude Desktop, Cursor, and Claude Android.
+**Working end-to-end** — deployed on `mcpawareness.com` via Cloudflare Tunnel with WAF protection. Tested with Claude.ai, Claude Code, Claude Desktop, Claude mobile (Android), and Cursor.
 
 **Implemented:**
 - Shared knowledge store: `remember`, `learn_pattern`, `add_context`, `set_preference` with filtered retrieval
@@ -280,16 +282,16 @@ The system doesn't just store what happened — it helps you decide what to do a
 | | mcp-awareness | Platform memory (Claude, ChatGPT) | Mem0 / Zep |
 |---|---|---|---|
 | **Portable** | Any MCP client | Locked to one platform | Framework-specific API |
-| **Self-hosted** | Yes, always | No | SaaS only (Mem0) |
+| **Self-hosted** | Yes, with managed option planned | No | SaaS only (Mem0) |
 | **Bidirectional** | Read and write from any client | Read-only recall | Varies |
 | **Change tracking** | `_changelog` on every update | None | None |
 | **Open protocol** | MCP (open standard) | Proprietary | Proprietary |
-| **Awareness** | Monitoring + knowledge | Memory only | Memory only |
+| **Awareness** | Knowledge + system monitoring | Memory only | Memory only |
 | **You own the data** | Yes | No | Depends |
 
 ## How it's built
 
-This project was designed and built through collaboration between [Chris Means](https://github.com/cmeans) and multiple Claude instances (Anthropic's AI assistant) working across platforms — Claude.ai for architecture and planning, Claude Code for implementation and testing, Claude Desktop for code review and feedback. The agents don't just build the service; they use it. Claude Desktop reviewed the awareness tools and gave engineering feedback that directly shaped the roadmap. Agents maintain shared project status in awareness so work flows across platforms without repetition.
+This project was designed and built through collaboration between [Chris Means](https://github.com/cmeans) and multiple Claude instances (Anthropic's AI assistant) working across platforms — Claude.ai for architecture and planning, Claude Code for implementation and testing, Claude Desktop for code review and feedback. The AIs don't just build the service; they use it. Claude Desktop reviewed the awareness tools and gave engineering feedback that directly shaped the roadmap. Each platform maintains shared project status in awareness so work flows without repetition.
 
 The collaboration model itself is part of what this project explores: AI that builds up shared knowledge through conversation rather than configuration. The awareness service is, in a sense, a formalization of how that collaboration already works — just extended to everything.
 
