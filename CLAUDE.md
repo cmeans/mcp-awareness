@@ -25,11 +25,11 @@ CI runs all three (ruff, mypy, pytest) on push/PR to main via `.github/workflows
 
 ```
 src/mcp_awareness/
-├── schema.py      # Entry types (status/alert/pattern/suppression/context/preference),
+├── schema.py      # Entry types (status/alert/pattern/suppression/context/preference/note),
 │                  # common envelope, validation, TTL/expiry logic, severity ranking
 ├── store.py       # Store protocol + SQLiteStore implementation (WAL mode), CRUD, soft delete, TTL cleanup
 ├── collator.py    # Briefing generation: applies suppressions + patterns, composes summary/mention
-└── server.py      # FastMCP server wiring — resources (read) + tools (write) + secret path middleware
+└── server.py      # FastMCP server wiring — resources (read) + tools (write/update) + secret path middleware
 ```
 
 **Data flow**: Edge processes → tools (`report_status`, `report_alert`) → `store` → `collator.generate_briefing()` → `awareness://briefing` resource
@@ -38,7 +38,10 @@ src/mcp_awareness/
 
 **Key design decisions**:
 - Briefing is computed on-demand per read (not background task) — fine for SQLite with WAL
+- Seven entry types: status, alert, pattern, suppression, context, preference, note
 - One status entry per source (upsert), alerts keyed by source + alert_id, preferences upsert by key + scope
+- Notes support optional content payload with MIME content_type
+- update_entry works on knowledge types only (note/pattern/context/preference); status/alert/suppression are immutable. Changes tracked in _changelog array
 - Suppressions use expiry timestamps + escalation override (critical breaks through warning-level suppression)
 - Pattern matching uses word-overlap between effect string and alert fields (hyphens/dashes normalized); hour ranges handle overnight wraparound
 - Soft delete: `delete_entry` moves to trash (30-day retention), `restore_entry` recovers, `get_deleted` lists trash. Bulk deletes require `confirm=True` (dry-run by default). Auto-purged by existing `_cleanup_expired`.

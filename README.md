@@ -169,7 +169,7 @@ docker compose --profile quick up -d mcp-awareness tunnel-quick
 
 ## Tools
 
-The server exposes 14 MCP tools. Clients that support MCP resources also get 6 read-only resources, but since many clients (including Claude.ai) only surface tools, every resource has a tool mirror.
+The server exposes 18 MCP tools. Clients that support MCP resources also get 6 read-only resources, but since many clients (including Claude.ai) only surface tools, every resource has a tool mirror.
 
 ### Read tools
 
@@ -178,8 +178,10 @@ The server exposes 14 MCP tools. Clients that support MCP resources also get 6 r
 | `get_briefing` | Compact awareness summary (~200 tokens all-clear, ~500 with issues). Call at conversation start. Pre-filtered through patterns and suppressions. |
 | `get_alerts` | Active alerts, optionally filtered by source. Drill-down from briefing. |
 | `get_status` | Full status for a specific source including metrics and inventory. |
-| `get_knowledge` | All knowledge entries: learned patterns, historical context, preferences. |
+| `get_knowledge` | Knowledge entries (patterns, context, preferences, notes). Filter by source, tags, entry_type. `include_history` controls changelog visibility. |
 | `get_suppressions` | Active alert suppressions with expiry times and escalation settings. |
+| `get_stats` | Entry counts by type, list of sources, total count. Call before `get_knowledge` to decide whether to filter. |
+| `get_tags` | All tags in use with usage counts. Use to discover existing tags and prevent drift. |
 
 ### Write tools
 
@@ -187,7 +189,8 @@ The server exposes 14 MCP tools. Clients that support MCP resources also get 6 r
 |------|-------------|
 | `report_status` | Report system status. Called periodically by edge processes. Upserts one entry per source; stale if TTL expires without refresh. |
 | `report_alert` | Report or resolve an alert. Captures diagnostics at detection time. Levels: `warning`, `critical`. Types: `threshold`, `structural`, `baseline`. |
-| `learn_pattern` | Record permanent knowledge from conversation. Tagged and searchable. Any agent writes; any agent reads. Set `learned_from` to your platform. |
+| `learn_pattern` | Record an operational pattern with conditions/effects for alert matching. Set `learned_from` to your platform. |
+| `remember` | Store a general-purpose note. Optional `content` payload with MIME `content_type`. For anything that isn't an operational pattern or time-limited context. |
 | `add_context` | Record time-limited knowledge (default 30 days). Use for events, temporary situations, or facts that lose relevance. |
 | `set_preference` | Set a portable presentation preference (e.g., `alert_verbosity`, `check_frequency`). Upserts by key + scope. |
 | `suppress_alert` | Suppress alerts by source/tags/metric. Time-limited with escalation override — critical alerts can break through. |
@@ -196,6 +199,7 @@ The server exposes 14 MCP tools. Clients that support MCP resources also get 6 r
 
 | Tool | Description |
 |------|-------------|
+| `update_entry` | Update a knowledge entry in place (note, pattern, context, preference). Tracks changes in `_changelog`. Status/alert/suppression are immutable. |
 | `delete_entry` | Soft-delete entries (30-day trash). By ID, by source + type, or by source. Bulk deletes require `confirm=True` (dry-run by default). |
 | `restore_entry` | Restore a soft-deleted entry from trash. |
 | `get_deleted` | List all entries in trash with IDs for restore. |
@@ -219,20 +223,22 @@ See [Security considerations](docs/deployment-guide.md#security-considerations) 
 - Portable knowledge store: agents read/write tagged knowledge via MCP tools
 - Ambient awareness: status reporting, alert detection, suppression, briefing generation
 - Storage abstraction: `Store` protocol with `SQLiteStore` default — designed for future Postgres/vector backends
-- Full MCP API: 6 resources + 14 tools (read mirrors for tools-only clients like Claude.ai)
+- Full MCP API: 6 resources + 18 tools (read mirrors for tools-only clients like Claude.ai)
+- General-purpose notes with optional content payload and MIME type
+- In-place updates with changelog tracking for knowledge entries
+- Tag registry and stats for store introspection
 - Soft delete with 30-day trash, dry-run confirmation for bulk operations
 - Streamable HTTP + stdio transports
 - Secret path auth + Cloudflare WAF for edge-level access control
 - Docker Compose with named Cloudflare Tunnel or ephemeral quick tunnel
 - Three-layer detection model (threshold + knowledge implemented; baseline planned)
 - Suppression system with time-based expiry and escalation overrides
-- 124 tests, strict type checking, CI pipeline
+- 148 tests, strict type checking, CI pipeline
 
 **Not yet implemented:**
 - Layer 2 (baseline) detection — rolling averages and deviation calculation
 - Edge processes — no automated producers yet ([example script](examples/simulate_edge.py) demonstrates the write path)
 - Semantic search — current knowledge retrieval is tag/keyword-based; vector similarity is planned
-- First-class knowledge entry type — currently uses `learn_pattern`; a dedicated knowledge tool with `remember`/`recall` semantics is planned
 - OAuth / API key authentication — current auth is secret-path-based; proper token auth requires MCP client support for auth flows
 
 ## Design docs
