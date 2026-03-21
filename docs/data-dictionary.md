@@ -107,16 +107,12 @@ Written by agents via `set_preference`. Keyed by `key` + `scope` (upserted). Por
 
 - **Upsert behavior:** `status` entries are upserted by `source`. `alert` entries by `source` + `alert_id`. `preference` entries by `key` + `scope`. Other types always insert new rows.
 - **Soft delete:** `delete_entry` sets the `deleted` timestamp. Entry remains in the database for 30 days, recoverable via `restore_entry`. Bulk deletes require `confirm=True` (dry-run by default).
-- **Auto-purge:** Expired entries (`expires < now`) and old soft-deleted entries (`deleted` > 30 days ago) are cleaned up by `_cleanup_expired`, which runs piggyback on store operations (reads and writes), debounced to at most every 10 seconds. There is no background scheduler — if the server receives no traffic, expired entries remain in the database until the next interaction. **Note:** auto-purge performs a hard `DELETE`, not a soft delete. Expired entries bypass the trash entirely — once past their expiry, they are permanently removed on the next cleanup pass.
+- **Auto-purge:** Expired entries (`expires < now`) and old soft-deleted entries (`deleted` > 30 days ago) are cleaned up by `_cleanup_expired`, which runs on a background thread triggered by write operations, debounced to at most every 10 seconds. Cleanup never blocks the request that triggers it — the debounce check is instant, and the actual DELETE runs on a separate thread with its own SQLite connection. Read operations do not trigger cleanup. If the server receives no write traffic, expired entries remain in the database until the next write. **Note:** auto-purge performs a hard `DELETE`, not a soft delete. Expired entries bypass the trash entirely — once past their expiry, they are permanently removed on the next cleanup pass.
 - **Staleness:** Status entries with `ttl_sec` are marked stale in the briefing if no update arrives within the TTL window. The entry itself is not deleted — it remains as the last known state.
 - **Hard deletes:** The API only performs soft deletes. If you delete the SQLite database file or run manual SQL `DELETE` statements, that data is gone permanently — there is no recovery mechanism beyond your own backups. Back up `awareness.db` regularly.
-
-### Known limitation: cleanup blocks requests
-
-The `_cleanup_expired` pass runs synchronously inside the write lock, meaning it blocks the request that triggers it. The 10-second debounce limits frequency, but when it fires, the caller waits for the `DELETE` to complete before getting their response. For a small single-user database this is negligible, but it will not scale. A future improvement should either move cleanup to a background task or filter expired entries at query time and purge asynchronously.
 
 ## SQLite configuration
 
 - **WAL mode** enabled for concurrent read/write safety
 - **Thread safety:** Write operations are protected by `threading.Lock` for async compatibility
-- **Cleanup debouncing:** `_cleanup_expired` runs at most every 10 seconds to avoid overhead on frequent reads
+- **Background cleanup:** `_cleanup_expired` spawns a daemon thread with its own SQLite connection, debounced to at most every 10 seconds, triggered only by writes
