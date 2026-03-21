@@ -243,7 +243,7 @@ Today, `mcp-awareness` is personal — one person's AI tools sharing a single kn
 
 **Personal** (now): Your AIs share memory across every platform you use. Plan on your phone, implement on your laptop, review from your desktop. Context follows you, not the app.
 
-**Family** (next): A shared store for your household. Birthdays, wishlists, dietary restrictions, who's allergic to what, which kid has practice on Thursdays. "Plan a birthday dinner for Mom" and your AI already knows the date, her favorite restaurant, and who's in town. No shared spreadsheet to maintain — knowledge accumulates as family members mention things to their own AIs.
+**Family & trusted circle** (next): A shared store for your household and the people in your life. Birthdays, wishlists, dietary restrictions, who's allergic to what, which kid has practice on Thursdays. "Plan a birthday dinner for Mom" and your AI already knows the date, her favorite restaurant, and who's in town. No shared spreadsheet to maintain — knowledge accumulates as family members mention things to their own AIs. Share specific notes or collections with people outside the household — change the door code while you're traveling, and the dog walker's AI surfaces the update on the way to your house.
 
 **Team** (next): A shared awareness store for your team at work. Your AI knows the on-call runbook, the architecture decisions, the coding conventions — not because someone wrote a doc, but because the team's AIs have been accumulating knowledge through daily work. New team member's AI is productive on day one. Temporary context like "code freeze until Thursday" is automatically known by everyone's AI and automatically forgotten when it lifts.
 
