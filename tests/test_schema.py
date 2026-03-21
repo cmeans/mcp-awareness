@@ -6,14 +6,14 @@ from mcp_awareness.schema import (
     Entry,
     EntryType,
     make_id,
-    now_iso,
+    now_utc,
     severity_rank,
     validate_entry_data,
 )
 
 
 def test_entry_roundtrip():
-    now = now_iso()
+    now = now_utc()
     entry = Entry(
         id=make_id(),
         type=EntryType.STATUS,
@@ -34,7 +34,7 @@ def test_entry_roundtrip():
 
 
 def test_entry_type_serialization():
-    now = now_iso()
+    now = now_utc()
     for et in EntryType:
         entry = Entry(
             id="x",
@@ -57,8 +57,8 @@ def test_is_expired_none():
         type=EntryType.ALERT,
         source="s",
         tags=[],
-        created=now_iso(),
-        updated=now_iso(),
+        created=now_utc(),
+        updated=now_utc(),
         expires=None,
         data={},
     )
@@ -66,14 +66,14 @@ def test_is_expired_none():
 
 
 def test_is_expired_future():
-    future = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
+    future = datetime.now(timezone.utc) + timedelta(hours=1)
     entry = Entry(
         id="x",
         type=EntryType.SUPPRESSION,
         source="s",
         tags=[],
-        created=now_iso(),
-        updated=now_iso(),
+        created=now_utc(),
+        updated=now_utc(),
         expires=future,
         data={},
     )
@@ -81,14 +81,14 @@ def test_is_expired_future():
 
 
 def test_is_expired_past():
-    past = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
+    past = datetime.now(timezone.utc) - timedelta(hours=1)
     entry = Entry(
         id="x",
         type=EntryType.SUPPRESSION,
         source="s",
         tags=[],
-        created=now_iso(),
-        updated=now_iso(),
+        created=now_utc(),
+        updated=now_utc(),
         expires=past,
         data={},
     )
@@ -96,7 +96,7 @@ def test_is_expired_past():
 
 
 def test_is_stale_within_ttl():
-    now = now_iso()
+    now = now_utc()
     entry = Entry(
         id="x",
         type=EntryType.STATUS,
@@ -111,7 +111,7 @@ def test_is_stale_within_ttl():
 
 
 def test_is_stale_expired_ttl():
-    old = (datetime.now(timezone.utc) - timedelta(seconds=300)).isoformat()
+    old = datetime.now(timezone.utc) - timedelta(seconds=300)
     entry = Entry(
         id="x",
         type=EntryType.STATUS,
@@ -126,7 +126,7 @@ def test_is_stale_expired_ttl():
 
 
 def test_is_stale_non_status():
-    old = (datetime.now(timezone.utc) - timedelta(seconds=300)).isoformat()
+    old = datetime.now(timezone.utc) - timedelta(seconds=300)
     entry = Entry(
         id="x",
         type=EntryType.ALERT,
@@ -141,7 +141,7 @@ def test_is_stale_non_status():
 
 
 def test_is_stale_no_ttl():
-    old = (datetime.now(timezone.utc) - timedelta(seconds=300)).isoformat()
+    old = datetime.now(timezone.utc) - timedelta(seconds=300)
     entry = Entry(
         id="x",
         type=EntryType.STATUS,

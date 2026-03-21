@@ -18,7 +18,7 @@ from typing import Any
 import psycopg
 from psycopg.rows import dict_row
 
-from .schema import Entry, EntryType, make_id, now_iso
+from .schema import Entry, EntryType, ensure_dt, ensure_dt_optional, make_id, now_utc, to_iso
 
 # How long soft-deleted entries remain recoverable before auto-purge
 TRASH_RETENTION_DAYS = 30
@@ -39,10 +39,10 @@ class PostgresStore:
                     id       TEXT PRIMARY KEY,
                     type     TEXT NOT NULL,
                     source   TEXT NOT NULL,
-                    created  TEXT NOT NULL,
-                    updated  TEXT NOT NULL,
-                    expires  TEXT,
-                    deleted  TEXT,
+                    created  TIMESTAMPTZ NOT NULL,
+                    updated  TIMESTAMPTZ NOT NULL,
+                    expires  TIMESTAMPTZ,
+                    deleted  TIMESTAMPTZ,
                     tags     JSONB NOT NULL DEFAULT '[]',
                     data     JSONB NOT NULL DEFAULT '{}'
                 );
@@ -71,9 +71,9 @@ class PostgresStore:
             type=EntryType(row["type"]),
             source=row["source"],
             tags=tags,
-            created=row["created"],
-            updated=row["updated"],
-            expires=row["expires"],
+            created=ensure_dt(row["created"]),
+            updated=ensure_dt(row["updated"]),
+            expires=ensure_dt_optional(row["expires"]),
             data=data,
         )
 
@@ -85,7 +85,7 @@ class PostgresStore:
                 entry.id,
                 entry.type.value if isinstance(entry.type, EntryType) else entry.type,
                 entry.source,
-                entry.created,
+                entry.created,  # datetime → TIMESTAMPTZ natively
                 entry.updated,
                 entry.expires,
                 json.dumps(entry.tags),
@@ -106,7 +106,7 @@ class PostgresStore:
         """Run the actual DELETE on a dedicated connection (background thread)."""
         try:
             with psycopg.connect(self.dsn) as conn:
-                now = datetime.now(timezone.utc).isoformat()
+                now = datetime.now(timezone.utc)
                 conn.execute(
                     "DELETE FROM entries WHERE expires IS NOT NULL AND expires <= %s",
                     (now,),
@@ -136,7 +136,7 @@ class PostgresStore:
     def upsert_status(self, source: str, tags: list[str], data: dict[str, Any]) -> Entry:
         """Upsert a status entry for a source (one active status per source)."""
         self._cleanup_expired()
-        now = now_iso()
+        now = now_utc()
         with self._conn.cursor() as cur:
             cur.execute(
                 f"DELETE FROM entries WHERE type = %s AND source = %s AND {self._ACTIVE}",
@@ -161,7 +161,7 @@ class PostgresStore:
     ) -> Entry:
         """Upsert an alert by source + alert_id."""
         self._cleanup_expired()
-        now = now_iso()
+        now = now_utc()
         existing = self._query_entries(
             "type = %s AND source = %s",
             (EntryType.ALERT.value, source),
@@ -199,7 +199,7 @@ class PostgresStore:
     ) -> Entry:
         """Upsert a preference by key + scope."""
         self._cleanup_expired()
-        now = now_iso()
+        now = now_utc()
         existing = self._query_entries(
             "type = %s",
             (EntryType.PREFERENCE.value,),
@@ -340,7 +340,7 @@ class PostgresStore:
             return None
 
         self._cleanup_expired()
-        now = now_iso()
+        now = now_utc()
         changed: dict[str, Any] = {}
         for field in ("source", "tags"):
             if field in updates and updates[field] != getattr(entry, field):
@@ -357,7 +357,7 @@ class PostgresStore:
             return entry
 
         changelog = entry.data.setdefault("changelog", [])
-        changelog.append({"updated": now, "changed": changed})
+        changelog.append({"updated": to_iso(now), "changed": changed})
         entry.updated = now
 
         with self._conn.cursor() as cur:
@@ -401,11 +401,11 @@ class PostgresStore:
     def soft_delete_by_id(self, entry_id: str) -> bool:
         """Soft-delete a single entry. Returns True if an entry was trashed."""
         now = datetime.now(timezone.utc)
-        expires = (now + timedelta(days=TRASH_RETENTION_DAYS)).isoformat()
+        expires = now + timedelta(days=TRASH_RETENTION_DAYS)
         with self._conn.cursor() as cur:
             cur.execute(
                 f"UPDATE entries SET deleted = %s, expires = %s WHERE id = %s AND {self._ACTIVE}",
-                (now.isoformat(), expires, entry_id),
+                (now, expires, entry_id),
             )
             affected = cur.rowcount
         self._conn.commit()
@@ -418,7 +418,7 @@ class PostgresStore:
     ) -> int:
         """Soft-delete all entries for a source, optionally filtered by type."""
         now = datetime.now(timezone.utc)
-        expires = (now + timedelta(days=TRASH_RETENTION_DAYS)).isoformat()
+        expires = now + timedelta(days=TRASH_RETENTION_DAYS)
         clauses = ["source = %s", self._ACTIVE]
         params: list[Any] = [source]
         if entry_type is not None:
@@ -428,7 +428,7 @@ class PostgresStore:
         with self._conn.cursor() as cur:
             cur.execute(
                 f"UPDATE entries SET deleted = %s, expires = %s WHERE {where}",
-                (now.isoformat(), expires, *params),
+                (now, expires, *params),
             )
             affected = cur.rowcount
         self._conn.commit()

@@ -4,7 +4,7 @@ import sqlite3
 
 import pytest
 
-from mcp_awareness.schema import Entry, EntryType, make_id, now_iso
+from mcp_awareness.schema import Entry, EntryType, make_id, now_utc
 from mcp_awareness.store import SQLiteStore
 
 
@@ -99,7 +99,7 @@ def test_get_active_alerts_by_source(store):
 
 
 def test_add_and_get_patterns(store):
-    now = now_iso()
+    now = now_utc()
     entry = Entry(
         id=make_id(),
         type=EntryType.PATTERN,
@@ -122,7 +122,7 @@ def test_add_and_get_patterns(store):
 
 
 def test_get_patterns_filtered_by_source(store):
-    now = now_iso()
+    now = now_utc()
     for src in ("nas", "ci"):
         store.add(
             Entry(
@@ -150,14 +150,14 @@ def test_suppressions(store):
     from datetime import datetime, timedelta, timezone
 
     now = datetime.now(timezone.utc)
-    expires = (now + timedelta(hours=1)).isoformat()
+    expires = now + timedelta(hours=1)
     entry = Entry(
         id=make_id(),
         type=EntryType.SUPPRESSION,
         source="nas",
         tags=["infra"],
-        created=now.isoformat(),
-        updated=now.isoformat(),
+        created=now,
+        updated=now,
         expires=expires,
         data={
             "metric": "cpu_pct",
@@ -175,14 +175,14 @@ def test_global_suppression_matches_any_source(store):
     from datetime import datetime, timedelta, timezone
 
     now = datetime.now(timezone.utc)
-    expires = (now + timedelta(hours=1)).isoformat()
+    expires = now + timedelta(hours=1)
     entry = Entry(
         id=make_id(),
         type=EntryType.SUPPRESSION,
         source="",
         tags=[],
-        created=now.isoformat(),
-        updated=now.isoformat(),
+        created=now,
+        updated=now,
         expires=expires,
         data={
             "metric": None,
@@ -200,7 +200,7 @@ def test_expired_entries_cleaned(store):
     import time
     from datetime import datetime, timedelta, timezone
 
-    past = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
+    past = datetime.now(timezone.utc) - timedelta(hours=1)
     entry = Entry(
         id=make_id(),
         type=EntryType.SUPPRESSION,
@@ -232,7 +232,7 @@ def test_expired_entries_cleaned(store):
 
 
 def test_knowledge_includes_patterns_context_preferences(store):
-    now = now_iso()
+    now = now_utc()
     for t in (EntryType.PATTERN, EntryType.CONTEXT, EntryType.PREFERENCE):
         store.add(
             Entry(
@@ -250,7 +250,7 @@ def test_knowledge_includes_patterns_context_preferences(store):
 
 
 def test_knowledge_filtered_by_tags(store):
-    now = now_iso()
+    now = now_utc()
     store.add(
         Entry(
             id=make_id(),
@@ -319,7 +319,7 @@ def test_upsert_preference_deduplicates(store):
 
 
 def test_soft_delete_by_id(store):
-    now = now_iso()
+    now = now_utc()
     entry = Entry(
         id=make_id(),
         type=EntryType.PATTERN,
@@ -344,7 +344,7 @@ def test_soft_delete_by_id_not_found(store):
 
 
 def test_soft_delete_by_source(store):
-    now = now_iso()
+    now = now_utc()
     for i in range(3):
         store.add(
             Entry(
@@ -378,7 +378,7 @@ def test_soft_delete_by_source(store):
 
 
 def test_soft_delete_by_source_with_type_filter(store):
-    now = now_iso()
+    now = now_utc()
     store.add(
         Entry(
             id=make_id(),
@@ -399,7 +399,7 @@ def test_soft_delete_by_source_with_type_filter(store):
 
 
 def test_restore_by_id(store):
-    now = now_iso()
+    now = now_utc()
     entry = Entry(
         id=make_id(),
         type=EntryType.PATTERN,
@@ -424,7 +424,7 @@ def test_restore_not_found(store):
 
 def test_soft_deleted_entries_auto_expire(store):
     """Soft-deleted entries get an expires timestamp and will be purged by cleanup."""
-    now = now_iso()
+    now = now_utc()
     entry = Entry(
         id=make_id(),
         type=EntryType.PATTERN,
@@ -452,7 +452,7 @@ def test_soft_deleted_entries_auto_expire(store):
 
 
 def test_double_soft_delete_is_noop(store):
-    now = now_iso()
+    now = now_utc()
     entry = Entry(
         id=make_id(),
         type=EntryType.PATTERN,
