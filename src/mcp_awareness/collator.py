@@ -65,7 +65,7 @@ def is_suppressed(alert: Entry, suppressions: list[Entry]) -> bool:
         # Tag match — check against alert tags AND alert content (alert_id, message)
         # so that a suppression tagged "qbittorrent" matches an alert about qbittorrent
         # even if the alert's structural tags are ["infra", "nas", "docker"]
-        s_tags = s_data.get("tags")
+        s_tags = s.tags
         if s_tags and not _suppression_tags_match(s_tags, alert):
             continue
 
