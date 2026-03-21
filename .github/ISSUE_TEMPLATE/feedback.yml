@@ -1,0 +1,56 @@
+name: General Feedback
+description: Share your experience, impressions, or suggestions — anything goes
+labels: ["feedback"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to share your thoughts! This is for general feedback — first impressions, usability observations, ideas, or anything that doesn't fit a bug report or feature request.
+  - type: dropdown
+    id: role
+    attributes:
+      label: How are you using awareness?
+      options:
+        - Just exploring / evaluating
+        - Set up locally, trying it out
+        - Using it daily
+        - Reviewing the code / architecture
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Primary MCP client
+      options:
+        - Claude Desktop
+        - Claude Code
+        - Claude.ai (web/mobile)
+        - Cursor
+        - Other (describe below)
+        - Haven't connected yet
+    validations:
+      required: true
+  - type: textarea
+    id: feedback
+    attributes:
+      label: Your feedback
+      description: What worked? What didn't? What surprised you? What's missing?
+      placeholder: Be honest — "I don't get the point" is useful feedback too.
+    validations:
+      required: true
+  - type: textarea
+    id: setup
+    attributes:
+      label: Setup experience
+      description: How did the Quick Start / deployment go? Any friction?
+      placeholder: Optional — skip if you haven't set it up yet.
+    validations:
+      required: false
+  - type: textarea
+    id: use-cases
+    attributes:
+      label: What would you use this for?
+      description: What knowledge or context would you store? What cross-platform workflows would help you?
+      placeholder: Optional — but this is the most valuable feedback for us.
+    validations:
+      required: false

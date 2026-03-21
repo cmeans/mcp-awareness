@@ -3,3 +3,6 @@ contact_links:
   - name: Deployment Guide
     url: https://github.com/cmeans/mcp-awareness/blob/main/docs/deployment-guide.md
     about: Deployment walkthrough and setup guide
+  - name: Memory Prompts
+    url: https://github.com/cmeans/mcp-awareness/blob/main/docs/memory-prompts.md
+    about: How to configure your AI to use awareness
