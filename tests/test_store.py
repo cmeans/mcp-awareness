@@ -197,6 +197,7 @@ def test_global_suppression_matches_any_source(store):
 
 
 def test_expired_entries_cleaned(store):
+    import time
     from datetime import datetime, timedelta, timezone
 
     past = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
@@ -210,10 +211,23 @@ def test_expired_entries_cleaned(store):
         expires=past,
         data={"metric": "cpu_pct", "suppress_level": "warning"},
     )
-    store.add(entry)  # add doesn't check expiry of the entry being added right away
-    # Force cleanup to run despite debounce (add() just ran cleanup moments ago)
+    store.add(entry)  # add triggers cleanup, but entry was just inserted in same txn
+    # Force cleanup to run on next write despite debounce
     store._last_cleanup = 0.0
-    # count_active_suppressions calls _cleanup_expired
+    # Trigger cleanup via a write (add a dummy entry) — cleanup runs in background
+    dummy = Entry(
+        id=make_id(),
+        type=EntryType.CONTEXT,
+        source="test",
+        tags=[],
+        created=past,
+        updated=past,
+        expires=None,
+        data={"description": "trigger cleanup"},
+    )
+    store.add(dummy)
+    # Wait briefly for background cleanup thread to complete
+    time.sleep(0.1)
     assert store.count_active_suppressions() == 0
 
 
@@ -431,8 +445,8 @@ def test_soft_deleted_entries_auto_expire(store):
         ("2020-01-01T00:00:00+00:00", entry.id),
     )
     store._conn.commit()
-    store._last_cleanup = 0.0  # Force cleanup to run
-    store._cleanup_expired()
+    # Run cleanup synchronously (bypassing the background thread)
+    store._do_cleanup()
     # Now truly gone
     assert len(store.get_deleted()) == 0
 
