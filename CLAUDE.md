@@ -62,6 +62,14 @@ Docker Compose runs both the server and a Cloudflare named tunnel. See `docker-c
 - `docs/from-metrics-to-mental-models.md` — Core spec: three-layer detection model, API design, data schema, priority table
 - `docs/collation-layer.md` — Collation layer: briefing resource, token optimization, escalation logic, backend placement
 
+## Working with awareness
+
+If you have access to the awareness MCP server while working on this repo:
+- **Verify connection:** Call `get_briefing` at the start of work. If it fails or returns an unstructured error, awareness is not reachable — skip the remaining steps.
+- **Check context:** Call `get_knowledge(tags=["mcp-awareness"])` to see if other agents or platforms left relevant context.
+- **Maintain status:** Keep a single permanent status note for this project using `remember`, then update it with `update_entry` as work progresses. Use tags `["mcp-awareness", "project", "status"]`. The `_changelog` tracks history automatically.
+- **Record milestones:** When finishing significant work (PR merged, release tagged), update the status note so other platforms know what happened.
+
 ## Naming
 
 - Package: `mcp-awareness-server` (PyPI)
