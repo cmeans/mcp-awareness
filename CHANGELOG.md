@@ -7,17 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **`note` entry type**: General-purpose permanent knowledge with optional `content` payload and MIME `content_type`
+- **`remember` tool**: Create notes — personal facts, project notes, skill backups, config snapshots
+- **`update_entry` tool**: Update knowledge entries (note/pattern/context/preference) in place with `changelog` tracking. Status/alert/suppression are immutable
+- **`get_stats` tool**: Entry counts by type, list of sources, total count
+- **`get_tags` tool**: All tags with usage counts — prevents tag drift across platforms
+- **`/health` endpoint**: Pure HTTP health check (no MCP overhead) returning uptime, timestamp, transport
+- **Request timing**: `@_timed` decorator on all 18 tools and 6 resources logs wall-clock time per call to stdout
+- **`include_history` param** on `get_knowledge`: omit (strip changelog), `"true"` (include), `"only"` (only entries with changes)
+- **Memory prompts documentation** (`docs/memory-prompts.md`): three tiers of prompt integration (platform memory, global CLAUDE.md, project CLAUDE.md) with tuning cycle guidance
+- **Awareness workflow in project CLAUDE.md**: verify connection, check context, maintain status, record milestones
+- **Vision section in README**: personal → family → team → organization progression, universal context, bidirectional data flow, proactive intelligence
+- CI status checks required on branch protection (lint, test 3.10/3.11/3.12, typecheck)
+- 148 tests (up from 124), strict type checking
+
 ### Changed
 - `_cleanup_expired` now runs on a background daemon thread — never blocks the calling request
 - Cleanup removed from read paths; only writes trigger it
-- `get_knowledge` tool now accepts `source`, `tags`, and `entry_type` params for filtered queries
+- `get_knowledge` tool now accepts `source`, `tags`, `entry_type`, and `include_history` params for filtered queries
 - Suppression tags stored only in entry envelope (removed duplicate `data.tags` field)
 - Tool descriptions include structured error contract (unstructured errors = transport/platform failure)
-- Demo screenshot resized and repositioned in README
-
-### Added
-- Tools reference section in README documenting all 14 MCP tools
-- 5 new tests for filtered knowledge queries and suppression tag deduplication (129 total)
+- Renamed `_changelog` to `changelog` (no underscore — it's public API, not internal)
+- Comprehensive README rewrite: simpler language, "shared memory for every AI you use", cross-platform workflow story
+- Quick Start simplified to `docker compose up -d` (moved pip install to Development section)
+- Docker health check: `start_period` 5s→15s, `timeout` 5s→10s to prevent false failures on startup
+- Deployment guide updated with Docker quick start, current tool surface, memory prompt link
 
 ### Fixed
 - Data model inconsistency: suppression tag matching now uses envelope `tags` instead of `data.tags`
