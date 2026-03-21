@@ -18,9 +18,9 @@ services:
     healthcheck:
       test: ["CMD", "python", "-c", "import socket; s = socket.create_connection(('localhost', 8420), timeout=2); s.close()"]
       interval: 10s
-      timeout: 5s
+      timeout: 10s
       retries: 3
-      start_period: 5s
+      start_period: 15s
 
   # Named tunnel — stable URL at awareness.intfar.com
   # Requires: cloudflared tunnel login + tunnel create (see Deployment Guide)
