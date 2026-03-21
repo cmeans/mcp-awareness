@@ -11,7 +11,7 @@
 
 **The problem:** Every AI platform keeps its own memory silo. What you teach Claude doesn't exist in ChatGPT. Your desktop assistant's context doesn't follow you to mobile. Switch platforms, and you start over.
 
-**The fix:** Externalize that knowledge into a service you control. Self-host it, or use the managed service when it launches. Tell one AI about your infrastructure, your projects, your preferences — and every AI knows it. Permanently, portably, privately.
+**The fix:** Externalize that knowledge into a service you control. Tell one AI about your infrastructure, your projects, your preferences — and every AI knows it. Permanently, portably, privately.
 
 ### What this looks like in practice
 
