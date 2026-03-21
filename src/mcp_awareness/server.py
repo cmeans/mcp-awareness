@@ -7,8 +7,11 @@ Transport is selected via the AWARENESS_TRANSPORT environment variable:
 
 from __future__ import annotations
 
+import functools
 import json
 import os
+import time
+from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 from typing import Any, Literal
 
@@ -17,6 +20,8 @@ from mcp.server.fastmcp import FastMCP
 from .collator import generate_briefing
 from .schema import Entry, EntryType, make_id, now_iso
 from .store import SQLiteStore, Store
+
+_start_time = time.monotonic()
 
 DATA_DIR = os.environ.get("AWARENESS_DATA_DIR", "./data")
 TRANSPORT: Literal["stdio", "streamable-http"] = os.environ.get(  # type: ignore[assignment]
@@ -27,6 +32,26 @@ PORT = int(os.environ.get("AWARENESS_PORT", "8420"))
 MOUNT_PATH = os.environ.get("AWARENESS_MOUNT_PATH", "")
 
 store: Store = SQLiteStore(os.path.join(DATA_DIR, "awareness.db"))
+
+
+def _log_timing(tool_name: str, elapsed_ms: float) -> None:
+    """Log tool call timing to stdout (Docker captures automatically)."""
+    ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
+    print(f"{ts} | {tool_name} | {elapsed_ms:.1f}ms", flush=True)
+
+
+def _timed(fn: Callable[..., Any]) -> Callable[..., Any]:
+    """Decorator that logs wall-clock time for each tool/resource call."""
+
+    @functools.wraps(fn)
+    async def wrapper(*args: Any, **kwargs: Any) -> Any:
+        t0 = time.monotonic()
+        result = await fn(*args, **kwargs)
+        _log_timing(fn.__name__, (time.monotonic() - t0) * 1000)
+        return result
+
+    return wrapper
+
 
 mcp = FastMCP(
     name="mcp-awareness",
@@ -53,6 +78,7 @@ mcp = FastMCP(
 
 
 @mcp.resource("awareness://briefing")
+@_timed
 async def briefing_resource() -> str:
     """Compact awareness briefing — the ONLY resource to read at conversation start.
     ~200 tokens when all clear, ~500 when issues exist. Pre-filtered through
@@ -63,6 +89,7 @@ async def briefing_resource() -> str:
 
 
 @mcp.resource("awareness://alerts")
+@_timed
 async def alerts_resource() -> str:
     """Active alerts across all monitored systems. Empty = all clear.
     This is a drill-down resource — read awareness://briefing first.
@@ -74,6 +101,7 @@ async def alerts_resource() -> str:
 
 
 @mcp.resource("awareness://alerts/{source}")
+@_timed
 async def source_alerts_resource(source: str) -> str:
     """Active alerts from a specific source. Drill-down from briefing.
     Read this when the briefing references a drill_down for this source."""
@@ -82,6 +110,7 @@ async def source_alerts_resource(source: str) -> str:
 
 
 @mcp.resource("awareness://status/{source}")
+@_timed
 async def source_status_resource(source: str) -> str:
     """Full status from a specific source including metrics and inventory.
     Drill-down resource — read when briefing indicates issues with this source
@@ -93,6 +122,7 @@ async def source_status_resource(source: str) -> str:
 
 
 @mcp.resource("awareness://knowledge")
+@_timed
 async def knowledge_resource() -> str:
     """All knowledge entries: learned patterns, historical context, preferences.
     Knowledge belongs to the system, not any specific agent.
@@ -103,6 +133,7 @@ async def knowledge_resource() -> str:
 
 
 @mcp.resource("awareness://suppressions")
+@_timed
 async def suppressions_resource() -> str:
     """Active alert suppressions with expiry times and escalation settings.
     Drill-down resource — the briefing already applies suppressions.
@@ -117,6 +148,7 @@ async def suppressions_resource() -> str:
 
 
 @mcp.tool()
+@_timed
 async def get_briefing() -> str:
     """Get the awareness briefing. Call this at conversation start.
     Returns a compact summary (~200 tokens all-clear, ~500 with issues).
@@ -129,6 +161,7 @@ async def get_briefing() -> str:
 
 
 @mcp.tool()
+@_timed
 async def get_alerts(source: str | None = None) -> str:
     """Get active alerts, optionally filtered by source.
     Drill-down from briefing — call when briefing shows attention_needed
@@ -140,6 +173,7 @@ async def get_alerts(source: str | None = None) -> str:
 
 
 @mcp.tool()
+@_timed
 async def get_status(source: str) -> str:
     """Get full status for a specific source including metrics and inventory.
     Call when the briefing indicates issues with a source or user asks
@@ -153,6 +187,7 @@ async def get_status(source: str) -> str:
 
 
 @mcp.tool()
+@_timed
 async def get_knowledge(
     source: str | None = None,
     tags: list[str] | None = None,
@@ -180,6 +215,7 @@ async def get_knowledge(
 
 
 @mcp.tool()
+@_timed
 async def get_suppressions() -> str:
     """Get active alert suppressions with expiry times and escalation settings.
     The briefing already applies suppressions — call this to show the user
@@ -194,6 +230,7 @@ async def get_suppressions() -> str:
 
 
 @mcp.tool()
+@_timed
 async def report_status(
     source: str,
     tags: list[str],
@@ -212,6 +249,7 @@ async def report_status(
 
 
 @mcp.tool()
+@_timed
 async def report_alert(
     source: str,
     tags: list[str],
@@ -244,6 +282,7 @@ async def report_alert(
 
 
 @mcp.tool()
+@_timed
 async def learn_pattern(
     source: str,
     tags: list[str],
@@ -280,6 +319,7 @@ async def learn_pattern(
 
 
 @mcp.tool()
+@_timed
 async def remember(
     source: str,
     tags: list[str],
@@ -318,6 +358,7 @@ async def remember(
 
 
 @mcp.tool()
+@_timed
 async def update_entry(
     entry_id: str,
     description: str | None = None,
@@ -359,6 +400,7 @@ async def update_entry(
 
 
 @mcp.tool()
+@_timed
 async def get_stats() -> str:
     """Get summary statistics: entry counts by type, list of sources, total count.
     Call before get_knowledge to decide whether to pull everything or filter.
@@ -368,6 +410,7 @@ async def get_stats() -> str:
 
 
 @mcp.tool()
+@_timed
 async def get_tags() -> str:
     """Get all tags in use with usage counts, sorted by count descending.
     Use this to discover existing tags before creating new ones — prevents
@@ -378,6 +421,7 @@ async def get_tags() -> str:
 
 
 @mcp.tool()
+@_timed
 async def suppress_alert(
     source: str | None = None,
     tags: list[str] | None = None,
@@ -414,6 +458,7 @@ async def suppress_alert(
 
 
 @mcp.tool()
+@_timed
 async def add_context(
     source: str,
     tags: list[str],
@@ -442,6 +487,7 @@ async def add_context(
 
 
 @mcp.tool()
+@_timed
 async def set_preference(
     key: str,
     value: str,
@@ -461,6 +507,7 @@ async def set_preference(
 
 
 @mcp.tool()
+@_timed
 async def delete_entry(
     source: str | None = None,
     entry_type: str | None = None,
@@ -514,6 +561,7 @@ async def delete_entry(
 
 
 @mcp.tool()
+@_timed
 async def restore_entry(entry_id: str) -> str:
     """Restore a soft-deleted entry from the trash. Requires the entry ID.
     Call get_deleted first to see what's in the trash and get the IDs."""
@@ -528,6 +576,7 @@ async def restore_entry(entry_id: str) -> str:
 
 
 @mcp.tool()
+@_timed
 async def get_deleted() -> str:
     """List all entries in the trash (soft-deleted, recoverable).
     Returns entries with their IDs so they can be restored via restore_entry.
@@ -536,15 +585,26 @@ async def get_deleted() -> str:
     return json.dumps([e.to_dict() for e in entries], indent=2)
 
 
+def _health_response() -> dict[str, Any]:
+    """Build the health check response payload."""
+    return {
+        "status": "ok",
+        "uptime_sec": round(time.monotonic() - _start_time, 1),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "transport": TRANSPORT,
+    }
+
+
 def main() -> None:
     if TRANSPORT == "streamable-http" and MOUNT_PATH:
         import uvicorn
+        from starlette.responses import JSONResponse, Response
         from starlette.types import ASGIApp, Receive, Scope, Send
 
         inner_app = mcp.streamable_http_app()
 
         class SecretPathMiddleware:
-            """Rewrite /SECRET/mcp → /mcp, reject everything else."""
+            """Rewrite /SECRET/mcp → /mcp, serve /SECRET/health, reject everything else."""
 
             def __init__(self, app: ASGIApp, prefix: str) -> None:
                 self.app = app
@@ -553,22 +613,48 @@ def main() -> None:
             async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
                 if scope["type"] in ("http", "websocket"):
                     path: str = scope.get("path", "")
+                    # Health endpoint — served at /SECRET/health
+                    if path == f"{self.prefix}/health":
+                        health_resp = JSONResponse(_health_response())
+                        await health_resp(scope, receive, send)
+                        return
                     if path.startswith(self.prefix):
                         scope = dict(scope)
                         scope["path"] = path[len(self.prefix) :] or "/"
                         await self.app(scope, receive, send)
                         return
                     # Not the secret path — 404
-                    from starlette.responses import Response
-
-                    response = Response("Not Found", status_code=404)
-                    await response(scope, receive, send)
+                    not_found = Response("Not Found", status_code=404)
+                    await not_found(scope, receive, send)
                     return
                 await self.app(scope, receive, send)
 
         app = SecretPathMiddleware(inner_app, MOUNT_PATH)
 
         config = uvicorn.Config(app, host=HOST, port=PORT)
+        server = uvicorn.Server(config)
+
+        import anyio
+
+        anyio.run(server.serve)
+    elif TRANSPORT == "streamable-http":
+        import uvicorn
+        from starlette.applications import Starlette
+        from starlette.responses import JSONResponse
+        from starlette.routing import Route
+
+        mcp_app = mcp.streamable_http_app()
+
+        async def health_endpoint(request: Any) -> JSONResponse:
+            return JSONResponse(_health_response())
+
+        http_app = Starlette(
+            routes=[Route("/health", health_endpoint)],
+            on_startup=[],
+        )
+        http_app.mount("/", mcp_app)
+
+        config = uvicorn.Config(http_app, host=HOST, port=PORT)
         server = uvicorn.Server(config)
 
         import anyio
