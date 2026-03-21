@@ -1,5 +1,7 @@
 # mcp-awareness
 
+[![CI](https://github.com/cmeans/mcp-awareness/actions/workflows/ci.yml/badge.svg)](https://github.com/cmeans/mcp-awareness/actions/workflows/ci.yml)
+
 > **Your AI's memory shouldn't be locked to one app. It should follow you everywhere.**
 
 > [!NOTE]
