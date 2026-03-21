@@ -266,13 +266,21 @@ Today, `mcp-awareness` is personal — one person's AI tools sharing a single kn
 
 **Organization** (future): Multiple teams, scoped access. Engineering, ops, product — each with their own store, plus cross-team shared knowledge. Access controls determine what each person's AI can see. Your AI has the context it needs without exposing what it shouldn't.
 
+### Universal context, not just monitoring
+
+Awareness started as a system monitoring tool, but that's just one source of context. The real vision is broader: every tool you use feeds knowledge into every AI you use.
+
+Take meeting notes in Notion — an edge process summarizes them and stores them in awareness. Next time you open Claude Code to implement what was discussed, it already knows the decisions and context. Update a ticket in Linear, and your AI knows the priority changed. Merge a PR in GitHub, and every platform knows the feature shipped.
+
+Notion, Slack, Linear, Jira, Google Docs, health trackers, calendars, infrastructure monitors — any tool with an API becomes a source. Your AI becomes the integration layer between everything you use, with context that flows automatically instead of requiring you to repeat yourself.
+
 ### What makes this different from a wiki
 
-Knowledge accumulates through conversation, not documentation. Nobody has to stop working to write things down — the AI does it as part of the work. And unlike a wiki that someone has to remember to check, your AI reads from awareness automatically. The result is a living knowledge base that grows as people work, not as a separate task they avoid.
+Knowledge accumulates through conversation and work, not documentation. Nobody has to stop what they're doing to write things down — the AI does it as part of the work, and edge processes capture it from the tools you already use. Unlike a wiki that someone has to remember to check, your AI reads from awareness automatically. The result is a living knowledge base that grows as people work, not as a separate task they avoid.
 
-### Proactive awareness
+### Proactive intelligence
 
-The alerting layer evolves too. Baseline detection learns what "normal" looks like for your systems and flags deviations — not just "CPU is high" but "CPU is unusually low, which means something probably stopped." Cross-domain inference connects data across sources: bad sleep from your health tracker + a packed calendar = a recommendation to reschedule the afternoon meeting. The system doesn't just tell you what happened — it helps you decide what to do about it.
+The system doesn't just store what happened — it helps you decide what to do about it. Baseline detection learns what "normal" looks like and flags deviations. Cross-domain inference connects data across sources: bad sleep from your health tracker + a packed calendar = a recommendation to reschedule the afternoon meeting. An alert from your infrastructure + context from last week's incident = "this looks like the same root cause."
 
 ## Design docs
 
