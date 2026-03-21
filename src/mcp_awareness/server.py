@@ -157,12 +157,15 @@ async def get_knowledge(
     source: str | None = None,
     tags: list[str] | None = None,
     entry_type: str | None = None,
+    include_history: str | None = None,
 ) -> str:
-    """Get knowledge entries: learned patterns, historical context, preferences.
+    """Get knowledge entries: learned patterns, historical context, preferences, notes.
     Knowledge belongs to the system, not any specific agent. Call when you need
-    context about a system's normal behavior or operational patterns.
+    context about a system's normal behavior, operational patterns, or stored notes.
     Filter by source, tags, and/or entry_type to reduce response size.
-    Valid entry_type values: 'pattern', 'context', 'preference'.
+    Valid entry_type values: 'pattern', 'context', 'preference', 'note'.
+    include_history: omit or 'false' to strip change history, 'true' to include,
+    'only' to return only entries with change history.
     This tool always returns JSON with a status field or an entry list.
     If you receive an unstructured error, the failure is in the transport
     or platform layer, not in awareness."""
@@ -170,7 +173,7 @@ async def get_knowledge(
         et = EntryType(entry_type)
         entries = store.get_entries(entry_type=et, source=source, tags=tags)
     else:
-        entries = store.get_knowledge(tags=tags)
+        entries = store.get_knowledge(tags=tags, include_history=include_history)
         if source:
             entries = [e for e in entries if e.source == source]
     return json.dumps([e.to_dict() for e in entries], indent=2)
@@ -274,6 +277,104 @@ async def learn_pattern(
     )
     store.add(entry)
     return json.dumps({"status": "ok", "id": entry.id, "description": description})
+
+
+@mcp.tool()
+async def remember(
+    source: str,
+    tags: list[str],
+    description: str,
+    content: str | None = None,
+    content_type: str = "text/plain",
+    learned_from: str = "conversation",
+) -> str:
+    """Store a general-purpose note. Use this for any knowledge that doesn't fit
+    operational patterns (learn_pattern) or time-limited context (add_context).
+    Examples: personal facts, project notes, skill backups, config snapshots.
+    description is a short summary; content is the optional payload (text, JSON, etc.).
+    content_type is a MIME type (default text/plain). Set learned_from to your platform.
+    Returns JSON with status and entry id. If you receive an unstructured
+    error, the failure is in the transport or platform layer, not in awareness."""
+    now = now_iso()
+    data: dict[str, Any] = {
+        "description": description,
+        "learned_from": learned_from,
+    }
+    if content is not None:
+        data["content"] = content
+        data["content_type"] = content_type
+    entry = Entry(
+        id=make_id(),
+        type=EntryType.NOTE,
+        source=source,
+        tags=tags,
+        created=now,
+        updated=now,
+        expires=None,
+        data=data,
+    )
+    store.add(entry)
+    return json.dumps({"status": "ok", "id": entry.id, "description": description})
+
+
+@mcp.tool()
+async def update_entry(
+    entry_id: str,
+    description: str | None = None,
+    tags: list[str] | None = None,
+    source: str | None = None,
+    content: str | None = None,
+    content_type: str | None = None,
+) -> str:
+    """Update an existing entry in place, preserving its ID and creation timestamp.
+    Only works on knowledge types: note, pattern, context, preference.
+    Status, alert, and suppression entries are immutable.
+    Only provided fields are updated — omit fields to leave them unchanged.
+    Changes are tracked in a _changelog array within the entry data.
+    Use get_knowledge(include_history='true') to see change history.
+    Returns JSON with status. If you receive an unstructured error, the failure
+    is in the transport or platform layer, not in awareness."""
+    updates: dict[str, Any] = {}
+    if description is not None:
+        updates["description"] = description
+    if tags is not None:
+        updates["tags"] = tags
+    if source is not None:
+        updates["source"] = source
+    if content is not None:
+        updates["content"] = content
+    if content_type is not None:
+        updates["content_type"] = content_type
+    if not updates:
+        return json.dumps({"status": "error", "message": "No fields to update"})
+    result = store.update_entry(entry_id, updates)
+    if result is None:
+        return json.dumps(
+            {
+                "status": "error",
+                "message": "Entry not found or type is immutable (status/alert/suppression)",
+            }
+        )
+    return json.dumps({"status": "ok", "id": result.id, "updated": result.updated})
+
+
+@mcp.tool()
+async def get_stats() -> str:
+    """Get summary statistics: entry counts by type, list of sources, total count.
+    Call before get_knowledge to decide whether to pull everything or filter.
+    This tool always returns structured JSON. If you receive an unstructured
+    error, the failure is in the transport or platform layer, not in awareness."""
+    return json.dumps(store.get_stats(), indent=2)
+
+
+@mcp.tool()
+async def get_tags() -> str:
+    """Get all tags in use with usage counts, sorted by count descending.
+    Use this to discover existing tags before creating new ones — prevents
+    tag drift (e.g., 'infrastructure' vs 'infra'). This tool always returns
+    structured JSON. If you receive an unstructured error, the failure is in
+    the transport or platform layer, not in awareness."""
+    return json.dumps(store.get_tags(), indent=2)
 
 
 @mcp.tool()

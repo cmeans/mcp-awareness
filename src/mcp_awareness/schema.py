@@ -16,6 +16,7 @@ class EntryType(str, Enum):
     SUPPRESSION = "suppression"
     CONTEXT = "context"
     PREFERENCE = "preference"
+    NOTE = "note"
 
 
 SEVERITY_RANK = {

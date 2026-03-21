@@ -632,3 +632,209 @@ class TestGetDeletedTool:
         trash = json.loads(await server_mod.get_deleted())
         assert len(trash) == 1
         assert trash[0]["id"] == entry_id
+
+
+class TestRememberTool:
+    @pytest.mark.anyio
+    async def test_remember_basic(self) -> None:
+        result = await server_mod.remember(
+            source="personal", tags=["family"], description="Mom's birthday is March 15"
+        )
+        data = json.loads(result)
+        assert data["status"] == "ok"
+        # Visible in get_knowledge
+        entries = json.loads(await server_mod.get_knowledge(entry_type="note"))
+        assert len(entries) == 1
+        assert entries[0]["data"]["description"] == "Mom's birthday is March 15"
+
+    @pytest.mark.anyio
+    async def test_remember_with_content(self) -> None:
+        result = await server_mod.remember(
+            source="tools",
+            tags=["backup"],
+            description="Claude Code skills backup",
+            content='{"skills": ["commit", "review-pr"]}',
+            content_type="application/json",
+            learned_from="claude-code",
+        )
+        data = json.loads(result)
+        assert data["status"] == "ok"
+        entries = json.loads(await server_mod.get_knowledge(entry_type="note"))
+        assert len(entries) == 1
+        assert entries[0]["data"]["content_type"] == "application/json"
+        assert entries[0]["data"]["learned_from"] == "claude-code"
+
+    @pytest.mark.anyio
+    async def test_remember_no_content_field_when_omitted(self) -> None:
+        await server_mod.remember(source="personal", tags=[], description="simple note")
+        entries = json.loads(await server_mod.get_knowledge(entry_type="note"))
+        assert "content" not in entries[0]["data"]
+
+    @pytest.mark.anyio
+    async def test_notes_included_in_get_knowledge(self) -> None:
+        await server_mod.remember(source="s", tags=["t"], description="a note")
+        await server_mod.learn_pattern(source="s", tags=["t"], description="a pattern")
+        entries = json.loads(await server_mod.get_knowledge())
+        assert len(entries) == 2
+
+
+class TestUpdateEntryTool:
+    @pytest.mark.anyio
+    async def test_update_description(self) -> None:
+        result = await server_mod.remember(source="personal", tags=["test"], description="original")
+        entry_id = json.loads(result)["id"]
+        update_result = await server_mod.update_entry(entry_id=entry_id, description="updated")
+        data = json.loads(update_result)
+        assert data["status"] == "ok"
+        # Check the entry was updated
+        entries = json.loads(
+            await server_mod.get_knowledge(entry_type="note", include_history="true")
+        )
+        assert entries[0]["data"]["description"] == "updated"
+        # Check changelog
+        changelog = entries[0]["data"]["_changelog"]
+        assert len(changelog) == 1
+        assert changelog[0]["changed"]["description"] == "original"
+
+    @pytest.mark.anyio
+    async def test_update_tags(self) -> None:
+        result = await server_mod.remember(source="personal", tags=["old-tag"], description="test")
+        entry_id = json.loads(result)["id"]
+        await server_mod.update_entry(entry_id=entry_id, tags=["new-tag"])
+        entries = json.loads(await server_mod.get_knowledge(include_history="true"))
+        assert entries[0]["tags"] == ["new-tag"]
+        assert entries[0]["data"]["_changelog"][0]["changed"]["tags"] == ["old-tag"]
+
+    @pytest.mark.anyio
+    async def test_update_immutable_type_rejected(self) -> None:
+        await server_mod.report_alert(
+            source="nas",
+            tags=["infra"],
+            alert_id="test-alert",
+            level="warning",
+            alert_type="threshold",
+            message="CPU high",
+        )
+        alerts = _store().get_active_alerts()
+        result = await server_mod.update_entry(entry_id=alerts[0].id, description="changed")
+        data = json.loads(result)
+        assert data["status"] == "error"
+        assert "immutable" in data["message"]
+
+    @pytest.mark.anyio
+    async def test_update_not_found(self) -> None:
+        result = await server_mod.update_entry(entry_id="nonexistent", description="test")
+        data = json.loads(result)
+        assert data["status"] == "error"
+
+    @pytest.mark.anyio
+    async def test_update_no_fields(self) -> None:
+        result = await server_mod.update_entry(entry_id="anything")
+        data = json.loads(result)
+        assert data["status"] == "error"
+        assert "No fields" in data["message"]
+
+    @pytest.mark.anyio
+    async def test_update_noop_same_value(self) -> None:
+        result = await server_mod.remember(source="personal", tags=["test"], description="same")
+        entry_id = json.loads(result)["id"]
+        update_result = await server_mod.update_entry(entry_id=entry_id, description="same")
+        data = json.loads(update_result)
+        assert data["status"] == "ok"
+        # No changelog since nothing changed
+        entries = json.loads(await server_mod.get_knowledge(include_history="true"))
+        assert "_changelog" not in entries[0]["data"]
+
+    @pytest.mark.anyio
+    async def test_update_pattern(self) -> None:
+        result = await server_mod.learn_pattern(
+            source="nas", tags=["infra"], description="original pattern"
+        )
+        entry_id = json.loads(result)["id"]
+        await server_mod.update_entry(entry_id=entry_id, description="refined pattern")
+        entries = json.loads(
+            await server_mod.get_knowledge(entry_type="pattern", include_history="true")
+        )
+        assert entries[0]["data"]["description"] == "refined pattern"
+
+    @pytest.mark.anyio
+    async def test_multiple_updates_accumulate_changelog(self) -> None:
+        result = await server_mod.remember(source="personal", tags=["test"], description="v1")
+        entry_id = json.loads(result)["id"]
+        await server_mod.update_entry(entry_id=entry_id, description="v2")
+        await server_mod.update_entry(entry_id=entry_id, description="v3")
+        entries = json.loads(await server_mod.get_knowledge(include_history="true"))
+        changelog = entries[0]["data"]["_changelog"]
+        assert len(changelog) == 2
+        assert changelog[0]["changed"]["description"] == "v1"
+        assert changelog[1]["changed"]["description"] == "v2"
+
+
+class TestGetKnowledgeHistory:
+    @pytest.mark.anyio
+    async def test_history_stripped_by_default(self) -> None:
+        result = await server_mod.remember(source="s", tags=["t"], description="v1")
+        entry_id = json.loads(result)["id"]
+        await server_mod.update_entry(entry_id=entry_id, description="v2")
+        entries = json.loads(await server_mod.get_knowledge())
+        assert "_changelog" not in entries[0]["data"]
+
+    @pytest.mark.anyio
+    async def test_history_included_when_true(self) -> None:
+        result = await server_mod.remember(source="s", tags=["t"], description="v1")
+        entry_id = json.loads(result)["id"]
+        await server_mod.update_entry(entry_id=entry_id, description="v2")
+        entries = json.loads(await server_mod.get_knowledge(include_history="true"))
+        assert "_changelog" in entries[0]["data"]
+
+    @pytest.mark.anyio
+    async def test_history_only(self) -> None:
+        await server_mod.remember(source="s", tags=["t"], description="no changes")
+        result = await server_mod.remember(source="s", tags=["t"], description="will change")
+        entry_id = json.loads(result)["id"]
+        await server_mod.update_entry(entry_id=entry_id, description="changed")
+        entries = json.loads(await server_mod.get_knowledge(include_history="only"))
+        assert len(entries) == 1
+        assert entries[0]["data"]["description"] == "changed"
+
+
+class TestGetStatsTool:
+    @pytest.mark.anyio
+    async def test_get_stats_empty(self) -> None:
+        result = await server_mod.get_stats()
+        data = json.loads(result)
+        assert data["total"] == 0
+        assert data["sources"] == []
+        assert data["entries"]["note"] == 0
+
+    @pytest.mark.anyio
+    async def test_get_stats_with_data(self) -> None:
+        await server_mod.remember(source="personal", tags=["t"], description="note")
+        await server_mod.learn_pattern(source="nas", tags=["t"], description="pattern")
+        await server_mod.add_context(source="nas", tags=["t"], description="context")
+        result = await server_mod.get_stats()
+        data = json.loads(result)
+        assert data["total"] == 3
+        assert data["entries"]["note"] == 1
+        assert data["entries"]["pattern"] == 1
+        assert data["entries"]["context"] == 1
+        assert set(data["sources"]) == {"personal", "nas"}
+
+
+class TestGetTagsTool:
+    @pytest.mark.anyio
+    async def test_get_tags_empty(self) -> None:
+        result = await server_mod.get_tags()
+        assert json.loads(result) == []
+
+    @pytest.mark.anyio
+    async def test_get_tags_with_data(self) -> None:
+        await server_mod.remember(source="s", tags=["infra", "nas"], description="a")
+        await server_mod.remember(source="s", tags=["infra"], description="b")
+        await server_mod.remember(source="s", tags=["personal"], description="c")
+        result = await server_mod.get_tags()
+        tags = json.loads(result)
+        # infra should be first (count=2)
+        assert tags[0]["tag"] == "infra"
+        assert tags[0]["count"] == 2
+        assert len(tags) == 3
