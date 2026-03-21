@@ -193,13 +193,15 @@ You should see Claude:
 2. Mention the alert as an FYI before answering
 3. Answer your question normally
 
+<img src="images/android-briefing-demo.png" alt="Demo screenshot" width="220" align="right">
+
 Example output:
 
 > **FYI:** qbittorrent container appears to be down on the NAS — disk I/O dropped to ~12% (normally 80-90%).
 >
 > Weekend looks decent for Chicago...
 
-<img src="images/android-briefing-demo.png" alt="Demo screenshot" width="300">
+<br clear="both">
 
 ### Step 10: Test suppression
 
