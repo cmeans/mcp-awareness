@@ -7,17 +7,15 @@
 
 ## What this is
 
-<img src="docs/images/android-briefing-demo.png" alt="Claude on Android surfacing an infrastructure alert during an unrelated conversation" width="220" align="right">
-
-`mcp-awareness` is shared memory for every AI you use. It's a self-hosted service where any AI assistant — Claude, ChatGPT, Cursor, or whatever comes next — can store and retrieve knowledge using the open [Model Context Protocol](https://modelcontextprotocol.io/) (MCP).
+`mcp-awareness` is shared memory for every AI you use. It's a self-hosted service where any AI assistant can store and retrieve knowledge using the open [Model Context Protocol](https://modelcontextprotocol.io/) (MCP). It works today with Claude.ai, Claude Code, Claude Desktop, Claude mobile (Android/iOS), Cursor, and any other MCP-compatible client.
 
 **The problem:** Every AI platform keeps its own memory silo. What you teach Claude doesn't exist in ChatGPT. Your desktop assistant's context doesn't follow you to mobile. Switch platforms, and you start over.
 
 **The fix:** Externalize that knowledge into a service *you* own. Tell one AI about your infrastructure, your projects, your preferences — and every AI knows it. Permanently, portably, privately.
 
-<br clear="both">
-
 ### What this looks like in practice
+
+<img src="docs/images/android-briefing-demo.png" alt="Claude on Android surfacing an infrastructure alert during an unrelated conversation" width="220" align="right">
 
 This morning, a plan was drafted on Claude Android during a commute. Claude Desktop picked it up and gave engineering feedback that shaped the project roadmap. Claude Code implemented the changes, tested them, and deployed — updating the shared project status so every platform knows what happened. No copy-paste. No "remember what we discussed." The knowledge just flows.
 
