@@ -34,7 +34,9 @@ Every PR that changes functionality must include:
 
     ### Manual tests (via MCP tools)
     1. - [ ] **Description of test**
-       Call `tool_name(arg1="value", arg2="value")`
+       ```
+       tool_name(arg1="value", arg2="value")
+       ```
        Expected: description of what success looks like
     ```
   - **Note**: CI already runs pytest, ruff, and mypy — only include automated checks in QA if you will auto-verify and check them off. Otherwise, omit them and let CI enforce.
