@@ -18,7 +18,6 @@ Every PR that changes functionality must include:
     - Have a checkbox (`- [ ]`) to mark pass/fail
     - Name the MCP tool to call and the arguments to pass
     - Describe the expected outcome explicitly
-  - **Automated checks**: checkboxes for `pytest`, `ruff`, `mypy` results
   - Example format:
     ```markdown
     ## QA
@@ -27,11 +26,6 @@ Every PR that changes functionality must include:
     - `pip install -e ".[dev]"`
     - Deploy to test instance on alternate port (`AWARENESS_PORT=8421`)
 
-    ### Automated checks
-    - [ ] `python -m pytest tests/` — all pass
-    - [ ] `ruff check src/ tests/` — clean
-    - [ ] `mypy src/mcp_awareness/` — clean
-
     ### Manual tests (via MCP tools)
     1. - [ ] **Description of test**
        ```
@@ -39,7 +33,7 @@ Every PR that changes functionality must include:
        ```
        Expected: description of what success looks like
     ```
-  - **Note**: CI already runs pytest, ruff, and mypy — only include automated checks in QA if you will auto-verify and check them off. Otherwise, omit them and let CI enforce.
+- **QA Approved label** — PRs cannot be merged without the `QA Approved` label. A CI check (`qa-gate.yml`) enforces this. After completing the QA checklist, add the label to unblock merge. CI already runs pytest, ruff, and mypy — the QA section is for manual verification only.
 - **Data dictionary** — update `docs/data-dictionary.md` if schema changed
 
 ## Build & Test
