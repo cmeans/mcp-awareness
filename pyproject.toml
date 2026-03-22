@@ -11,10 +11,13 @@ dependencies = [
 
 [project.scripts]
 mcp-awareness = "mcp_awareness.server:main"
+mcp-awareness-migrate = "mcp_awareness.migrate:main"
 
 [project.optional-dependencies]
 postgres = [
     "psycopg[binary]>=3.1",
+    "alembic>=1.13",
+    "sqlalchemy>=2.0",
 ]
 dev = [
     "ruff",
@@ -22,6 +25,8 @@ dev = [
     "pytest",
     "pytest-cov",
     "psycopg[binary]>=3.1",
+    "alembic>=1.13",
+    "sqlalchemy>=2.0",
 ]
 
 [build-system]
@@ -74,4 +79,8 @@ ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
 module = ["psycopg.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["alembic.*", "sqlalchemy.*"]
 ignore_missing_imports = true

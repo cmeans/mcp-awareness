@@ -150,6 +150,7 @@ Written by agents via `set_preference`. Keyed by `key` + `scope` (upserted). Por
 - **Background cleanup:** Daemon thread with its own psycopg connection, same debounce pattern as SQLite
 - **Connection string:** Configured via `AWARENESS_DATABASE_URL` (e.g., `postgresql://user:pass@localhost:5432/awareness`)
 - **Docker image:** `pgvector/pgvector:pg17` (PostgreSQL 17 with pgvector pre-installed)
+- **Schema migrations:** Managed by Alembic (raw SQL, no ORM). Migration files in `alembic/versions/`. Run `mcp-awareness-migrate` or `alembic upgrade head`. Version tracked in `alembic_version` table.
 
 ### RDS compatibility
 
