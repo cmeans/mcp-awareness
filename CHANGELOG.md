@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Alembic migrations**: version-tracked database migrations for PostgreSQL (raw SQL, no ORM)
+- **`mcp-awareness-migrate` CLI**: run/stamp/check/history for database migrations
+- **pgvector extension**: enabled via migration (ready for future RAG/embeddings)
+- **Migration files**: initial schema baseline + pgvector extension
+
+### Changed
+- Removed inline migration code from PostgresStore (Alembic handles it)
+- Dockerfile includes alembic.ini and migration files
+
 ## [0.3.1] - 2026-03-21
 
 ### Added
