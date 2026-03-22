@@ -6,6 +6,7 @@ COPY pyproject.toml README.md ./
 COPY src/ src/
 COPY alembic.ini ./
 COPY alembic/ alembic/
+COPY docker-entrypoint.sh ./
 
 RUN pip install --no-cache-dir ".[postgres]"
 
@@ -17,4 +18,4 @@ VOLUME /app/data
 
 EXPOSE 8420
 
-ENTRYPOINT ["mcp-awareness"]
+ENTRYPOINT ["./docker-entrypoint.sh"]
