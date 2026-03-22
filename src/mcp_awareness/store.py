@@ -80,6 +80,8 @@ class Store(Protocol):
 
     def soft_delete_by_id(self, entry_id: str) -> bool: ...
 
+    def soft_delete_by_tags(self, tags: list[str]) -> int: ...
+
     def soft_delete_by_source(self, source: str, entry_type: EntryType | None = None) -> int: ...
 
     def get_deleted(self, limit: int | None = None, offset: int | None = None) -> list[Entry]: ...
@@ -553,6 +555,30 @@ class SQLiteStore:
             )
             self._conn.commit()
             return cur.rowcount > 0
+
+    def soft_delete_by_tags(self, tags: list[str]) -> int:
+        """Soft-delete all entries matching ALL given tags (AND logic).
+
+        Returns the number of trashed entries.
+        """
+        if not tags:
+            return 0
+        with self._write_lock:
+            now = datetime.now(timezone.utc)
+            expires = (now + timedelta(days=TRASH_RETENTION_DAYS)).isoformat()
+            # AND: entry must contain every tag — count matching tags per entry
+            placeholders = ",".join("?" * len(tags))
+            cur = self._conn.execute(
+                f"UPDATE entries SET deleted = ?, expires = ? WHERE {self._ACTIVE} "
+                f"AND id IN ("
+                f"  SELECT e.id FROM entries e, json_each(e.tags) t"
+                f"  WHERE t.value IN ({placeholders}) AND e.{self._ACTIVE}"
+                f"  GROUP BY e.id HAVING COUNT(DISTINCT t.value) = ?"
+                f")",
+                (now.isoformat(), expires, *tags, len(tags)),
+            )
+            self._conn.commit()
+            return cur.rowcount
 
     def soft_delete_by_source(
         self,

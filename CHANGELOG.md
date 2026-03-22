@@ -15,7 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `write_guide` — existing sources, tags with counts, and entry type reference
   - `catchup(hours)` — what changed recently across knowledge and alerts
 - **User-defined prompts**: store entries with `source="custom-prompt"` and they automatically appear as MCP prompts. Template variables (`{{var}}`) become prompt arguments. Prompts are namespaced under `user/` and synced dynamically on every list/get.
-- 14 new tests (176 total)
+- **Delete by tags**: `delete_entry(tags=["qa-test"], confirm=True)` soft-deletes all entries matching ALL given tags (AND logic). Supports dry-run without `confirm`.
+- 17 new tests (179 total)
 
 ## [0.4.1] - 2026-03-22
 

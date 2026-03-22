@@ -552,13 +552,15 @@ async def delete_entry(
     source: str | None = None,
     entry_type: str | None = None,
     entry_id: str | None = None,
+    tags: list[str] | None = None,
     confirm: bool = False,
 ) -> str:
-    """Soft-delete entries (moves to trash, recoverable for 30 days). Three modes:
+    """Soft-delete entries (moves to trash, recoverable for 30 days). Four modes:
     - By entry_id: trash a single specific entry (no confirm needed).
+    - By tags: trash all entries matching ALL given tags (AND logic). confirm required.
     - By source + entry_type: trash all entries of that type for the source.
     - By source alone: trash ALL entries for that source.
-    For bulk deletes (by source), set confirm=True. Without it, a dry-run count
+    For bulk deletes, set confirm=True. Without it, a dry-run count
     is returned so the user can verify before committing.
     Use when the user says 'forget that', 'delete the pattern about X',
     or 'remove everything about Y'. Entries auto-purge after 30 days.
@@ -574,8 +576,28 @@ async def delete_entry(
                 "recoverable_days": 30,
             }
         )
+    if tags:
+        if not confirm:
+            entries = store.get_entries(tags=tags)
+            return json.dumps(
+                {
+                    "status": "dry_run",
+                    "would_trash": len(entries),
+                    "tags": tags,
+                    "message": "Set confirm=True to move to trash. Show the user this count first.",
+                }
+            )
+        count = store.soft_delete_by_tags(tags)
+        return json.dumps(
+            {
+                "status": "ok",
+                "trashed": count,
+                "tags": tags,
+                "recoverable_days": 30,
+            }
+        )
     if not source:
-        return json.dumps({"status": "error", "message": "Provide entry_id or source"})
+        return json.dumps({"status": "error", "message": "Provide entry_id, tags, or source"})
     et = EntryType(entry_type) if entry_type else None
     if not confirm:
         entries = store.get_entries(entry_type=et, source=source)
