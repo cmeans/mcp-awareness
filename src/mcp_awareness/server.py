@@ -624,17 +624,27 @@ async def delete_entry(
 
 @mcp.tool()
 @_timed
-async def restore_entry(entry_id: str) -> str:
-    """Restore a soft-deleted entry from the trash. Requires the entry ID.
-    Call get_deleted first to see what's in the trash and get the IDs."""
-    restored = store.restore_by_id(entry_id)
-    return json.dumps(
-        {
-            "status": "ok" if restored else "not_found",
-            "restored": restored,
-            "entry_id": entry_id,
-        }
-    )
+async def restore_entry(
+    entry_id: str | None = None,
+    tags: list[str] | None = None,
+) -> str:
+    """Restore soft-deleted entries from the trash. Two modes:
+    - By entry_id: restore a single specific entry.
+    - By tags: restore all trashed entries matching ALL given tags (AND logic).
+    Call get_deleted first to see what's in the trash."""
+    if entry_id:
+        restored = store.restore_by_id(entry_id)
+        return json.dumps(
+            {
+                "status": "ok" if restored else "not_found",
+                "restored": 1 if restored else 0,
+                "entry_id": entry_id,
+            }
+        )
+    if tags:
+        count = store.restore_by_tags(tags)
+        return json.dumps({"status": "ok", "restored": count, "tags": tags})
+    return json.dumps({"status": "error", "message": "Provide entry_id or tags"})
 
 
 @mcp.tool()

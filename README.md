@@ -240,7 +240,7 @@ See [Security considerations](docs/deployment-guide.md#security-considerations) 
 - Pagination (`limit`/`offset`) on knowledge, alerts, entries, and trash queries
 - QA gate: `QA Approved` label required to merge PRs (pending status, not failed)
 - MCP Prompts: 5 built-in dynamic prompts + user-defined prompts from store entries with `{{var}}` templates
-- 179 tests, strict type checking, CI pipeline
+- 181 tests, strict type checking, CI pipeline
 
 **Not yet implemented:**
 - Layer 2 (baseline) detection — rolling averages and deviation calculation

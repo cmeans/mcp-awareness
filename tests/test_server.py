@@ -607,7 +607,7 @@ class TestRestoreEntryTool:
         restore_result = await server_mod.restore_entry(entry_id=entry_id)
         data = json.loads(restore_result)
         assert data["status"] == "ok"
-        assert data["restored"] is True
+        assert data["restored"] == 1
         assert len(_store().get_patterns()) == 1
 
     @pytest.mark.anyio
@@ -615,7 +615,7 @@ class TestRestoreEntryTool:
         result = await server_mod.restore_entry(entry_id="nonexistent")
         data = json.loads(result)
         assert data["status"] == "not_found"
-        assert data["restored"] is False
+        assert data["restored"] == 0
 
 
 class TestGetDeletedTool:

@@ -533,6 +533,25 @@ class PostgresStore:
         self._conn.commit()
         return affected > 0
 
+    def restore_by_tags(self, tags: list[str]) -> int:
+        """Restore all soft-deleted entries matching ALL given tags (AND logic).
+
+        Returns the number of restored entries.
+        """
+        if not tags:
+            return 0
+        tag_clauses = " AND ".join("tags @> %s::jsonb" for _ in tags)
+        params = [json.dumps([t]) for t in tags]
+        with self._conn.cursor() as cur:
+            cur.execute(
+                "UPDATE entries SET deleted = NULL, expires = NULL "
+                f"WHERE deleted IS NOT NULL AND {tag_clauses}",
+                tuple(params),
+            )
+            affected = cur.rowcount
+        self._conn.commit()
+        return affected
+
     def clear(self) -> None:
         with self._conn.cursor() as cur:
             cur.execute("DELETE FROM entries")

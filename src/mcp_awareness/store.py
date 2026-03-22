@@ -88,6 +88,8 @@ class Store(Protocol):
 
     def restore_by_id(self, entry_id: str) -> bool: ...
 
+    def restore_by_tags(self, tags: list[str]) -> int: ...
+
     def clear(self) -> None: ...
 
 
@@ -621,6 +623,28 @@ class SQLiteStore:
             )
             self._conn.commit()
             return cur.rowcount > 0
+
+    def restore_by_tags(self, tags: list[str]) -> int:
+        """Restore all soft-deleted entries matching ALL given tags (AND logic).
+
+        Returns the number of restored entries.
+        """
+        if not tags:
+            return 0
+        with self._write_lock:
+            placeholders = ",".join("?" * len(tags))
+            cur = self._conn.execute(
+                "UPDATE entries SET deleted = NULL, expires = NULL "
+                "WHERE deleted IS NOT NULL "
+                "AND id IN ("
+                "  SELECT e.id FROM entries e, json_each(e.tags) t"
+                "  WHERE t.value IN (" + placeholders + ") AND e.deleted IS NOT NULL"
+                "  GROUP BY e.id HAVING COUNT(DISTINCT t.value) = ?"
+                ")",
+                (*tags, len(tags)),
+            )
+            self._conn.commit()
+            return cur.rowcount
 
     def clear(self) -> None:
         with self._write_lock:

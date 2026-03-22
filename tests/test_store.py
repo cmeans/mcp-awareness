@@ -703,3 +703,36 @@ def test_soft_delete_by_tags_single(store):
     count = store.soft_delete_by_tags(["qa-test"])
     assert count == 2
     assert len(store.get_entries()) == 1
+
+
+# ------------------------------------------------------------------
+# Restore by tags
+# ------------------------------------------------------------------
+
+
+def test_restore_by_tags(store):
+    """Restore trashed entries matching ALL tags."""
+    for i in range(3):
+        entry = store.add(
+            Entry(
+                id=make_id(),
+                type=EntryType.NOTE,
+                source="test",
+                tags=["qa-test", "batch"] if i < 2 else ["other"],
+                created=now_utc(),
+                updated=now_utc(),
+                expires=None,
+                data={"description": f"note-{i}"},
+            )
+        )
+        store.soft_delete_by_id(entry.id)
+    assert len(store.get_deleted()) == 3
+    restored = store.restore_by_tags(["qa-test", "batch"])
+    assert restored == 2
+    assert len(store.get_entries()) == 2
+    assert len(store.get_deleted()) == 1
+
+
+def test_restore_by_tags_empty(store):
+    """Empty tag list restores nothing."""
+    assert store.restore_by_tags([]) == 0
