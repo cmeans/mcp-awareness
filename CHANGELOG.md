@@ -8,8 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- **MCP Prompts**: `agent_instructions` prompt dynamically built from `source="awareness-prompt"` entries in the store. Any MCP client can discover and fetch agent workflow instructions without hardcoded prompts.
-- 3 new tests (165 total)
+- **MCP Prompts** — 5 dynamic prompts built from store data:
+  - `agent_instructions` — complete workflow conventions from `source="awareness-prompt"` entries
+  - `project_context(repo_name)` — knowledge, alerts, and status for a project
+  - `system_status(source)` — status, alerts, and patterns for a monitored system
+  - `write_guide` — existing sources, tags with counts, and entry type reference
+  - `catchup(hours)` — what changed recently across knowledge and alerts
+- 10 new tests (172 total)
 
 ## [0.4.1] - 2026-03-22
 

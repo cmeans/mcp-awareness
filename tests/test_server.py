@@ -989,3 +989,57 @@ class TestPrompts:
         core_pos = result.index("## Core")
         writing_pos = result.index("## Writing")
         assert core_pos < writing_pos
+
+    @pytest.mark.anyio
+    async def test_project_context_empty(self) -> None:
+        result = await server_mod.project_context(repo_name="nonexistent")
+        assert "No knowledge or alerts found" in result
+
+    @pytest.mark.anyio
+    async def test_project_context_with_entries(self) -> None:
+        await server_mod.remember(
+            source="test-project",
+            tags=["my-repo"],
+            description="Architecture uses 4-file layout.",
+        )
+        result = await server_mod.project_context(repo_name="my-repo")
+        assert "# Project Context: my-repo" in result
+        assert "Architecture uses 4-file layout" in result
+
+    @pytest.mark.anyio
+    async def test_system_status_empty(self) -> None:
+        result = await server_mod.system_status(source="nonexistent")
+        assert "No status or alerts found" in result
+
+    @pytest.mark.anyio
+    async def test_system_status_with_data(self) -> None:
+        await server_mod.report_status(
+            source="test-nas",
+            tags=["infra"],
+            metrics={"cpu": 45, "memory": 60},
+        )
+        result = await server_mod.system_status(source="test-nas")
+        assert "# System Status: test-nas" in result
+        assert "cpu: 45" in result
+
+    @pytest.mark.anyio
+    async def test_write_guide(self) -> None:
+        await server_mod.remember(
+            source="test-src", tags=["alpha", "beta"], description="test note"
+        )
+        result = await server_mod.write_guide()
+        assert "# Awareness Write Guide" in result
+        assert "test-src" in result
+        assert "alpha" in result
+
+    @pytest.mark.anyio
+    async def test_catchup_empty(self) -> None:
+        result = await server_mod.catchup(hours=24)
+        assert "Nothing changed" in result
+
+    @pytest.mark.anyio
+    async def test_catchup_with_recent(self) -> None:
+        await server_mod.remember(source="test-src", tags=["t"], description="recent note")
+        result = await server_mod.catchup(hours=24)
+        assert "recent note" in result
+        assert "[new]" in result
