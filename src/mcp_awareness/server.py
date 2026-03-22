@@ -179,13 +179,18 @@ async def get_briefing() -> str:
 
 @mcp.tool()
 @_timed
-async def get_alerts(source: str | None = None) -> str:
+async def get_alerts(
+    source: str | None = None,
+    limit: int | None = None,
+    offset: int | None = None,
+) -> str:
     """Get active alerts, optionally filtered by source.
     Drill-down from briefing — call when briefing shows attention_needed
     and you want alert details. Returns full alert entries with diagnostics.
+    Use limit/offset for pagination (e.g., limit=10, offset=0 for first page).
     This tool always returns structured JSON. If you receive an unstructured
     error, the failure is in the transport or platform layer, not in awareness."""
-    alerts = store.get_active_alerts(source)
+    alerts = store.get_active_alerts(source, limit=limit, offset=offset)
     return json.dumps([a.to_dict() for a in alerts], indent=2)
 
 
@@ -210,6 +215,8 @@ async def get_knowledge(
     tags: list[str] | None = None,
     entry_type: str | None = None,
     include_history: str | None = None,
+    limit: int | None = None,
+    offset: int | None = None,
 ) -> str:
     """Get knowledge entries: learned patterns, historical context, preferences, notes.
     Knowledge belongs to the system, not any specific agent. Call when you need
@@ -218,14 +225,19 @@ async def get_knowledge(
     Valid entry_type values: 'pattern', 'context', 'preference', 'note'.
     include_history: omit or 'false' to strip change history, 'true' to include,
     'only' to return only entries with change history.
+    Use limit/offset for pagination (e.g., limit=10, offset=0 for first page).
     This tool always returns JSON with a status field or an entry list.
     If you receive an unstructured error, the failure is in the transport
     or platform layer, not in awareness."""
     if entry_type:
         et = EntryType(entry_type)
-        entries = store.get_entries(entry_type=et, source=source, tags=tags)
+        entries = store.get_entries(
+            entry_type=et, source=source, tags=tags, limit=limit, offset=offset
+        )
     else:
-        entries = store.get_knowledge(tags=tags, include_history=include_history)
+        entries = store.get_knowledge(
+            tags=tags, include_history=include_history, limit=limit, offset=offset
+        )
         if source:
             entries = [e for e in entries if e.source == source]
     return json.dumps([e.to_dict() for e in entries], indent=2)
@@ -604,11 +616,15 @@ async def restore_entry(entry_id: str) -> str:
 
 @mcp.tool()
 @_timed
-async def get_deleted() -> str:
+async def get_deleted(
+    limit: int | None = None,
+    offset: int | None = None,
+) -> str:
     """List all entries in the trash (soft-deleted, recoverable).
     Returns entries with their IDs so they can be restored via restore_entry.
-    Trashed entries auto-purge after 30 days."""
-    entries = store.get_deleted()
+    Trashed entries auto-purge after 30 days.
+    Use limit/offset for pagination."""
+    entries = store.get_deleted(limit=limit, offset=offset)
     return json.dumps([e.to_dict() for e in entries], indent=2)
 
 

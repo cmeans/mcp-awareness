@@ -118,8 +118,8 @@ class PostgresStore:
                     (now,),
                 )
                 conn.commit()
-        except Exception:
-            pass  # best-effort cleanup — next debounce window will retry
+        except Exception as exc:
+            print(f"[awareness] cleanup failed: {type(exc).__name__}: {exc}")
 
     _ACTIVE = "deleted IS NULL"
 
@@ -127,6 +127,15 @@ class PostgresStore:
         with self._conn.cursor() as cur:
             cur.execute(f"SELECT * FROM entries WHERE {self._ACTIVE} AND ({where})", params)
             return [self._row_to_entry(r) for r in cur.fetchall()]
+
+    @staticmethod
+    def _paginate(entries: list[Entry], limit: int | None, offset: int | None) -> list[Entry]:
+        """Apply offset and limit to a list of entries."""
+        if offset:
+            entries = entries[offset:]
+        if limit:
+            entries = entries[:limit]
+        return entries
 
     # ------------------------------------------------------------------
     # Public API
@@ -169,22 +178,22 @@ class PostgresStore:
         self._cleanup_expired()
         now = now_utc()
         existing = self._query_entries(
-            "type = %s AND source = %s",
-            (EntryType.ALERT.value, source),
+            "type = %s AND source = %s AND data->>'alert_id' = %s",
+            (EntryType.ALERT.value, source, alert_id),
         )
-        for e in existing:
-            if e.data.get("alert_id") == alert_id:
-                e.updated = now
-                e.tags = tags
-                e.data.update(data)
-                with self._conn.cursor() as cur:
-                    cur.execute(
-                        "UPDATE entries SET updated = %s, tags = %s::jsonb, "
-                        "data = %s::jsonb WHERE id = %s",
-                        (now, json.dumps(e.tags), json.dumps(e.data), e.id),
-                    )
-                self._conn.commit()
-                return e
+        if existing:
+            e = existing[0]
+            e.updated = now
+            e.tags = tags
+            e.data.update(data)
+            with self._conn.cursor() as cur:
+                cur.execute(
+                    "UPDATE entries SET updated = %s, tags = %s::jsonb, "
+                    "data = %s::jsonb WHERE id = %s",
+                    (now, json.dumps(e.tags), json.dumps(e.data), e.id),
+                )
+            self._conn.commit()
+            return e
         entry = Entry(
             id=make_id(),
             type=EntryType.ALERT,
@@ -207,22 +216,22 @@ class PostgresStore:
         self._cleanup_expired()
         now = now_utc()
         existing = self._query_entries(
-            "type = %s",
-            (EntryType.PREFERENCE.value,),
+            "type = %s AND data->>'key' = %s AND data->>'scope' = %s",
+            (EntryType.PREFERENCE.value, key, scope),
         )
-        for e in existing:
-            if e.data.get("key") == key and e.data.get("scope") == scope:
-                e.updated = now
-                e.tags = tags
-                e.data.update(data)
-                with self._conn.cursor() as cur:
-                    cur.execute(
-                        "UPDATE entries SET updated = %s, tags = %s::jsonb, "
-                        "data = %s::jsonb WHERE id = %s",
-                        (now, json.dumps(e.tags), json.dumps(e.data), e.id),
-                    )
-                self._conn.commit()
-                return e
+        if existing:
+            e = existing[0]
+            e.updated = now
+            e.tags = tags
+            e.data.update(data)
+            with self._conn.cursor() as cur:
+                cur.execute(
+                    "UPDATE entries SET updated = %s, tags = %s::jsonb, "
+                    "data = %s::jsonb WHERE id = %s",
+                    (now, json.dumps(e.tags), json.dumps(e.data), e.id),
+                )
+            self._conn.commit()
+            return e
         entry = Entry(
             id=make_id(),
             type=EntryType.PREFERENCE,
@@ -243,6 +252,8 @@ class PostgresStore:
         entry_type: EntryType | None = None,
         source: str | None = None,
         tags: list[str] | None = None,
+        limit: int | None = None,
+        offset: int | None = None,
     ) -> list[Entry]:
         clauses: list[str] = []
         params: list[Any] = []
@@ -258,7 +269,8 @@ class PostgresStore:
             clauses.append(f"({' OR '.join(tag_clauses)})")
             params.extend(json.dumps([t]) for t in tags)
         where = " AND ".join(clauses) if clauses else "1=1"
-        return self._query_entries(where, tuple(params))
+        results = self._query_entries(where, tuple(params))
+        return self._paginate(results, limit, offset)
 
     def get_sources(self) -> list[str]:
         """Get all unique sources that have reported status."""
@@ -279,7 +291,9 @@ class PostgresStore:
             row = cur.fetchone()
         return self._row_to_entry(row) if row else None
 
-    def get_active_alerts(self, source: str | None = None) -> list[Entry]:
+    def get_active_alerts(
+        self, source: str | None = None, limit: int | None = None, offset: int | None = None
+    ) -> list[Entry]:
         clauses = ["type = %s"]
         params: list[str] = [EntryType.ALERT.value]
         if source:
@@ -287,7 +301,8 @@ class PostgresStore:
             params.append(source)
         where = " AND ".join(clauses)
         alerts = self._query_entries(where, tuple(params))
-        return [a for a in alerts if not a.data.get("resolved")]
+        results = [a for a in alerts if not a.data.get("resolved")]
+        return self._paginate(results, limit, offset)
 
     def get_active_suppressions(self, source: str | None = None) -> list[Entry]:
         entries = self._query_entries("type = %s", (EntryType.SUPPRESSION.value,))
@@ -313,7 +328,11 @@ class PostgresStore:
         return row["cnt"] if row else 0
 
     def get_knowledge(
-        self, tags: list[str] | None = None, include_history: str | None = None
+        self,
+        tags: list[str] | None = None,
+        include_history: str | None = None,
+        limit: int | None = None,
+        offset: int | None = None,
     ) -> list[Entry]:
         """Get knowledge entries (patterns, context, preferences, notes)."""
         types = [
@@ -336,7 +355,7 @@ class PostgresStore:
         elif include_history != "true":
             for e in entries:
                 e.data.pop("changelog", None)
-        return entries
+        return self._paginate(entries, limit, offset)
 
     def get_entry_by_id(self, entry_id: str) -> Entry | None:
         """Get a single entry by ID (active only)."""
@@ -472,11 +491,12 @@ class PostgresStore:
         self._conn.commit()
         return affected
 
-    def get_deleted(self) -> list[Entry]:
+    def get_deleted(self, limit: int | None = None, offset: int | None = None) -> list[Entry]:
         """Get all soft-deleted entries (the trash)."""
         with self._conn.cursor() as cur:
             cur.execute("SELECT * FROM entries WHERE deleted IS NOT NULL")
-            return [self._row_to_entry(r) for r in cur.fetchall()]
+            results = [self._row_to_entry(r) for r in cur.fetchall()]
+        return self._paginate(results, limit, offset)
 
     def restore_by_id(self, entry_id: str) -> bool:
         """Restore a soft-deleted entry. Returns True if restored."""

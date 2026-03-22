@@ -237,7 +237,7 @@ See [Security considerations](docs/deployment-guide.md#security-considerations) 
 - Three-layer detection model (threshold + knowledge implemented; baseline planned)
 - Suppression system with time-based expiry and escalation overrides
 - Alembic migration framework for PostgreSQL (version-tracked, raw SQL, auto-runs on Docker startup)
-- 155 tests, strict type checking, CI pipeline
+- 162 tests, strict type checking, CI pipeline
 
 **Not yet implemented:**
 - Layer 2 (baseline) detection — rolling averages and deviation calculation
