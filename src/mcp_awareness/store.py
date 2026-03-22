@@ -111,8 +111,6 @@ class SQLiteStore:
             CREATE INDEX IF NOT EXISTS idx_entries_type ON entries(type);
             CREATE INDEX IF NOT EXISTS idx_entries_source ON entries(source);
             CREATE INDEX IF NOT EXISTS idx_entries_type_source ON entries(type, source);
-            CREATE UNIQUE INDEX IF NOT EXISTS idx_entries_source_logical_key
-                ON entries(source, logical_key) WHERE logical_key IS NOT NULL;
         """)
         # Migrations for existing databases
         cur = self._conn.execute("PRAGMA table_info(entries)")
@@ -121,10 +119,11 @@ class SQLiteStore:
             self._conn.execute("ALTER TABLE entries ADD COLUMN deleted TEXT")
         if "logical_key" not in columns:
             self._conn.execute("ALTER TABLE entries ADD COLUMN logical_key TEXT")
-            self._conn.execute(
-                "CREATE UNIQUE INDEX IF NOT EXISTS idx_entries_source_logical_key "
-                "ON entries(source, logical_key) WHERE logical_key IS NOT NULL"
-            )
+        # Always ensure the index exists (covers both fresh and migrated DBs)
+        self._conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_entries_source_logical_key "
+            "ON entries(source, logical_key) WHERE logical_key IS NOT NULL"
+        )
         self._conn.commit()
 
     # ------------------------------------------------------------------

@@ -10,6 +10,11 @@ services:
     environment:
       - AWARENESS_DATA_DIR=/app/data
       - AWARENESS_MOUNT_PATH=${AWARENESS_MOUNT_PATH:-}
+      - AWARENESS_BACKEND=${AWARENESS_BACKEND:-sqlite}
+      - AWARENESS_DATABASE_URL=${AWARENESS_DATABASE_URL:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
     deploy:
       resources:
         limits:
@@ -42,8 +47,7 @@ services:
           cpus: '0.05'
           memory: 64M
 
-  # PostgreSQL backend — opt-in via: docker compose --profile postgres up -d
-  # Then set AWARENESS_BACKEND=postgres and AWARENESS_DATABASE_URL in .env
+  # PostgreSQL backend (default when AWARENESS_BACKEND=postgres in .env)
   postgres:
     image: pgvector/pgvector:pg17
     container_name: awareness-postgres
@@ -73,8 +77,6 @@ services:
       timeout: 5s
       retries: 5
       start_period: 10s
-    profiles:
-      - postgres
 
   # Quick tunnel — ephemeral URL, no account needed
   # Usage: docker compose up mcp-awareness tunnel-quick
