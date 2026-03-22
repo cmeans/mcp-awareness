@@ -40,13 +40,17 @@ class Store(Protocol):
         entry_type: EntryType | None = None,
         source: str | None = None,
         tags: list[str] | None = None,
+        limit: int | None = None,
+        offset: int | None = None,
     ) -> list[Entry]: ...
 
     def get_sources(self) -> list[str]: ...
 
     def get_latest_status(self, source: str) -> Entry | None: ...
 
-    def get_active_alerts(self, source: str | None = None) -> list[Entry]: ...
+    def get_active_alerts(
+        self, source: str | None = None, limit: int | None = None, offset: int | None = None
+    ) -> list[Entry]: ...
 
     def get_active_suppressions(self, source: str | None = None) -> list[Entry]: ...
 
@@ -55,7 +59,11 @@ class Store(Protocol):
     def count_active_suppressions(self) -> int: ...
 
     def get_knowledge(
-        self, tags: list[str] | None = None, include_history: str | None = None
+        self,
+        tags: list[str] | None = None,
+        include_history: str | None = None,
+        limit: int | None = None,
+        offset: int | None = None,
     ) -> list[Entry]: ...
 
     def get_entry_by_id(self, entry_id: str) -> Entry | None: ...
@@ -74,7 +82,7 @@ class Store(Protocol):
 
     def soft_delete_by_source(self, source: str, entry_type: EntryType | None = None) -> int: ...
 
-    def get_deleted(self) -> list[Entry]: ...
+    def get_deleted(self, limit: int | None = None, offset: int | None = None) -> list[Entry]: ...
 
     def restore_by_id(self, entry_id: str) -> bool: ...
 
@@ -186,8 +194,8 @@ class SQLiteStore:
             )
             conn.commit()
             conn.close()
-        except Exception:
-            pass  # best-effort cleanup — next debounce window will retry
+        except Exception as exc:
+            print(f"[awareness] cleanup failed: {type(exc).__name__}: {exc}")
 
     # Base filter for all normal reads — excludes soft-deleted entries
     _ACTIVE = "deleted IS NULL"
@@ -197,6 +205,15 @@ class SQLiteStore:
             f"SELECT * FROM entries WHERE {self._ACTIVE} AND ({where})", params
         )
         return [self._row_to_entry(r) for r in cur.fetchall()]
+
+    @staticmethod
+    def _paginate(entries: list[Entry], limit: int | None, offset: int | None) -> list[Entry]:
+        """Apply offset and limit to a list of entries."""
+        if offset:
+            entries = entries[offset:]
+        if limit:
+            entries = entries[:limit]
+        return entries
 
     # ------------------------------------------------------------------
     # Public API
@@ -240,21 +257,21 @@ class SQLiteStore:
             self._cleanup_expired()
             now = now_utc()
             existing = self._query_entries(
-                "type = ? AND source = ?",
-                (EntryType.ALERT.value, source),
+                "type = ? AND source = ? AND json_extract(data, '$.alert_id') = ?",
+                (EntryType.ALERT.value, source, alert_id),
             )
-            for e in existing:
-                if e.data.get("alert_id") == alert_id:
-                    e.updated = now
-                    e.tags = tags
-                    e.data.update(data)
-                    self._conn.execute(
-                        """UPDATE entries SET updated = ?, tags = ?, data = ?
-                           WHERE id = ?""",
-                        (now, json.dumps(e.tags), json.dumps(e.data), e.id),
-                    )
-                    self._conn.commit()
-                    return e
+            if existing:
+                e = existing[0]
+                e.updated = now
+                e.tags = tags
+                e.data.update(data)
+                self._conn.execute(
+                    """UPDATE entries SET updated = ?, tags = ?, data = ?
+                       WHERE id = ?""",
+                    (now, json.dumps(e.tags), json.dumps(e.data), e.id),
+                )
+                self._conn.commit()
+                return e
             entry = Entry(
                 id=make_id(),
                 type=EntryType.ALERT,
@@ -277,21 +294,22 @@ class SQLiteStore:
             self._cleanup_expired()
             now = now_utc()
             existing = self._query_entries(
-                "type = ?",
-                (EntryType.PREFERENCE.value,),
+                "type = ? AND json_extract(data, '$.key') = ?"
+                " AND json_extract(data, '$.scope') = ?",
+                (EntryType.PREFERENCE.value, key, scope),
             )
-            for e in existing:
-                if e.data.get("key") == key and e.data.get("scope") == scope:
-                    e.updated = now
-                    e.tags = tags
-                    e.data.update(data)
-                    self._conn.execute(
-                        """UPDATE entries SET updated = ?, tags = ?, data = ?
-                           WHERE id = ?""",
-                        (now, json.dumps(e.tags), json.dumps(e.data), e.id),
-                    )
-                    self._conn.commit()
-                    return e
+            if existing:
+                e = existing[0]
+                e.updated = now
+                e.tags = tags
+                e.data.update(data)
+                self._conn.execute(
+                    """UPDATE entries SET updated = ?, tags = ?, data = ?
+                       WHERE id = ?""",
+                    (now, json.dumps(e.tags), json.dumps(e.data), e.id),
+                )
+                self._conn.commit()
+                return e
             entry = Entry(
                 id=make_id(),
                 type=EntryType.PREFERENCE,
@@ -311,6 +329,8 @@ class SQLiteStore:
         entry_type: EntryType | None = None,
         source: str | None = None,
         tags: list[str] | None = None,
+        limit: int | None = None,
+        offset: int | None = None,
     ) -> list[Entry]:
         clauses: list[str] = []
         params: list[str] = []
@@ -324,7 +344,7 @@ class SQLiteStore:
         results = self._query_entries(where, tuple(params))
         if tags:
             results = [e for e in results if any(t in e.tags for t in tags)]
-        return results
+        return self._paginate(results, limit, offset)
 
     def get_sources(self) -> list[str]:
         """Get all unique sources that have reported status."""
@@ -343,7 +363,9 @@ class SQLiteStore:
         row = cur.fetchone()
         return self._row_to_entry(row) if row else None
 
-    def get_active_alerts(self, source: str | None = None) -> list[Entry]:
+    def get_active_alerts(
+        self, source: str | None = None, limit: int | None = None, offset: int | None = None
+    ) -> list[Entry]:
         clauses = ["type = ?"]
         params: list[str] = [EntryType.ALERT.value]
         if source:
@@ -351,7 +373,8 @@ class SQLiteStore:
             params.append(source)
         where = " AND ".join(clauses)
         alerts = self._query_entries(where, tuple(params))
-        return [a for a in alerts if not a.data.get("resolved")]
+        results = [a for a in alerts if not a.data.get("resolved")]
+        return self._paginate(results, limit, offset)
 
     def get_active_suppressions(self, source: str | None = None) -> list[Entry]:
         entries = self._query_entries("type = ?", (EntryType.SUPPRESSION.value,))
@@ -376,7 +399,11 @@ class SQLiteStore:
         return result
 
     def get_knowledge(
-        self, tags: list[str] | None = None, include_history: str | None = None
+        self,
+        tags: list[str] | None = None,
+        include_history: str | None = None,
+        limit: int | None = None,
+        offset: int | None = None,
     ) -> list[Entry]:
         """Get knowledge entries (patterns, context, preferences, notes).
 
@@ -399,7 +426,7 @@ class SQLiteStore:
             # Strip changelog from results by default
             for e in entries:
                 e.data.pop("changelog", None)
-        return entries
+        return self._paginate(entries, limit, offset)
 
     def get_entry_by_id(self, entry_id: str) -> Entry | None:
         """Get a single entry by ID (active only)."""
@@ -552,10 +579,11 @@ class SQLiteStore:
             self._conn.commit()
             return cur.rowcount
 
-    def get_deleted(self) -> list[Entry]:
+    def get_deleted(self, limit: int | None = None, offset: int | None = None) -> list[Entry]:
         """Get all soft-deleted entries (the trash)."""
         cur = self._conn.execute("SELECT * FROM entries WHERE deleted IS NOT NULL")
-        return [self._row_to_entry(r) for r in cur.fetchall()]
+        results = [self._row_to_entry(r) for r in cur.fetchall()]
+        return self._paginate(results, limit, offset)
 
     def restore_by_id(self, entry_id: str) -> bool:
         """Restore a soft-deleted entry. Returns True if restored."""
