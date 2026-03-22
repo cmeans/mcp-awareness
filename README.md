@@ -237,6 +237,8 @@ See [Security considerations](docs/deployment-guide.md#security-considerations) 
 - Three-layer detection model (threshold + knowledge implemented; baseline planned)
 - Suppression system with time-based expiry and escalation overrides
 - Alembic migration framework for PostgreSQL (version-tracked, raw SQL, auto-runs on Docker startup)
+- Pagination (`limit`/`offset`) on knowledge, alerts, entries, and trash queries
+- QA gate: `QA Approved` label required to merge PRs (pending status, not failed)
 - 162 tests, strict type checking, CI pipeline
 
 **Not yet implemented:**

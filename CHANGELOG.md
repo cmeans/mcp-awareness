@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.4.1] - 2026-03-22
 
 ### Fixed
 - **Cleanup error logging**: `_do_cleanup` now logs exceptions instead of silently swallowing them (both SQLite and Postgres backends)
@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - **Pagination**: `limit`/`offset` params on `get_knowledge`, `get_alerts`, `get_entries`, `get_deleted` tools and Store protocol methods
+- **QA gate**: `QA Approved` label required to merge PRs, enforced by `qa-gate.yml` workflow (pending status, not failed)
+- QA section conventions in CLAUDE.md: MCP-based manual tests with copyable code blocks
 - 7 new tests (162 total)
 
 ## [0.4.0] - 2026-03-22
@@ -127,7 +129,8 @@ Initial implementation.
 - **Dockerfile** for container deployment
 - Design docs: core spec and collation layer
 
-[Unreleased]: https://github.com/cmeans/mcp-awareness/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/cmeans/mcp-awareness/compare/v0.4.1...HEAD
+[0.4.1]: https://github.com/cmeans/mcp-awareness/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/cmeans/mcp-awareness/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/cmeans/mcp-awareness/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/cmeans/mcp-awareness/compare/v0.2.0...v0.3.0
