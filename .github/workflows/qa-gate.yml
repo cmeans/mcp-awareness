@@ -9,12 +9,19 @@ jobs:
   qa-approved:
     runs-on: ubuntu-latest
     steps:
-      - name: Check for QA Approved label
+      - name: Set QA status
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           if echo '${{ toJSON(github.event.pull_request.labels.*.name) }}' | grep -q '"QA Approved"'; then
-            echo "✅ QA Approved label found"
+            STATE="success"
+            DESC="QA testing completed"
           else
-            echo "❌ PR requires the 'QA Approved' label before merging"
-            echo "Complete the QA checklist in the PR description, then add the label"
-            exit 1
+            STATE="pending"
+            DESC="Waiting for QA — add 'QA Approved' label when testing is complete"
           fi
+          gh api repos/${{ github.repository }}/statuses/${{ github.event.pull_request.head.sha }} \
+            --method POST \
+            -f state="$STATE" \
+            -f description="$DESC" \
+            -f context="QA Gate"
