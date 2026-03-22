@@ -36,6 +36,14 @@ Every PR that changes functionality must include:
 - **QA Approved label** — PRs cannot be merged without the `QA Approved` label. A CI check (`qa-gate.yml`) enforces this. After completing the QA checklist, add the label to unblock merge. CI already runs pytest, ruff, and mypy — the QA section is for manual verification only.
 - **Data dictionary** — update `docs/data-dictionary.md` if schema changed
 
+## Release process
+
+1. Feature PRs add changelog entries under `[Unreleased]`
+2. When ready to release, rename `[Unreleased]` → `[x.y.z] - YYYY-MM-DD` in the same PR (or a final commit on the branch), update comparison links, and update README
+3. QA the PR, add `QA Approved` label, merge
+4. **Tag only after merge** — `git tag -a vx.y.z -m "vx.y.z — summary"` then `git push origin vx.y.z`
+5. No separate release PRs — everything in one PR
+
 ## Build & Test
 
 ```bash
