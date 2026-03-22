@@ -938,3 +938,54 @@ class TestLogicalKeyUpsert:
             await server_mod.get_knowledge(entry_type="note", include_history="true")
         )
         assert "changelog" not in entries[0]["data"]
+
+
+# ------------------------------------------------------------------
+# Prompts
+# ------------------------------------------------------------------
+
+
+class TestPrompts:
+    @pytest.mark.anyio
+    async def test_agent_instructions_empty(self) -> None:
+        """Returns fallback message when no prompt entries exist."""
+        result = await server_mod.agent_instructions()
+        assert "No agent instructions found" in result
+
+    @pytest.mark.anyio
+    async def test_agent_instructions_from_store(self) -> None:
+        """Composes instructions from awareness-prompt entries."""
+        await server_mod.remember(
+            source="awareness-prompt",
+            tags=["memory-prompt"],
+            description="Awareness prompt Entry 1 (Core): Start with get_briefing.",
+        )
+        await server_mod.remember(
+            source="awareness-prompt",
+            tags=["memory-prompt"],
+            description="Awareness prompt Entry 2 (Reading): Call get_knowledge before answering.",
+        )
+        result = await server_mod.agent_instructions()
+        assert "# Awareness Agent Instructions" in result
+        assert "## Core" in result
+        assert "## Reading" in result
+        assert "get_briefing" in result
+
+    @pytest.mark.anyio
+    async def test_agent_instructions_sorted(self) -> None:
+        """Entries are sorted by entry number, not insertion order."""
+        # Insert out of order
+        await server_mod.remember(
+            source="awareness-prompt",
+            tags=["memory-prompt"],
+            description="Awareness prompt Entry 3 (Writing): Use remember for notes.",
+        )
+        await server_mod.remember(
+            source="awareness-prompt",
+            tags=["memory-prompt"],
+            description="Awareness prompt Entry 1 (Core): Start with get_briefing.",
+        )
+        result = await server_mod.agent_instructions()
+        core_pos = result.index("## Core")
+        writing_pos = result.index("## Writing")
+        assert core_pos < writing_pos

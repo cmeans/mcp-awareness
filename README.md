@@ -228,7 +228,7 @@ See [Security considerations](docs/deployment-guide.md#security-considerations) 
 - PostgreSQL backend with pgvector (production default), TIMESTAMPTZ columns, GIN-indexed tag queries, Debezium CDC-ready (`wal_level=logical`)
 - SQLite backend available as lightweight alternative
 - Storage abstraction: `Store` protocol — backends are swappable without changing server or collator logic
-- Full MCP API: 6 resources + 18 tools (read mirrors for tools-only clients like Claude.ai)
+- Full MCP API: 6 resources + 18 tools + 1 prompt (read mirrors for tools-only clients like Claude.ai)
 - Soft delete with 30-day trash, dry-run confirmation for bulk operations
 - Request timing instrumentation and `/health` endpoint for latency analysis
 - Streamable HTTP + stdio transports
@@ -239,7 +239,8 @@ See [Security considerations](docs/deployment-guide.md#security-considerations) 
 - Alembic migration framework for PostgreSQL (version-tracked, raw SQL, auto-runs on Docker startup)
 - Pagination (`limit`/`offset`) on knowledge, alerts, entries, and trash queries
 - QA gate: `QA Approved` label required to merge PRs (pending status, not failed)
-- 162 tests, strict type checking, CI pipeline
+- MCP Prompts: dynamically composed agent instructions from stored conventions
+- 165 tests, strict type checking, CI pipeline
 
 **Not yet implemented:**
 - Layer 2 (baseline) detection — rolling averages and deviation calculation

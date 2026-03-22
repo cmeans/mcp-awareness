@@ -10,6 +10,7 @@ from __future__ import annotations
 import functools
 import json
 import os
+import re
 import time
 from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
@@ -626,6 +627,53 @@ async def get_deleted(
     Use limit/offset for pagination."""
     entries = store.get_deleted(limit=limit, offset=offset)
     return json.dumps([e.to_dict() for e in entries], indent=2)
+
+
+# ---------------------------------------------------------------------------
+# Prompts (discoverable agent instructions, built from store data)
+# ---------------------------------------------------------------------------
+
+
+def _extract_entry_number(desc: str) -> int:
+    """Extract 'Entry N' number from description for sorting."""
+    m = re.search(r"Entry\s+(\d+)", desc)
+    return int(m.group(1)) if m else 99
+
+
+@mcp.prompt(
+    name="agent_instructions",
+    description=(
+        "Complete agent instructions for using awareness — reading, writing, "
+        "tag conventions, quality rules, status maintenance, and resilience. "
+        "Built dynamically from the user's stored conventions. "
+        "Call this once at conversation start to learn how to use awareness correctly."
+    ),
+)
+@_timed
+async def agent_instructions() -> str:
+    """Compose agent instructions from awareness-prompt entries in the store."""
+    entries = store.get_knowledge(tags=["memory-prompt"])
+    # Sort by entry number (Entry 1, Entry 2, etc.)
+    entries.sort(key=lambda e: _extract_entry_number(e.data.get("description", "")))
+
+    if not entries:
+        return (
+            "No agent instructions found in the awareness store. "
+            "Store entries with source='awareness-prompt' and tags=['memory-prompt'] "
+            "to populate this prompt."
+        )
+
+    sections = []
+    for e in entries:
+        desc = e.data.get("description", "")
+        # Extract the section name from "Entry N (Name):" pattern
+        m = re.match(r"Awareness prompt Entry \d+ \(([^)]+)\):\s*(.*)", desc, re.DOTALL)
+        if m:
+            sections.append(f"## {m.group(1)}\n{m.group(2).strip()}")
+        else:
+            sections.append(desc)
+
+    return "# Awareness Agent Instructions\n\n" + "\n\n".join(sections)
 
 
 def _health_response() -> dict[str, Any]:
