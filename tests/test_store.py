@@ -482,11 +482,18 @@ def test_clear(store):
 def test_get_knowledge_pagination(store):
     """Limit and offset work on get_knowledge."""
     for i in range(5):
-        store.add(Entry(
-            id=make_id(), type=EntryType.NOTE, source="test", tags=[],
-            created=now_utc(), updated=now_utc(), expires=None,
-            data={"description": f"note-{i}"},
-        ))
+        store.add(
+            Entry(
+                id=make_id(),
+                type=EntryType.NOTE,
+                source="test",
+                tags=[],
+                created=now_utc(),
+                updated=now_utc(),
+                expires=None,
+                data={"description": f"note-{i}"},
+            )
+        )
     all_entries = store.get_knowledge()
     assert len(all_entries) == 5
     page = store.get_knowledge(limit=2)
@@ -501,7 +508,9 @@ def test_get_active_alerts_pagination(store):
     """Limit and offset work on get_active_alerts."""
     for i in range(4):
         store.upsert_alert(
-            "src", ["t"], f"a{i}",
+            "src",
+            ["t"],
+            f"a{i}",
             {"alert_id": f"a{i}", "level": "warning", "message": f"m{i}", "resolved": False},
         )
     assert len(store.get_active_alerts()) == 4
@@ -514,11 +523,18 @@ def test_get_active_alerts_pagination(store):
 def test_get_entries_pagination(store):
     """Limit and offset work on get_entries."""
     for i in range(3):
-        store.add(Entry(
-            id=make_id(), type=EntryType.NOTE, source="test", tags=[],
-            created=now_utc(), updated=now_utc(), expires=None,
-            data={"description": f"note-{i}"},
-        ))
+        store.add(
+            Entry(
+                id=make_id(),
+                type=EntryType.NOTE,
+                source="test",
+                tags=[],
+                created=now_utc(),
+                updated=now_utc(),
+                expires=None,
+                data={"description": f"note-{i}"},
+            )
+        )
     assert len(store.get_entries(limit=2)) == 2
     assert len(store.get_entries(limit=10, offset=2)) == 1
 
@@ -526,11 +542,18 @@ def test_get_entries_pagination(store):
 def test_get_deleted_pagination(store):
     """Limit and offset work on get_deleted."""
     for i in range(3):
-        entry = store.add(Entry(
-            id=make_id(), type=EntryType.NOTE, source="test", tags=[],
-            created=now_utc(), updated=now_utc(), expires=None,
-            data={"description": f"note-{i}"},
-        ))
+        entry = store.add(
+            Entry(
+                id=make_id(),
+                type=EntryType.NOTE,
+                source="test",
+                tags=[],
+                created=now_utc(),
+                updated=now_utc(),
+                expires=None,
+                data={"description": f"note-{i}"},
+            )
+        )
         store.soft_delete_by_id(entry.id)
     assert len(store.get_deleted()) == 3
     assert len(store.get_deleted(limit=2)) == 2
@@ -559,11 +582,15 @@ def test_do_cleanup_logs_errors(store, capsys):
 def test_upsert_alert_different_sources_same_alert_id(store):
     """Two sources can have alerts with the same alert_id independently."""
     store.upsert_alert(
-        "src-a", ["t"], "dup-id",
+        "src-a",
+        ["t"],
+        "dup-id",
         {"alert_id": "dup-id", "level": "warning", "message": "A", "resolved": False},
     )
     store.upsert_alert(
-        "src-b", ["t"], "dup-id",
+        "src-b",
+        ["t"],
+        "dup-id",
         {"alert_id": "dup-id", "level": "critical", "message": "B", "resolved": False},
     )
     alerts = store.get_active_alerts()
@@ -573,10 +600,16 @@ def test_upsert_alert_different_sources_same_alert_id(store):
 def test_upsert_preference_updates_existing(store):
     """upsert_preference updates in place via SQL lookup."""
     store.upsert_preference(
-        "theme", "global", ["ui"], {"key": "theme", "scope": "global", "value": "dark"},
+        "theme",
+        "global",
+        ["ui"],
+        {"key": "theme", "scope": "global", "value": "dark"},
     )
     store.upsert_preference(
-        "theme", "global", ["ui"], {"key": "theme", "scope": "global", "value": "light"},
+        "theme",
+        "global",
+        ["ui"],
+        {"key": "theme", "scope": "global", "value": "light"},
     )
     prefs = store.get_entries(entry_type=EntryType.PREFERENCE)
     assert len(prefs) == 1
