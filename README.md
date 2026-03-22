@@ -236,6 +236,7 @@ See [Security considerations](docs/deployment-guide.md#security-considerations) 
 - Docker Compose with Postgres, named Cloudflare Tunnel, or ephemeral quick tunnel
 - Three-layer detection model (threshold + knowledge implemented; baseline planned)
 - Suppression system with time-based expiry and escalation overrides
+- Alembic migration framework for PostgreSQL (version-tracked, raw SQL, auto-runs on Docker startup)
 - 155 tests, strict type checking, CI pipeline
 
 **Not yet implemented:**
