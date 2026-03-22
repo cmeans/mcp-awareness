@@ -872,6 +872,89 @@ async def catchup(hours: int = 24) -> str:
     return "\n".join(parts)
 
 
+# ---------------------------------------------------------------------------
+# User-defined prompts (stored as entries with source="custom-prompt")
+# ---------------------------------------------------------------------------
+
+_TEMPLATE_VAR_RE = re.compile(r"\{\{(\w+)\}\}")
+
+
+def _sync_custom_prompts() -> None:
+    """Sync user-defined prompts from the store into the FastMCP registry.
+
+    Each entry with source="custom-prompt" becomes an MCP prompt:
+    - logical_key → prompt name (prefixed with "user/")
+    - description → prompt description
+    - content → template body ({{var}} placeholders become arguments)
+    """
+    from mcp.server.fastmcp.prompts import Prompt
+    from mcp.server.fastmcp.prompts.base import PromptArgument
+
+    entries = store.get_entries(source="custom-prompt")
+    pm = mcp._prompt_manager
+    # Remove previously synced custom prompts
+    to_remove = [name for name in pm._prompts if name.startswith("user/")]
+    for name in to_remove:
+        del pm._prompts[name]
+
+    for entry in entries:
+        key = entry.logical_key or entry.id
+        name = f"user/{key}"
+        desc = entry.data.get("description", "")
+        template = entry.data.get("content", desc)
+
+        # Extract {{var}} placeholders as prompt arguments
+        var_names = _TEMPLATE_VAR_RE.findall(template)
+        arguments = [
+            PromptArgument(name=v, description=f"Value for {v}", required=True)
+            for v in dict.fromkeys(var_names)  # deduplicate, preserve order
+        ]
+
+        def _make_fn(tmpl: str) -> Any:
+            """Create a closure that renders the template."""
+
+            async def _render(**kwargs: str) -> str:
+                result = tmpl
+                for k, v in kwargs.items():
+                    result = result.replace(f"{{{{{k}}}}}", v)
+                return result
+
+            return _render
+
+        prompt = Prompt(
+            name=name,
+            title=None,
+            description=desc,
+            arguments=arguments if arguments else None,
+            fn=_make_fn(template),
+            context_kwarg=None,
+        )
+        pm._prompts[name] = prompt
+
+
+# Patch list_prompts to sync custom prompts before listing
+_original_list_prompts = mcp.list_prompts
+
+
+async def _list_prompts_with_sync() -> list[Any]:
+    _sync_custom_prompts()
+    return await _original_list_prompts()
+
+
+mcp.list_prompts = _list_prompts_with_sync  # type: ignore[method-assign]
+
+# Also sync before get_prompt so new prompts are available immediately
+_original_get_prompt = mcp.get_prompt
+
+
+async def _get_prompt_with_sync(name: str, arguments: dict[str, str] | None = None) -> Any:
+    _sync_custom_prompts()
+    return await _original_get_prompt(name, arguments)
+
+
+mcp.get_prompt = _get_prompt_with_sync  # type: ignore[method-assign]
+
+
 def _health_response() -> dict[str, Any]:
     """Build the health check response payload."""
     return {

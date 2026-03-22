@@ -14,7 +14,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `system_status(source)` — status, alerts, and patterns for a monitored system
   - `write_guide` — existing sources, tags with counts, and entry type reference
   - `catchup(hours)` — what changed recently across knowledge and alerts
-- 10 new tests (172 total)
+- **User-defined prompts**: store entries with `source="custom-prompt"` and they automatically appear as MCP prompts. Template variables (`{{var}}`) become prompt arguments. Prompts are namespaced under `user/` and synced dynamically on every list/get.
+- 14 new tests (176 total)
 
 ## [0.4.1] - 2026-03-22
 

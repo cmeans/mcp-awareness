@@ -239,8 +239,8 @@ See [Security considerations](docs/deployment-guide.md#security-considerations) 
 - Alembic migration framework for PostgreSQL (version-tracked, raw SQL, auto-runs on Docker startup)
 - Pagination (`limit`/`offset`) on knowledge, alerts, entries, and trash queries
 - QA gate: `QA Approved` label required to merge PRs (pending status, not failed)
-- MCP Prompts: 5 dynamic prompts (agent instructions, project context, system status, write guide, catchup)
-- 172 tests, strict type checking, CI pipeline
+- MCP Prompts: 5 built-in dynamic prompts + user-defined prompts from store entries with `{{var}}` templates
+- 176 tests, strict type checking, CI pipeline
 
 **Not yet implemented:**
 - Layer 2 (baseline) detection — rolling averages and deviation calculation

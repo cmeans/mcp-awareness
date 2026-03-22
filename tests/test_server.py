@@ -1043,3 +1043,73 @@ class TestPrompts:
         result = await server_mod.catchup(hours=24)
         assert "recent note" in result
         assert "[new]" in result
+
+
+class TestCustomPrompts:
+    @pytest.mark.anyio
+    async def test_custom_prompt_no_vars(self) -> None:
+        """Custom prompt with no template variables."""
+        await server_mod.remember(
+            source="custom-prompt",
+            tags=["prompt"],
+            description="Daily standup summary",
+            content="Summarize all active alerts and recent changes.",
+            logical_key="standup",
+        )
+        server_mod._sync_custom_prompts()
+        pm = server_mod.mcp._prompt_manager
+        assert "user/standup" in pm._prompts
+        prompt = pm._prompts["user/standup"]
+        assert prompt.description == "Daily standup summary"
+
+    @pytest.mark.anyio
+    async def test_custom_prompt_with_vars(self) -> None:
+        """Custom prompt extracts {{var}} as arguments."""
+        await server_mod.remember(
+            source="custom-prompt",
+            tags=["prompt"],
+            description="Project review",
+            content="Review project {{repo_name}} focusing on {{area}}.",
+            logical_key="project-review",
+        )
+        server_mod._sync_custom_prompts()
+        pm = server_mod.mcp._prompt_manager
+        prompt = pm._prompts["user/project-review"]
+        arg_names = [a.name for a in (prompt.arguments or [])]
+        assert "repo_name" in arg_names
+        assert "area" in arg_names
+
+    @pytest.mark.anyio
+    async def test_custom_prompt_renders(self) -> None:
+        """Custom prompt renders template variables."""
+        await server_mod.remember(
+            source="custom-prompt",
+            tags=["prompt"],
+            description="Greeting",
+            content="Hello {{name}}, welcome to {{project}}!",
+            logical_key="greeting",
+        )
+        server_mod._sync_custom_prompts()
+        pm = server_mod.mcp._prompt_manager
+        prompt = pm._prompts["user/greeting"]
+        result = await prompt.fn(name="Chris", project="awareness")
+        assert result == "Hello Chris, welcome to awareness!"
+
+    @pytest.mark.anyio
+    async def test_custom_prompt_removal(self) -> None:
+        """Deleted custom prompts are removed on next sync."""
+        await server_mod.remember(
+            source="custom-prompt",
+            tags=["prompt"],
+            description="Temporary",
+            content="temp",
+            logical_key="temp",
+        )
+        server_mod._sync_custom_prompts()
+        pm = server_mod.mcp._prompt_manager
+        assert "user/temp" in pm._prompts
+        # Delete and re-sync
+        entry_id = server_mod.store.get_entries(source="custom-prompt")[0].id
+        server_mod.store.soft_delete_by_id(entry_id)
+        server_mod._sync_custom_prompts()
+        assert "user/temp" not in pm._prompts
