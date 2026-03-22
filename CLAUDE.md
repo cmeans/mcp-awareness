@@ -6,6 +6,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **mcp-awareness** — a generic MCP server that provides ambient system awareness to AI agents. Edge processes (NAS daemons, calendar processors, CI/CD watchers) write tagged status, alerts, and knowledge. Any MCP client reads a unified, token-optimized briefing.
 
+## PR conventions
+
+Every PR that changes functionality must include:
+- **CHANGELOG update** — add entries under `[Unreleased]` following Keep a Changelog format
+- **README update** — if the change affects "Current status", "Implemented", test count, or tool count, update those sections
+- **Test count** — update the test count in README if tests were added or removed
+- **QA section** — include manual testing steps with checkboxes, prerequisites, and exact commands including alternate ports to avoid breaking production
+- **Data dictionary** — update `docs/data-dictionary.md` if schema changed
+
 ## Build & Test
 
 ```bash

@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-03-21
+
+### Added
+- **`logical_key` upsert**: Optional `logical_key` param on `remember` enables idempotent upserts — same source + logical_key updates in place with changelog tracking, no UUID needed
+- **Partial unique index** on `(source, logical_key)` for both SQLite and PostgreSQL
+- **Postgres migration**: auto-adds `logical_key` column to existing databases on startup
+- **Cross-platform feedback loop story** in README "How it's built" section
+- 7 new tests (155 total)
+
+### Changed
+- Production deployment switched from SQLite to PostgreSQL backend
+- Dockerfile installs `[postgres]` extra (psycopg)
+- Docker Compose: Postgres service in default profile, mcp-awareness depends on postgres health
+- Clean shutdown on Ctrl+C — `KeyboardInterrupt` prints "Shutdown requested" instead of traceback
+- SQLite `CREATE TABLE` includes `logical_key` column (migration still handles existing DBs)
+
+### Fixed
+- Postgres migration: `logical_key` index creation moved after column migration
+- SQLite migration: same fix — index creation after column addition
+- MCP session manager initialization for non-MOUNT_PATH HTTP transport
+
 ## [0.3.0] - 2026-03-21
 
 ### Added
@@ -86,7 +107,8 @@ Initial implementation.
 - **Dockerfile** for container deployment
 - Design docs: core spec and collation layer
 
-[Unreleased]: https://github.com/cmeans/mcp-awareness/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/cmeans/mcp-awareness/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/cmeans/mcp-awareness/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/cmeans/mcp-awareness/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/cmeans/mcp-awareness/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/cmeans/mcp-awareness/releases/tag/v0.1.0

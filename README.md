@@ -220,21 +220,23 @@ See [Security considerations](docs/deployment-guide.md#security-considerations) 
 
 **Implemented:**
 - Shared knowledge store: `remember`, `learn_pattern`, `add_context`, `set_preference` with filtered retrieval
+- Idempotent upserts via `logical_key` — same source + key updates in place with changelog tracking, no UUID needed
 - In-place updates with changelog tracking (`update_entry` + `include_history`)
 - Store introspection: `get_stats` for entry counts, `get_tags` for tag discovery
 - General-purpose notes with optional content payload and MIME type
 - Ambient awareness: status reporting, alert detection, suppression, briefing generation
-- Storage backends: SQLite (default) and PostgreSQL with pgvector (opt-in via `AWARENESS_BACKEND=postgres`)
+- PostgreSQL backend with pgvector (production default), TIMESTAMPTZ columns, GIN-indexed tag queries, Debezium CDC-ready (`wal_level=logical`)
+- SQLite backend available as lightweight alternative
 - Storage abstraction: `Store` protocol — backends are swappable without changing server or collator logic
 - Full MCP API: 6 resources + 18 tools (read mirrors for tools-only clients like Claude.ai)
 - Soft delete with 30-day trash, dry-run confirmation for bulk operations
 - Request timing instrumentation and `/health` endpoint for latency analysis
 - Streamable HTTP + stdio transports
 - Secret path auth + Cloudflare WAF for edge-level access control
-- Docker Compose with named Cloudflare Tunnel or ephemeral quick tunnel
+- Docker Compose with Postgres, named Cloudflare Tunnel, or ephemeral quick tunnel
 - Three-layer detection model (threshold + knowledge implemented; baseline planned)
 - Suppression system with time-based expiry and escalation overrides
-- 148 tests, strict type checking, CI pipeline
+- 155 tests, strict type checking, CI pipeline
 
 **Not yet implemented:**
 - Layer 2 (baseline) detection — rolling averages and deviation calculation
