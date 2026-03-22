@@ -12,7 +12,31 @@ Every PR that changes functionality must include:
 - **CHANGELOG update** — add entries under `[Unreleased]` following Keep a Changelog format
 - **README update** — if the change affects "Current status", "Implemented", test count, or tool count, update those sections
 - **Test count** — update the test count in README if tests were added or removed
-- **QA section** — include manual testing steps with checkboxes, prerequisites, and exact commands including alternate ports to avoid breaking production
+- **QA section** — every PR body must include a `## QA` section with:
+  - **Prerequisites**: environment setup needed (e.g., install deps, deploy to test instance). Use an alternate port (e.g., `AWARENESS_PORT=8421`) to avoid breaking production
+  - **Manual tests**: all testing must go through the MCP interface (call awareness tools directly, not raw HTTP/curl). Each test step should:
+    - Have a checkbox (`- [ ]`) to mark pass/fail
+    - Name the MCP tool to call and the arguments to pass
+    - Describe the expected outcome explicitly
+  - **Automated checks**: checkboxes for `pytest`, `ruff`, `mypy` results
+  - Example format:
+    ```markdown
+    ## QA
+
+    ### Prerequisites
+    - `pip install -e ".[dev]"`
+    - Deploy to test instance on alternate port (`AWARENESS_PORT=8421`)
+
+    ### Automated checks
+    - [ ] `python -m pytest tests/` — all pass
+    - [ ] `ruff check src/ tests/` — clean
+    - [ ] `mypy src/mcp_awareness/` — clean
+
+    ### Manual tests (via MCP tools)
+    1. - [ ] **Description of test**
+       Call `tool_name(arg1="value", arg2="value")`
+       Expected: description of what success looks like
+    ```
 - **Data dictionary** — update `docs/data-dictionary.md` if schema changed
 
 ## Build & Test
