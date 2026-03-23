@@ -95,4 +95,47 @@ class Store(Protocol):
 
     def restore_by_tags(self, tags: list[str]) -> int: ...
 
+    # Read / action tracking
+
+    def log_read(
+        self, entry_ids: list[str], tool_used: str, platform: str | None = None
+    ) -> None: ...
+
+    def log_action(
+        self,
+        entry_id: str,
+        action: str,
+        platform: str | None = None,
+        detail: str | None = None,
+        tags: list[str] | None = None,
+    ) -> dict[str, Any]: ...
+
+    def get_reads(
+        self,
+        entry_id: str | None = None,
+        since: datetime | None = None,
+        platform: str | None = None,
+        limit: int | None = None,
+    ) -> list[dict[str, Any]]: ...
+
+    def get_actions(
+        self,
+        entry_id: str | None = None,
+        since: datetime | None = None,
+        platform: str | None = None,
+        tags: list[str] | None = None,
+        limit: int | None = None,
+    ) -> list[dict[str, Any]]: ...
+
+    def get_unread(self, since: datetime | None = None) -> list[Entry]: ...
+
+    def get_activity(
+        self,
+        since: datetime | None = None,
+        platform: str | None = None,
+        limit: int | None = None,
+    ) -> list[dict[str, Any]]: ...
+
+    def get_read_counts(self, entry_ids: list[str]) -> dict[str, dict[str, Any]]: ...
+
     def clear(self) -> None: ...

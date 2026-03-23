@@ -856,3 +856,224 @@ def test_get_deleted_since(store):
 
     assert len(store.get_deleted()) == 2
     assert len(store.get_deleted(since=cutoff)) == 1
+
+
+# ------------------------------------------------------------------
+# Read / action tracking tests
+# ------------------------------------------------------------------
+
+
+def test_log_read_and_get_reads(store):
+    """log_read records reads, get_reads retrieves them."""
+    entry = store.add(
+        Entry(
+            id=make_id(),
+            type=EntryType.NOTE,
+            source="test",
+            tags=["demo"],
+            created=now_utc(),
+            updated=now_utc(),
+            expires=None,
+            data={"description": "readable"},
+        )
+    )
+    store.log_read([entry.id], tool_used="get_knowledge")
+    store.log_read([entry.id], tool_used="get_knowledge", platform="claude-code")
+    reads = store.get_reads(entry_id=entry.id)
+    assert len(reads) == 2
+    assert reads[0]["entry_id"] == entry.id
+    assert reads[0]["tool_used"] == "get_knowledge"
+
+
+def test_log_read_empty_list(store):
+    """log_read with empty list is a no-op."""
+    store.log_read([], tool_used="test")
+    assert store.get_reads() == []
+
+
+def test_log_action_and_get_actions(store):
+    """log_action records actions, get_actions retrieves them."""
+    entry = store.add(
+        Entry(
+            id=make_id(),
+            type=EntryType.NOTE,
+            source="test",
+            tags=["project", "mcp-awareness"],
+            created=now_utc(),
+            updated=now_utc(),
+            expires=None,
+            data={"description": "actionable"},
+        )
+    )
+    result = store.log_action(
+        entry_id=entry.id,
+        action="created GitHub issue #42",
+        platform="claude-code",
+        detail="https://github.com/cmeans/mcp-awareness/issues/42",
+    )
+    assert result["action"] == "created GitHub issue #42"
+    assert result["tags"] == ["project", "mcp-awareness"]  # copied from entry
+
+    actions = store.get_actions(entry_id=entry.id)
+    assert len(actions) == 1
+    assert actions[0]["action"] == "created GitHub issue #42"
+    assert actions[0]["detail"] == "https://github.com/cmeans/mcp-awareness/issues/42"
+
+
+def test_log_action_custom_tags(store):
+    """log_action accepts custom tags instead of copying from entry."""
+    entry = store.add(
+        Entry(
+            id=make_id(),
+            type=EntryType.NOTE,
+            source="test",
+            tags=["original"],
+            created=now_utc(),
+            updated=now_utc(),
+            expires=None,
+            data={"description": "test"},
+        )
+    )
+    result = store.log_action(entry_id=entry.id, action="test", tags=["custom", "tags"])
+    assert result["tags"] == ["custom", "tags"]
+
+
+def test_log_action_invalid_entry_id(store):
+    """log_action returns error for nonexistent entry_id."""
+    result = store.log_action(entry_id="nonexistent-id", action="test")
+    assert result["status"] == "error"
+    assert "not found" in result["message"].lower()
+
+
+def test_get_actions_filter_by_tags(store):
+    """get_actions can filter by tags."""
+    entry = store.add(
+        Entry(
+            id=make_id(),
+            type=EntryType.NOTE,
+            source="test",
+            tags=["project"],
+            created=now_utc(),
+            updated=now_utc(),
+            expires=None,
+            data={"description": "test"},
+        )
+    )
+    store.log_action(entry_id=entry.id, action="tagged action", tags=["project", "deploy"])
+    store.log_action(entry_id=entry.id, action="other action", tags=["personal"])
+
+    project_actions = store.get_actions(tags=["project"])
+    assert len(project_actions) == 1
+    assert project_actions[0]["action"] == "tagged action"
+
+
+def test_get_unread(store):
+    """get_unread returns entries with zero reads."""
+    e1 = store.add(
+        Entry(
+            id=make_id(),
+            type=EntryType.NOTE,
+            source="test",
+            tags=[],
+            created=now_utc(),
+            updated=now_utc(),
+            expires=None,
+            data={"description": "read entry"},
+        )
+    )
+    store.add(
+        Entry(
+            id=make_id(),
+            type=EntryType.NOTE,
+            source="test",
+            tags=[],
+            created=now_utc(),
+            updated=now_utc(),
+            expires=None,
+            data={"description": "unread entry"},
+        )
+    )
+    store.log_read([e1.id], tool_used="test")
+    unread = store.get_unread()
+    assert len(unread) == 1
+    assert unread[0].data["description"] == "unread entry"
+
+
+def test_get_activity(store):
+    """get_activity returns combined reads + actions feed."""
+    entry = store.add(
+        Entry(
+            id=make_id(),
+            type=EntryType.NOTE,
+            source="test",
+            tags=[],
+            created=now_utc(),
+            updated=now_utc(),
+            expires=None,
+            data={"description": "test"},
+        )
+    )
+    store.log_read([entry.id], tool_used="get_knowledge")
+    store.log_action(entry_id=entry.id, action="used for context")
+
+    activity = store.get_activity()
+    assert len(activity) == 2
+    types = {a["event_type"] for a in activity}
+    assert types == {"read", "action"}
+
+
+def test_get_read_counts(store):
+    """get_read_counts returns counts and last_read per entry."""
+    e1 = store.add(
+        Entry(
+            id=make_id(),
+            type=EntryType.NOTE,
+            source="test",
+            tags=[],
+            created=now_utc(),
+            updated=now_utc(),
+            expires=None,
+            data={"description": "popular"},
+        )
+    )
+    e2 = store.add(
+        Entry(
+            id=make_id(),
+            type=EntryType.NOTE,
+            source="test",
+            tags=[],
+            created=now_utc(),
+            updated=now_utc(),
+            expires=None,
+            data={"description": "unpopular"},
+        )
+    )
+    store.log_read([e1.id], tool_used="test")
+    store.log_read([e1.id], tool_used="test")
+    store.log_read([e1.id], tool_used="test")
+
+    counts = store.get_read_counts([e1.id, e2.id])
+    assert counts[e1.id]["read_count"] == 3
+    assert counts[e1.id]["last_read"] is not None
+    assert e2.id not in counts  # no reads
+
+
+def test_clear_removes_reads_and_actions(store):
+    """clear() removes reads and actions along with entries."""
+    entry = store.add(
+        Entry(
+            id=make_id(),
+            type=EntryType.NOTE,
+            source="test",
+            tags=[],
+            created=now_utc(),
+            updated=now_utc(),
+            expires=None,
+            data={"description": "test"},
+        )
+    )
+    store.log_read([entry.id], tool_used="test")
+    store.log_action(entry_id=entry.id, action="test")
+    store.clear()
+    assert store.get_reads() == []
+    assert store.get_actions() == []

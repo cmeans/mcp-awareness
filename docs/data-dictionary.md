@@ -127,6 +127,48 @@ Written by agents via `set_preference`. Keyed by `key` + `scope` (upserted). Por
 - **Staleness:** Status entries with `ttl_sec` are marked stale in the briefing if no update arrives within the TTL window. The entry itself is not deleted.
 - **Change tracking:** `update_entry` appends previous field values to the `changelog` array in `data`. Use `get_knowledge(include_history="true")` to see changes, or `include_history="only"` to find entries that have been modified.
 - **Hard deletes:** The API only performs soft deletes. Manual SQL `DELETE` statements bypass the trash — that data is gone permanently. Back up regularly.
+- **Read/action cleanup:** The `reads` and `actions` tables use `ON DELETE CASCADE` on `entry_id`. This means read and action records are automatically removed when an entry is **hard deleted** (auto-purge or manual SQL). Soft delete (`delete_entry`) does **not** cascade — reads and actions persist for trashed entries until the 30-day purge.
+
+## Table: `reads`
+
+Auto-populated when entries are accessed via `get_knowledge` and `get_alerts`. Fire-and-forget — read log failures never block tool responses.
+
+| Column | Type | Nullable | Description |
+|--------|------|----------|-------------|
+| `id` | SERIAL | No | Auto-incrementing primary key. |
+| `entry_id` | TEXT | No | References `entries(id)` with `ON DELETE CASCADE`. |
+| `timestamp` | TIMESTAMPTZ | No | When the read occurred. Default: `now()`. |
+| `platform` | TEXT | Yes | Which platform performed the read (e.g., `"claude-code"`). |
+| `tool_used` | TEXT | Yes | Which tool triggered the read (e.g., `"get_knowledge"`). |
+
+### Indexes
+
+| Index | Columns | Type | Purpose |
+|-------|---------|------|---------|
+| `idx_reads_entry` | `entry_id` | B-tree | Look up reads for a specific entry |
+| `idx_reads_timestamp` | `timestamp` | B-tree | Time-range queries |
+
+## Table: `actions`
+
+Agent-reported records of concrete actions taken because of an entry. Permanent audit trail.
+
+| Column | Type | Nullable | Description |
+|--------|------|----------|-------------|
+| `id` | SERIAL | No | Auto-incrementing primary key. |
+| `entry_id` | TEXT | No | References `entries(id)` with `ON DELETE CASCADE`. |
+| `timestamp` | TIMESTAMPTZ | No | When the action was recorded. Default: `now()`. |
+| `platform` | TEXT | Yes | Which platform reported the action (e.g., `"claude-code"`). |
+| `action` | TEXT | No | What was done (e.g., `"created GitHub issue #42"`). |
+| `detail` | TEXT | Yes | Optional structured reference (PR URL, issue number, etc.). |
+| `tags` | JSONB | No | Tags for filtered queries. Default: copied from referenced entry. |
+
+### Indexes
+
+| Index | Columns | Type | Purpose |
+|-------|---------|------|---------|
+| `idx_actions_entry` | `entry_id` | B-tree | Look up actions for a specific entry |
+| `idx_actions_timestamp` | `timestamp` | B-tree | Time-range queries |
+| `idx_actions_tags_gin` | `tags` | GIN | Fast tag containment queries |
 
 ## Backend details
 

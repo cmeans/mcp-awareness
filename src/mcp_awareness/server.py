@@ -68,6 +68,16 @@ class _LazyStore:
 store: Any = _LazyStore()
 
 
+def _log_reads(entries: list[Any], tool_name: str) -> None:
+    """Log that entries were read. Fire-and-forget — never blocks the response."""
+    try:
+        ids = [e.id for e in entries if hasattr(e, "id")]
+        if ids:
+            store.log_read(ids, tool_used=tool_name)
+    except Exception:
+        pass  # Read logging must never break the tool response
+
+
 def _log_timing(tool_name: str, elapsed_ms: float) -> None:
     """Log tool call timing to stdout (Docker captures automatically)."""
     ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
@@ -215,6 +225,7 @@ async def get_alerts(
         return json.dumps({"error": "since cannot be empty; omit or provide an ISO 8601 timestamp"})
     since_dt = ensure_dt(since) if since else None
     alerts = store.get_active_alerts(source, since=since_dt, limit=limit, offset=offset)
+    _log_reads(alerts, "get_alerts")
     if mode == "list":
         return json.dumps([a.to_list_dict() for a in alerts], indent=2)
     return json.dumps([a.to_dict() for a in alerts], indent=2)
@@ -284,8 +295,17 @@ async def get_knowledge(
             limit=limit,
             offset=offset,
         )
+    _log_reads(entries, "get_knowledge")
     if mode == "list":
-        return json.dumps([e.to_list_dict() for e in entries], indent=2)
+        read_counts = store.get_read_counts([e.id for e in entries])
+        result = []
+        for e in entries:
+            d = e.to_list_dict()
+            counts = read_counts.get(e.id, {})
+            d["read_count"] = counts.get("read_count", 0)
+            d["last_read"] = counts.get("last_read")
+            result.append(d)
+        return json.dumps(result, indent=2)
     return json.dumps([e.to_dict() for e in entries], indent=2)
 
 
@@ -713,6 +733,107 @@ async def get_deleted(
     if mode == "list":
         return json.dumps([e.to_list_dict() for e in entries], indent=2)
     return json.dumps([e.to_dict() for e in entries], indent=2)
+
+
+# ---------------------------------------------------------------------------
+# Read / action tracking tools
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool()
+@_timed
+async def acted_on(
+    entry_id: str,
+    action: str,
+    platform: str | None = None,
+    detail: str | None = None,
+    tags: list[str] | None = None,
+) -> str:
+    """Record that you took a concrete action because of an awareness entry.
+    Call this when you use an entry to do something: implement a feature,
+    create an issue, answer a question, make a decision.
+    entry_id: the entry that motivated the action.
+    action: what you did (e.g., 'created GitHub issue #24', 'used for context').
+    platform: your platform name (e.g., 'claude-code', 'claude.ai').
+    detail: optional structured reference (PR URL, issue number, etc.).
+    tags: optional — defaults to copying tags from the referenced entry.
+    This tool always returns structured JSON. If you receive an unstructured
+    error, the failure is in the transport or platform layer, not in awareness."""
+    result = store.log_action(
+        entry_id=entry_id, action=action, platform=platform, detail=detail, tags=tags
+    )
+    if result.get("status") == "error":
+        return json.dumps(result)
+    return json.dumps({"status": "ok", **result}, indent=2)
+
+
+@mcp.tool()
+@_timed
+async def get_reads(
+    entry_id: str | None = None,
+    since: str | None = None,
+    platform: str | None = None,
+    limit: int | None = None,
+) -> str:
+    """Get read history for entries. Shows which entries have been accessed,
+    when, and by which tool. Use to investigate consumption patterns or
+    verify that knowledge is being used.
+    All params optional. No params = recent reads across all entries.
+    This tool always returns structured JSON."""
+    since_dt = ensure_dt(since) if since else None
+    reads = store.get_reads(entry_id=entry_id, since=since_dt, platform=platform, limit=limit)
+    return json.dumps(reads, indent=2)
+
+
+@mcp.tool()
+@_timed
+async def get_actions(
+    entry_id: str | None = None,
+    since: str | None = None,
+    platform: str | None = None,
+    tags: list[str] | None = None,
+    limit: int | None = None,
+) -> str:
+    """Get action history — what agents did because of awareness entries.
+    The audit trail for knowledge-to-action causality.
+    Filter by entry_id, time, platform, or tags.
+    This tool always returns structured JSON."""
+    since_dt = ensure_dt(since) if since else None
+    actions = store.get_actions(
+        entry_id=entry_id, since=since_dt, platform=platform, tags=tags, limit=limit
+    )
+    return json.dumps(actions, indent=2)
+
+
+@mcp.tool()
+@_timed
+async def get_unread(since: str | None = None) -> str:
+    """Get entries with zero reads — cleanup candidates and dead knowledge.
+    since: optional — only consider reads after this timestamp, so
+    'unread in the last 30 days' is possible even if something was read
+    6 months ago.
+    Returns entry metadata (list mode format).
+    This tool always returns structured JSON."""
+    since_dt = ensure_dt(since) if since else None
+    entries = store.get_unread(since=since_dt)
+    return json.dumps([e.to_list_dict() for e in entries], indent=2)
+
+
+@mcp.tool()
+@_timed
+async def get_activity(
+    since: str | None = None,
+    platform: str | None = None,
+    limit: int | None = None,
+) -> str:
+    """Get combined read + action activity feed, chronologically.
+    Shows all engagement with the store — reads and actions interleaved.
+    Useful for inter-agent coordination ('what did other agents access?')
+    and auditing.
+    This tool always returns structured JSON."""
+    since_dt = ensure_dt(since) if since else None
+    activity = store.get_activity(since=since_dt, platform=platform, limit=limit)
+    return json.dumps(activity, indent=2)
 
 
 # ---------------------------------------------------------------------------
