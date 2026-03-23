@@ -338,9 +338,11 @@ def generate_briefing(store: Store) -> dict[str, Any]:
         ]
         briefing["attention_needed"] = True
 
-    # Count all pending intentions for context
-    pending_intentions = store.get_intentions(state="pending")
-    briefing["pending_intentions"] = len(pending_intentions)
+    # Count pending intentions, excluding those already fired (avoid double-counting)
+    all_pending = store.get_intentions(state="pending")
+    fired_ids = {i.id for i in fired_intentions}
+    pending_not_fired = [i for i in all_pending if i.id not in fired_ids]
+    briefing["pending_intentions"] = len(pending_not_fired)
 
     briefing["evaluation"] = {
         "alerts_checked": eval_alerts_checked,
@@ -348,7 +350,7 @@ def generate_briefing(store: Store) -> dict[str, Any]:
         "pattern_matched": eval_pattern_matched,
         "stale_sources": eval_stale_sources,
         "surfaced": briefing["active_alerts"],
-        "intentions_pending": len(pending_intentions),
+        "intentions_pending": len(pending_not_fired),
         "intentions_fired": len(fired_intentions),
     }
     briefing["summary"] = compose_summary(briefing)

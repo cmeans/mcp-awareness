@@ -812,7 +812,8 @@ class TestGenerateBriefing:
         assert len(briefing.get("fired_intentions", [])) == 1
         assert briefing["fired_intentions"][0]["goal"] == "Pick up milk"
         assert briefing["evaluation"]["intentions_fired"] == 1
-        assert briefing["evaluation"]["intentions_pending"] == 1  # still pending until transitioned
+        # Fired intentions excluded from pending count
+        assert briefing["evaluation"]["intentions_pending"] == 0
         assert "intention" in briefing["summary"].lower()
 
     def test_briefing_no_intentions_when_none_pending(self, store):

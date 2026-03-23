@@ -875,16 +875,17 @@ class PostgresStore:
         if entry is None or entry.type != EntryType.INTENTION:
             return None
         old_state = entry.data.get("state", "pending")
+        old_reason = entry.data.get("state_reason")
         now = now_utc()
         # Update state
         entry.data["state"] = new_state
         if reason:
             entry.data["state_reason"] = reason
-        # Changelog
+        # Changelog — capture previous values
         changelog = entry.data.setdefault("changelog", [])
         changed: dict[str, Any] = {"state": old_state}
-        if reason:
-            changed["state_reason"] = entry.data.get("state_reason", "")
+        if old_reason is not None:
+            changed["state_reason"] = old_reason
         changelog.append({"updated": to_iso(now), "changed": changed})
         entry.updated = now
         with self._conn.cursor() as cur:
