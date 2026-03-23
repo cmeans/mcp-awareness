@@ -13,7 +13,6 @@ services:
     #   - "8420:8420"
     environment:
       - AWARENESS_MOUNT_PATH=${AWARENESS_MOUNT_PATH:-}
-      - AWARENESS_BACKEND=${AWARENESS_BACKEND:-postgres}
       - AWARENESS_DATABASE_URL=${AWARENESS_DATABASE_URL:-}
     depends_on:
       postgres:

@@ -1,3 +1,5 @@
 """mcp-awareness: Generic MCP server for ambient system awareness."""
 
-__version__ = "0.1.0"
+from importlib.metadata import version
+
+__version__ = version("mcp-awareness-server")
