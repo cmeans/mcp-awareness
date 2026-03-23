@@ -127,10 +127,11 @@ Written by agents via `set_preference`. Keyed by `key` + `scope` (upserted). Por
 - **Staleness:** Status entries with `ttl_sec` are marked stale in the briefing if no update arrives within the TTL window. The entry itself is not deleted.
 - **Change tracking:** `update_entry` appends previous field values to the `changelog` array in `data`. Use `get_knowledge(include_history="true")` to see changes, or `include_history="only"` to find entries that have been modified.
 - **Hard deletes:** The API only performs soft deletes. Manual SQL `DELETE` statements bypass the trash — that data is gone permanently. Back up regularly.
+- **Read/action cleanup:** The `reads` and `actions` tables use `ON DELETE CASCADE` on `entry_id`. This means read and action records are automatically removed when an entry is **hard deleted** (auto-purge or manual SQL). Soft delete (`delete_entry`) does **not** cascade — reads and actions persist for trashed entries until the 30-day purge.
 
 ## Table: `reads`
 
-Auto-populated when entries are accessed via read tools (`get_knowledge`, `get_alerts`, etc.). Fire-and-forget — read log failures never block tool responses.
+Auto-populated when entries are accessed via `get_knowledge` and `get_alerts`. Fire-and-forget — read log failures never block tool responses.
 
 | Column | Type | Nullable | Description |
 |--------|------|----------|-------------|

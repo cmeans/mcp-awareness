@@ -8,14 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- **Read tracking**: Auto-logs when entries are accessed by `get_knowledge`, `get_alerts`, and other read tools. Query with `get_reads(entry_id?, since?, platform?, limit?)`.
+- **Read tracking**: Auto-logs when entries are accessed by `get_knowledge` and `get_alerts`. Query with `get_reads(entry_id?, since?, platform?, limit?)`.
 - **Action tracking**: `acted_on(entry_id, action, platform?, detail?, tags?)` records concrete actions agents take because of entries. Query with `get_actions(entry_id?, since?, platform?, tags?, limit?)`.
 - **Unread entries**: `get_unread(since?)` returns entries with zero reads — cleanup candidates and dead knowledge.
 - **Activity feed**: `get_activity(since?, platform?, limit?)` returns combined reads + actions chronologically.
 - **Read count enrichment**: List mode (`mode="list"`) now includes `read_count` and `last_read` on each entry.
 - **Actions have tags**: Tags on action records (default: copied from referenced entry) enable filtered action queries.
 - Alembic migration for `reads` and `actions` tables with indexes
-- 15 new tests (211 total)
+- 17 new tests (213 total)
 
 ## [0.6.1] - 2026-03-23
 
