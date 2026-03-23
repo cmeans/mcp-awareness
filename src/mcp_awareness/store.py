@@ -64,7 +64,9 @@ class Store(Protocol):
         tags: list[str] | None = None,
         include_history: str | None = None,
         since: datetime | None = None,
+        until: datetime | None = None,
         source: str | None = None,
+        learned_from: str | None = None,
         limit: int | None = None,
         offset: int | None = None,
     ) -> list[Entry]: ...

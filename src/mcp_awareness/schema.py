@@ -105,16 +105,29 @@ class Entry:
         return d
 
     def to_list_dict(self) -> dict[str, Any]:
-        """Lightweight metadata-only representation — no content or changelog."""
+        """Lightweight metadata-only representation — no content or changelog.
+
+        Type-aware: uses message for alerts, goal+state for intentions,
+        description for everything else.
+        """
+        entry_type = self.type.value if isinstance(self.type, EntryType) else self.type
+        # Type-aware description extraction
+        desc = self.data.get("description", "")
+        if not desc and entry_type == "alert":
+            desc = self.data.get("message", "")
         d: dict[str, Any] = {
             "id": self.id,
-            "type": self.type.value if isinstance(self.type, EntryType) else self.type,
+            "type": entry_type,
             "source": self.source,
             "tags": self.tags,
-            "description": self.data.get("description", ""),
+            "description": desc,
             "created": to_iso(self.created),
             "updated": to_iso(self.updated),
         }
+        # Include key fields for intentions in list mode
+        if entry_type == "intention":
+            d["goal"] = self.data.get("goal", "")
+            d["state"] = self.data.get("state", "pending")
         if self.logical_key is not None:
             d["logical_key"] = self.logical_key
         return d
