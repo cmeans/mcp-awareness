@@ -76,7 +76,7 @@ src/mcp_awareness/
 
 **Key design decisions**:
 - Briefing is computed on-demand per read (not background task)
-- Seven entry types: status, alert, pattern, suppression, context, preference, note
+- Eight entry types: status, alert, pattern, suppression, context, preference, note, intention
 - One status entry per source (upsert), alerts keyed by source + alert_id, preferences upsert by key + scope
 - Notes support optional content payload with MIME content_type
 - update_entry works on knowledge types only (note/pattern/context/preference); status/alert/suppression are immutable. Changes tracked in changelog array

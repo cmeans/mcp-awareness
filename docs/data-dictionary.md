@@ -7,7 +7,7 @@ All data in mcp-awareness is stored in a single `entries` table using a common e
 | Column | Type | Nullable | Description |
 |--------|------|----------|-------------|
 | `id` | TEXT | No | Primary key. UUID v4, generated via `uuid.uuid4()`. |
-| `type` | TEXT | No | Entry type. One of: `status`, `alert`, `pattern`, `suppression`, `context`, `preference`, `note`. |
+| `type` | TEXT | No | Entry type. One of: `status`, `alert`, `pattern`, `suppression`, `context`, `preference`, `note`, `intention`. |
 | `source` | TEXT | No | Origin identifier. Describes the subject, not the owner (e.g., `"personal"`, `"synology-nas"`, `"mcp-awareness-project"`). |
 | `created` | TIMESTAMPTZ | No | UTC timestamp. Set once when the entry is first created. |
 | `updated` | TIMESTAMPTZ | No | UTC timestamp. Updated on every upsert or `update_entry` call. |
@@ -83,6 +83,24 @@ Written by agents via `remember`. Permanent unless explicitly deleted. The defau
 | `content_type` | string | No | MIME type of the content (e.g., `"text/plain"`, `"application/json"`, `"text/markdown"`). Default: `"text/plain"`. |
 | `learned_from` | string | No | Platform that recorded this. Default: `"conversation"`. |
 | `changelog` | array | No | Change history. Populated automatically by `update_entry`. Each element: `{"updated": "<timestamp>", "changed": {"<field>": "<old_value>"}}`. |
+
+### `intention` — Goals with conditions
+
+Written by agents via `remind`. Intentions have a lifecycle: they start `pending`, fire when conditions are met (currently time-based via `deliver_at`), and complete when the user acts on them. The collator evaluates pending intentions during briefing generation.
+
+**`data` fields:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `goal` | string | Yes | What outcome is desired (e.g., "pick up milk", "tell Mom about insurance"). |
+| `state` | string | Yes | Lifecycle state: `pending`, `fired`, `completed`, `snoozed`, `cancelled`. |
+| `deliver_at` | string | No | ISO 8601 timestamp — when to surface this intention. Required for time-based triggers. |
+| `constraints` | string | No | Preferences or requirements (e.g., "organic, budget-conscious"). |
+| `urgency` | string | No | `"low"`, `"normal"`, or `"high"`. Default: `"normal"`. |
+| `recurrence` | string | No | Reserved for future use. Currently only one-shot (`null`) is supported. |
+| `state_reason` | string | No | Explanation for the current state (e.g., "completed at Mariano's", "not today"). |
+| `learned_from` | string | No | Platform that created this. Default: `"conversation"`. |
+| `changelog` | array | No | State transition history. Each element: `{"updated": "<timestamp>", "changed": {"state": "<old_state>"}}`. |
 
 ### `suppression` — Alert suppressions
 

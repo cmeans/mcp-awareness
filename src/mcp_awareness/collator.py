@@ -200,6 +200,10 @@ def compose_summary(briefing: dict[str, Any]) -> str:
     if upcoming:
         parts.append(f"{len(upcoming)} upcoming item{'s' if len(upcoming) != 1 else ''}")
 
+    fired = briefing.get("fired_intentions", [])
+    if fired:
+        parts.append(f"{len(fired)} intention{'s' if len(fired) != 1 else ''} ready")
+
     return ". ".join(parts) + "." if parts else f"All clear across {total} sources."
 
 
@@ -224,6 +228,11 @@ def compose_mention(briefing: dict[str, Any]) -> str:
         summary = item.get("summary", "")
         if summary:
             parts.append(summary)
+
+    for intention in briefing.get("fired_intentions", []):
+        goal = intention.get("goal", "")
+        if goal:
+            parts.append(f"INTENTION: {goal}")
 
     return " ".join(parts)
 
@@ -314,12 +323,35 @@ def generate_briefing(store: Store) -> dict[str, Any]:
         briefing["sources"][source] = source_entry
 
     briefing["active_suppressions"] = store.count_active_suppressions()
+
+    # Evaluate time-based intentions — fire pending intentions whose deliver_at has passed
+    fired_intentions = store.get_fired_intentions()
+    if fired_intentions:
+        briefing["fired_intentions"] = [
+            {
+                "id": i.id,
+                "goal": i.data.get("goal", i.data.get("description", "")),
+                "source": i.source,
+                "tags": i.tags,
+            }
+            for i in fired_intentions
+        ]
+        briefing["attention_needed"] = True
+
+    # Count pending intentions, excluding those already fired (avoid double-counting)
+    all_pending = store.get_intentions(state="pending")
+    fired_ids = {i.id for i in fired_intentions}
+    pending_not_fired = [i for i in all_pending if i.id not in fired_ids]
+    briefing["pending_intentions"] = len(pending_not_fired)
+
     briefing["evaluation"] = {
         "alerts_checked": eval_alerts_checked,
         "suppressed": eval_suppressed,
         "pattern_matched": eval_pattern_matched,
         "stale_sources": eval_stale_sources,
         "surfaced": briefing["active_alerts"],
+        "intentions_pending": len(pending_not_fired),
+        "intentions_fired": len(fired_intentions),
     }
     briefing["summary"] = compose_summary(briefing)
 

@@ -17,6 +17,11 @@ class EntryType(str, Enum):
     CONTEXT = "context"
     PREFERENCE = "preference"
     NOTE = "note"
+    INTENTION = "intention"
+
+
+# Valid states for the INTENTION lifecycle
+INTENTION_STATES = {"pending", "fired", "completed", "snoozed", "cancelled"}
 
 
 SEVERITY_RANK = {
@@ -40,6 +45,9 @@ def now_utc() -> datetime:
 
 
 def parse_iso(s: str) -> datetime:
+    # Python 3.10 doesn't support 'Z' suffix in fromisoformat — normalize to +00:00
+    if s.endswith("Z"):
+        s = s[:-1] + "+00:00"
     return datetime.fromisoformat(s)
 
 

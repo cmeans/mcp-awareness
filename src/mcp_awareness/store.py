@@ -138,4 +138,20 @@ class Store(Protocol):
 
     def get_read_counts(self, entry_ids: list[str]) -> dict[str, dict[str, Any]]: ...
 
+    # Intentions
+
+    def get_intentions(
+        self,
+        state: str | None = None,
+        source: str | None = None,
+        tags: list[str] | None = None,
+        limit: int | None = None,
+    ) -> list[Entry]: ...
+
+    def update_intention_state(
+        self, entry_id: str, new_state: str, reason: str | None = None
+    ) -> Entry | None: ...
+
+    def get_fired_intentions(self) -> list[Entry]: ...
+
     def clear(self) -> None: ...
