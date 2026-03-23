@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-03-23
+
 ### Added
 - **Read tracking**: Auto-logs when entries are accessed by `get_knowledge` and `get_alerts`. Query with `get_reads(entry_id?, since?, platform?, limit?)`.
 - **Action tracking**: `acted_on(entry_id, action, platform?, detail?, tags?)` records concrete actions agents take because of entries. Query with `get_actions(entry_id?, since?, platform?, tags?, limit?)`.
@@ -197,7 +199,8 @@ Initial implementation.
 - **Dockerfile** for container deployment
 - Design docs: core spec and collation layer
 
-[Unreleased]: https://github.com/cmeans/mcp-awareness/compare/v0.6.1...HEAD
+[Unreleased]: https://github.com/cmeans/mcp-awareness/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/cmeans/mcp-awareness/compare/v0.6.1...v0.7.0
 [0.6.1]: https://github.com/cmeans/mcp-awareness/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/cmeans/mcp-awareness/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/cmeans/mcp-awareness/compare/v0.4.1...v0.5.0
