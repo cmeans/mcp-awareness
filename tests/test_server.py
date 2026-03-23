@@ -1701,6 +1701,44 @@ class TestSemanticSearchTool:
         assert "embedding provider" in result["message"].lower()
 
     @pytest.mark.anyio
+    async def test_embed_returns_empty(self, monkeypatch) -> None:
+        """When embed returns empty list, returns error."""
+
+        class EmptyProvider:
+            model_name = "mock"
+            dimensions = 768
+
+            def embed(self, texts: list[str]) -> list[list[float]]:
+                return []
+
+            def is_available(self) -> bool:
+                return True
+
+        monkeypatch.setattr(server_mod, "_embedding_provider", EmptyProvider())
+        result = json.loads(await server_mod.semantic_search(query="test"))
+        assert result["status"] == "error"
+        assert "failed" in result["message"].lower()
+
+    @pytest.mark.anyio
+    async def test_embed_raises_exception(self, monkeypatch) -> None:
+        """When embed raises, returns error with message."""
+
+        class FailingProvider:
+            model_name = "mock"
+            dimensions = 768
+
+            def embed(self, texts: list[str]) -> list[list[float]]:
+                raise ConnectionError("Ollama down")
+
+            def is_available(self) -> bool:
+                return True
+
+        monkeypatch.setattr(server_mod, "_embedding_provider", FailingProvider())
+        result = json.loads(await server_mod.semantic_search(query="test"))
+        assert result["status"] == "error"
+        assert "Ollama down" in result["message"]
+
+    @pytest.mark.anyio
     async def test_search_with_mock_provider(self, monkeypatch) -> None:
         """With mock embeddings, returns ranked results."""
 

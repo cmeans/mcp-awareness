@@ -168,6 +168,18 @@ class TestNullEmbedding:
 
 
 # ---------------------------------------------------------------------------
+# OllamaEmbedding unit tests (no running Ollama needed)
+# ---------------------------------------------------------------------------
+
+
+class TestOllamaEmbeddingUnit:
+    def test_unreachable_is_not_available(self):
+        """is_available returns False when Ollama is unreachable."""
+        p = OllamaEmbedding(base_url="http://localhost:19999")
+        assert p.is_available() is False
+
+
+# ---------------------------------------------------------------------------
 # create_provider
 # ---------------------------------------------------------------------------
 

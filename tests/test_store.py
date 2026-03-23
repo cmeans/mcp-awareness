@@ -1848,3 +1848,75 @@ class TestEmbeddings:
             store.upsert_embedding(entry.id, "m", 768, f"h{i}", vec)
         results = store.semantic_search(vec, "m", limit=2)
         assert len(results) == 2
+
+    def test_semantic_search_since_filter(self, store):
+        """since filter narrows by updated timestamp."""
+        from datetime import timedelta
+
+        old = now_utc() - timedelta(hours=2)
+        new = now_utc()
+        e1 = Entry(
+            id=make_id(),
+            type=EntryType.NOTE,
+            source="test",
+            tags=[],
+            created=old,
+            updated=old,
+            expires=None,
+            data={"description": "old"},
+        )
+        e2 = Entry(
+            id=make_id(),
+            type=EntryType.NOTE,
+            source="test",
+            tags=[],
+            created=new,
+            updated=new,
+            expires=None,
+            data={"description": "new"},
+        )
+        store.add(e1)
+        store.add(e2)
+        vec = self._vec(768, 0)
+        store.upsert_embedding(e1.id, "m", 768, "h1", vec)
+        store.upsert_embedding(e2.id, "m", 768, "h2", vec)
+        cutoff = now_utc() - timedelta(hours=1)
+        results = store.semantic_search(vec, "m", since=cutoff)
+        assert len(results) == 1
+        assert results[0][0].data["description"] == "new"
+
+    def test_semantic_search_until_filter(self, store):
+        """until filter narrows by updated timestamp."""
+        from datetime import timedelta
+
+        old = now_utc() - timedelta(hours=2)
+        new = now_utc()
+        e1 = Entry(
+            id=make_id(),
+            type=EntryType.NOTE,
+            source="test",
+            tags=[],
+            created=old,
+            updated=old,
+            expires=None,
+            data={"description": "old"},
+        )
+        e2 = Entry(
+            id=make_id(),
+            type=EntryType.NOTE,
+            source="test",
+            tags=[],
+            created=new,
+            updated=new,
+            expires=None,
+            data={"description": "new"},
+        )
+        store.add(e1)
+        store.add(e2)
+        vec = self._vec(768, 0)
+        store.upsert_embedding(e1.id, "m", 768, "h1", vec)
+        store.upsert_embedding(e2.id, "m", 768, "h2", vec)
+        cutoff = now_utc() - timedelta(hours=1)
+        results = store.semantic_search(vec, "m", until=cutoff)
+        assert len(results) == 1
+        assert results[0][0].data["description"] == "old"
