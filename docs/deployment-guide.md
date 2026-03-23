@@ -111,7 +111,8 @@ docker compose up -d
 ```
 
 This starts:
-- **mcp-awareness** — the MCP server (HTTP transport, secret path mounted)
+- **mcp-awareness** — the Awareness server (HTTP transport, secret path mounted)
+- **postgres** — PostgreSQL with pgvector
 - **awareness-tunnel** — named Cloudflare Tunnel to your domain
 
 Verify:
