@@ -357,4 +357,4 @@ The current approach uses two layers:
 
 ---
 
-*[mcp-awareness](https://github.com/cmeans/mcp-awareness) is open source under the [Apache 2.0 License](../LICENSE). Copyright 2026 Chris Means.*
+*[mcp-awareness](https://github.com/cmeans/mcp-awareness) is open source under the [Apache 2.0 License](../LICENSE). Copyright (c) 2026 Chris Means.*
