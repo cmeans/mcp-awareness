@@ -341,7 +341,8 @@ The current approach uses two layers:
 ## Notes
 
 - **The store persists** in the data directory. Restart the server and your data is still there.
-- **Not all clients expose MCP resources** — the MCP spec defines both [resources](https://modelcontextprotocol.io/docs/concepts/resources) (read path) and [tools](https://modelcontextprotocol.io/docs/concepts/tools) (write path). Some clients (including Claude.ai) only surface tools. We added read tools (`get_briefing`, `get_alerts`, `get_status`, `get_knowledge`, `get_suppressions`, `get_stats`, `get_tags`) that mirror the resource endpoints, so every client gets full functionality.
+- **Not all clients support all MCP features** — the MCP spec defines [resources](https://modelcontextprotocol.io/docs/concepts/resources), [tools](https://modelcontextprotocol.io/docs/concepts/tools), and [prompts](https://modelcontextprotocol.io/docs/concepts/prompts). Client support varies: some only surface tools (e.g., Claude.ai), some don't support prompts. All 18 tools work everywhere. Read tools mirror the resources so tools-only clients get full functionality. Prompts (including user-defined custom prompts) are available in clients that support them — VS Code, Claude Desktop, Cursor.
+
 - **18 tools available** — includes `remember` (general notes), `learn_pattern` (operational knowledge), `add_context` (time-limited), `update_entry` (in-place updates with changelog), `get_stats` (store summary), `get_tags` (tag discovery), plus all the alerting and data management tools. See the [README](../README.md#tools) for the full list.
 - **Model matters** — best experience with Claude Sonnet 4.6 or Opus 4.6. Smaller models (Haiku, GPT-4o-mini) may not follow MCP prompts or call tools proactively.
 - **Suppression matching is content-aware** — a suppression tagged `["qbittorrent"]` will match alerts whose alert_id or message contains "qbittorrent", even if the alert's structural tags differ.
