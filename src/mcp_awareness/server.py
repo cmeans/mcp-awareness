@@ -302,6 +302,8 @@ async def get_knowledge(
     since: str | None = None,
     until: str | None = None,
     learned_from: str | None = None,
+    created_after: str | None = None,
+    created_before: str | None = None,
     mode: str | None = None,
     limit: int | None = None,
     offset: int | None = None,
@@ -319,6 +321,10 @@ async def get_knowledge(
     Combine with since for date ranges (e.g., "what happened in March?").
     learned_from: filter by platform that created the entry (e.g., 'claude-code',
     'claude.ai', 'conversation'). Useful when multiple platforms write entries.
+    created_after: ISO 8601 timestamp — filter by creation time (not last update).
+    created_before: ISO 8601 timestamp — filter by creation time (not last update).
+    Use created_after/created_before when you care about when knowledge was first
+    recorded, not when it was last modified.
     mode: omit for full entries, 'list' for metadata only (id, type, source,
     description, tags, created, updated — no content or changelog). Use 'list'
     to orient before pulling full entries.
@@ -331,6 +337,8 @@ async def get_knowledge(
         return json.dumps({"error": "since cannot be empty; omit or provide an ISO 8601 timestamp"})
     since_dt = ensure_dt(since) if since else None
     until_dt = ensure_dt(until) if until else None
+    created_after_dt = ensure_dt(created_after) if created_after else None
+    created_before_dt = ensure_dt(created_before) if created_before else None
     if entry_type:
         et = EntryType(entry_type)
         entries = store.get_entries(
@@ -349,6 +357,8 @@ async def get_knowledge(
             until=until_dt,
             source=source,
             learned_from=learned_from,
+            created_after=created_after_dt,
+            created_before=created_before_dt,
             limit=limit,
             offset=offset,
         )
@@ -1330,11 +1340,12 @@ def _sync_custom_prompts() -> None:
     from mcp.server.fastmcp.prompts.base import PromptArgument
 
     entries = store.get_entries(source="custom-prompt")
-    pm = mcp._prompt_manager
-    # Remove previously synced custom prompts
-    to_remove = [name for name in pm._prompts if name.startswith("user/")]
+    # Access _prompts dict for deletion only — no public remove API exists in FastMCP.
+    # add_prompt() is used for insertion (public API).
+    prompts_dict = mcp._prompt_manager._prompts
+    to_remove = [name for name in prompts_dict if name.startswith("user/")]
     for name in to_remove:
-        del pm._prompts[name]
+        del prompts_dict[name]
 
     for entry in entries:
         key = entry.logical_key or entry.id
@@ -1368,7 +1379,9 @@ def _sync_custom_prompts() -> None:
             fn=_make_fn(template),
             context_kwarg=None,
         )
-        pm._prompts[name] = prompt
+        # Force overwrite — add_prompt() skips duplicates, but we need
+        # to replace prompts whose content changed in the store.
+        prompts_dict[name] = prompt
 
 
 # Custom prompt sync happens at server start (in main()), not at import time.

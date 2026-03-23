@@ -402,6 +402,8 @@ class PostgresStore:
         until: datetime | None = None,
         source: str | None = None,
         learned_from: str | None = None,
+        created_after: datetime | None = None,
+        created_before: datetime | None = None,
         limit: int | None = None,
         offset: int | None = None,
     ) -> list[Entry]:
@@ -431,6 +433,12 @@ class PostgresStore:
         if learned_from is not None:
             clauses.append("data->>'learned_from' = %s")
             params.append(learned_from)
+        if created_after is not None:
+            clauses.append("created >= %s")
+            params.append(created_after)
+        if created_before is not None:
+            clauses.append("created <= %s")
+            params.append(created_before)
         where = " AND ".join(clauses)
         # Push LIMIT/OFFSET to SQL unless include_history="only" (post-filter changes count)
         sql_limit = limit if include_history != "only" else None

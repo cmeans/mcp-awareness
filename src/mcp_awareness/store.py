@@ -67,6 +67,8 @@ class Store(Protocol):
         until: datetime | None = None,
         source: str | None = None,
         learned_from: str | None = None,
+        created_after: datetime | None = None,
+        created_before: datetime | None = None,
         limit: int | None = None,
         offset: int | None = None,
     ) -> list[Entry]: ...

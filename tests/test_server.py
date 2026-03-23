@@ -1585,6 +1585,93 @@ class TestIntentionTools:
 
 
 # ---------------------------------------------------------------------------
+# created_after / created_before filters
+# ---------------------------------------------------------------------------
+
+
+class TestCreatedFilters:
+    @pytest.mark.anyio
+    async def test_created_after_filter(self) -> None:
+        from datetime import timedelta
+
+        from mcp_awareness.schema import now_utc
+
+        s = _store()
+        early = now_utc() - timedelta(hours=2)
+        late = now_utc()
+        from mcp_awareness.schema import Entry, EntryType, make_id
+
+        s.add(
+            Entry(
+                id=make_id(),
+                type=EntryType.NOTE,
+                source="test",
+                tags=["x"],
+                created=early,
+                updated=late,
+                expires=None,
+                data={"description": "old"},
+            )
+        )
+        s.add(
+            Entry(
+                id=make_id(),
+                type=EntryType.NOTE,
+                source="test",
+                tags=["x"],
+                created=late,
+                updated=late,
+                expires=None,
+                data={"description": "new"},
+            )
+        )
+        cutoff = (now_utc() - timedelta(hours=1)).isoformat()
+        result = json.loads(await server_mod.get_knowledge(created_after=cutoff))
+        assert len(result) == 1
+        assert result[0]["data"]["description"] == "new"
+
+    @pytest.mark.anyio
+    async def test_created_before_filter(self) -> None:
+        from datetime import timedelta
+
+        from mcp_awareness.schema import now_utc
+
+        s = _store()
+        early = now_utc() - timedelta(hours=2)
+        late = now_utc()
+        from mcp_awareness.schema import Entry, EntryType, make_id
+
+        s.add(
+            Entry(
+                id=make_id(),
+                type=EntryType.NOTE,
+                source="test",
+                tags=["x"],
+                created=early,
+                updated=early,
+                expires=None,
+                data={"description": "old"},
+            )
+        )
+        s.add(
+            Entry(
+                id=make_id(),
+                type=EntryType.NOTE,
+                source="test",
+                tags=["x"],
+                created=late,
+                updated=late,
+                expires=None,
+                data={"description": "new"},
+            )
+        )
+        cutoff = (now_utc() - timedelta(hours=1)).isoformat()
+        result = json.loads(await server_mod.get_knowledge(created_before=cutoff))
+        assert len(result) == 1
+        assert result[0]["data"]["description"] == "old"
+
+
+# ---------------------------------------------------------------------------
 # Semantic search tool tests
 # ---------------------------------------------------------------------------
 

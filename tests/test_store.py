@@ -1483,6 +1483,79 @@ def test_get_knowledge_include_history_only_with_pagination(store):
 
 
 # ---------------------------------------------------------------------------
+# created_after / created_before filters
+# ---------------------------------------------------------------------------
+
+
+def test_get_knowledge_created_after(store):
+    """created_after filters by creation time, not update time."""
+    from datetime import timedelta
+
+    early = now_utc() - timedelta(hours=2)
+    late = now_utc()
+    e1 = Entry(
+        id=make_id(),
+        type=EntryType.NOTE,
+        source="test",
+        tags=[],
+        created=early,
+        updated=late,  # updated recently, but created early
+        expires=None,
+        data={"description": "old note"},
+    )
+    e2 = Entry(
+        id=make_id(),
+        type=EntryType.NOTE,
+        source="test",
+        tags=[],
+        created=late,
+        updated=late,
+        expires=None,
+        data={"description": "new note"},
+    )
+    store.add(e1)
+    store.add(e2)
+    cutoff = now_utc() - timedelta(hours=1)
+    results = store.get_knowledge(created_after=cutoff)
+    assert len(results) == 1
+    assert results[0].data["description"] == "new note"
+
+
+def test_get_knowledge_created_before(store):
+    """created_before filters by creation time."""
+    from datetime import timedelta
+
+    early = now_utc() - timedelta(hours=2)
+    late = now_utc()
+    e1 = Entry(
+        id=make_id(),
+        type=EntryType.NOTE,
+        source="test",
+        tags=[],
+        created=early,
+        updated=early,
+        expires=None,
+        data={"description": "old note"},
+    )
+    e2 = Entry(
+        id=make_id(),
+        type=EntryType.NOTE,
+        source="test",
+        tags=[],
+        created=late,
+        updated=late,
+        expires=None,
+        data={"description": "new note"},
+    )
+    store.add(e1)
+    store.add(e2)
+    cutoff = now_utc() - timedelta(hours=1)
+    results = store.get_knowledge(created_before=cutoff)
+    assert len(results) == 1
+    assert results[0].data["description"] == "old note"
+
+
+# ---------------------------------------------------------------------------
 # Embeddings / semantic search
 # ---------------------------------------------------------------------------
 
