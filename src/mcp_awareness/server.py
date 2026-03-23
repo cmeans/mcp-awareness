@@ -211,6 +211,8 @@ async def get_alerts(
     Use limit/offset for pagination (e.g., limit=10, offset=0 for first page).
     This tool always returns structured JSON. If you receive an unstructured
     error, the failure is in the transport or platform layer, not in awareness."""
+    if since is not None and not since:
+        return json.dumps({"error": "since cannot be empty; omit or provide an ISO 8601 timestamp"})
     since_dt = ensure_dt(since) if since else None
     alerts = store.get_active_alerts(source, since=since_dt, limit=limit, offset=offset)
     if mode == "list":
@@ -260,6 +262,8 @@ async def get_knowledge(
     This tool always returns JSON with a status field or an entry list.
     If you receive an unstructured error, the failure is in the transport
     or platform layer, not in awareness."""
+    if since is not None and not since:
+        return json.dumps({"error": "since cannot be empty; omit or provide an ISO 8601 timestamp"})
     since_dt = ensure_dt(since) if since else None
     if entry_type:
         et = EntryType(entry_type)
@@ -276,11 +280,10 @@ async def get_knowledge(
             tags=tags,
             include_history=include_history,
             since=since_dt,
+            source=source,
             limit=limit,
             offset=offset,
         )
-        if source:
-            entries = [e for e in entries if e.source == source]
     if mode == "list":
         return json.dumps([e.to_list_dict() for e in entries], indent=2)
     return json.dumps([e.to_dict() for e in entries], indent=2)
@@ -703,6 +706,8 @@ async def get_deleted(
     since: ISO 8601 timestamp — only return entries deleted after this time.
     mode: omit for full entries, 'list' for metadata only.
     Use limit/offset for pagination."""
+    if since is not None and not since:
+        return json.dumps({"error": "since cannot be empty; omit or provide an ISO 8601 timestamp"})
     since_dt = ensure_dt(since) if since else None
     entries = store.get_deleted(since=since_dt, limit=limit, offset=offset)
     if mode == "list":

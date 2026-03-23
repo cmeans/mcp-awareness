@@ -1225,3 +1225,82 @@ class TestListModeAndSince:
         assert len(listing) == 1
         assert "data" not in listing[0]
         assert listing[0]["description"] == "will delete"
+
+    @pytest.mark.anyio
+    async def test_get_alerts_since(self) -> None:
+        from datetime import datetime, timedelta, timezone
+
+        s = _store()
+        old = datetime.now(timezone.utc) - timedelta(hours=2)
+        s.upsert_alert(
+            "nas",
+            ["infra"],
+            "old-alert",
+            {"alert_id": "old-alert", "level": "warning", "message": "old", "resolved": False},
+        )
+        # Backdate the alert
+        with s._conn.cursor() as cur:
+            cur.execute(
+                "UPDATE entries SET updated = %s WHERE data->>'alert_id' = 'old-alert'",
+                (old,),
+            )
+            s._conn.commit()
+        s.upsert_alert(
+            "nas",
+            ["infra"],
+            "recent-alert",
+            {
+                "alert_id": "recent-alert",
+                "level": "warning",
+                "message": "recent",
+                "resolved": False,
+            },
+        )
+        cutoff = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
+        result = json.loads(await server_mod.get_alerts(since=cutoff))
+        assert len(result) == 1
+        assert result[0]["data"]["alert_id"] == "recent-alert"
+
+    @pytest.mark.anyio
+    async def test_get_knowledge_source_sql_filter(self) -> None:
+        from mcp_awareness.schema import Entry, EntryType, make_id, now_utc
+
+        s = _store()
+        s.add(
+            Entry(
+                id=make_id(),
+                type=EntryType.NOTE,
+                source="alpha",
+                tags=[],
+                created=now_utc(),
+                updated=now_utc(),
+                expires=None,
+                data={"description": "from alpha"},
+            )
+        )
+        s.add(
+            Entry(
+                id=make_id(),
+                type=EntryType.NOTE,
+                source="beta",
+                tags=[],
+                created=now_utc(),
+                updated=now_utc(),
+                expires=None,
+                data={"description": "from beta"},
+            )
+        )
+        result = json.loads(await server_mod.get_knowledge(source="alpha"))
+        assert len(result) == 1
+        assert result[0]["data"]["description"] == "from alpha"
+
+    @pytest.mark.anyio
+    async def test_since_empty_string_returns_error(self) -> None:
+        result = json.loads(await server_mod.get_knowledge(since=""))
+        assert "error" in result
+
+        result = json.loads(await server_mod.get_alerts(since=""))
+        assert "error" in result
+
+        result = json.loads(await server_mod.get_deleted(since=""))
+        assert "error" in result

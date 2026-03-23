@@ -352,6 +352,7 @@ class PostgresStore:
         tags: list[str] | None = None,
         include_history: str | None = None,
         since: datetime | None = None,
+        source: str | None = None,
         limit: int | None = None,
         offset: int | None = None,
     ) -> list[Entry]:
@@ -365,6 +366,9 @@ class PostgresStore:
         placeholders = ",".join("%s" for _ in types)
         clauses = [f"type IN ({placeholders})"]
         params: list[Any] = list(types)
+        if source is not None:
+            clauses.append("source = %s")
+            params.append(source)
         if tags:
             tag_clauses = ["tags @> %s::jsonb" for _ in tags]
             clauses.append(f"({' OR '.join(tag_clauses)})")
