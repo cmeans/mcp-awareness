@@ -254,23 +254,21 @@ Say:
 
 Claude calls `suppress_alert`. Subsequent new conversations no longer mention it.
 
-### Step 11: Test knowledge storage
+### Step 11: Personalize your instance
 
-Say:
+If your client supports MCP prompts, use the `getting-started` prompt. Your AI will interview you about your setup, projects, and preferences, then store everything in awareness.
 
-> Please save your knowledge about my setup to awareness
+If prompts aren't available, tell your AI directly:
 
-Claude calls `remember` and `learn_pattern` to write tagged, searchable knowledge entries to the store. `remember` stores general-purpose notes; `learn_pattern` stores operational knowledge with conditions and effects for alert matching. This knowledge is now accessible from any MCP client on any platform.
+> Remember that I'm a developer working on [project]. I use [tools]. I prefer terse communication.
 
-You can also test the new tools:
+Your AI will use `remember`, `learn_pattern`, and `set_preference` to store tagged, searchable entries. This knowledge is now accessible from any MCP client on any platform.
+
+You can verify what's stored:
 
 > How many entries are in awareness?
 
-Claude calls `get_stats` and reports entry counts by type.
-
 > What tags are in use?
-
-Claude calls `get_tags` and lists all tags with usage counts.
 
 ## Alternative: PostgreSQL backend
 
