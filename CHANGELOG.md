@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-03-23
+
 ### Added
 - **List mode**: `get_knowledge(mode="list")` returns metadata only (id, type, source, description, tags, created, updated) — no content or changelog. Also available on `get_alerts` and `get_deleted`. Use to orient before pulling full entries.
 - **Since filter**: `get_knowledge(since="2026-03-23T06:00:00Z")` returns only entries updated after the given timestamp. SQL-level filtering (not post-query). Also available on `get_alerts`, `get_entries`, and `get_deleted`.
@@ -176,7 +178,8 @@ Initial implementation.
 - **Dockerfile** for container deployment
 - Design docs: core spec and collation layer
 
-[Unreleased]: https://github.com/cmeans/mcp-awareness/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/cmeans/mcp-awareness/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/cmeans/mcp-awareness/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/cmeans/mcp-awareness/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/cmeans/mcp-awareness/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/cmeans/mcp-awareness/compare/v0.3.1...v0.4.0
