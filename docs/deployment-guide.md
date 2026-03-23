@@ -286,12 +286,12 @@ Use `https://some-random-words.trycloudflare.com/mcp` as the connector URL. The 
 
 ```mermaid
 sequenceDiagram
-    participant You as You (Claude.ai)
+    participant You as Your AI
     participant WAF as Cloudflare WAF
     participant CF as Cloudflare Tunnel
-    participant Server as mcp-awareness
+    participant Server as Awareness
     participant Collator as Collator
-    participant Store as Store (SQLite or Postgres)
+    participant Store as Postgres
 
     You->>WAF: Request to /secret/mcp
     WAF->>WAF: Path starts with /secret? ✓
@@ -332,7 +332,7 @@ The current approach uses two layers:
 - API keys in headers (requires MCP client support)
 - Cloudflare Access with compatible identity providers
 
-**Gotchas we discovered:**
+**Known client/platform gotchas:**
 - Claude.ai custom connectors support OAuth Client ID / Secret fields, but these follow standard OAuth flows — they are **not compatible** with Cloudflare Access service tokens (which use `CF-Access-Client-Id` / `CF-Access-Client-Secret` headers)
 - Cloudflare Managed OAuth requires dynamic client registration (RFC 8707), which Claude.ai does not support
 - cloudflared tunnel ingress rules cannot rewrite URL paths — the server must handle path rewriting
@@ -341,8 +341,8 @@ The current approach uses two layers:
 ## Notes
 
 - **The store persists** in the data directory. Restart the server and your data is still there.
-- **Claude.ai exposes tools but not resources** — the MCP spec defines both [resources](https://modelcontextprotocol.io/docs/concepts/resources) (read path) and [tools](https://modelcontextprotocol.io/docs/concepts/tools) (write path). Claude.ai custom connectors surface tools but not resources. We added read tools (`get_briefing`, `get_alerts`, `get_status`, `get_knowledge`, `get_suppressions`, `get_stats`, `get_tags`) that mirror the resource endpoints.
+- **Not all clients expose MCP resources** — the MCP spec defines both [resources](https://modelcontextprotocol.io/docs/concepts/resources) (read path) and [tools](https://modelcontextprotocol.io/docs/concepts/tools) (write path). Some clients (including Claude.ai) only surface tools. We added read tools (`get_briefing`, `get_alerts`, `get_status`, `get_knowledge`, `get_suppressions`, `get_stats`, `get_tags`) that mirror the resource endpoints, so every client gets full functionality.
 - **18 tools available** — includes `remember` (general notes), `learn_pattern` (operational knowledge), `add_context` (time-limited), `update_entry` (in-place updates with changelog), `get_stats` (store summary), `get_tags` (tag discovery), plus all the alerting and data management tools. See the [README](../README.md#tools) for the full list.
-- **Model matters** — Haiku 4.5 did not follow the memory instruction to call `get_briefing` at conversation start. Sonnet 4.6 and Opus 4.6 both worked reliably.
+- **Model matters** — best experience with Claude Sonnet 4.6 or Opus 4.6. Smaller models (Haiku, GPT-4o-mini) may not follow MCP prompts or call tools proactively.
 - **Suppression matching is content-aware** — a suppression tagged `["qbittorrent"]` will match alerts whose alert_id or message contains "qbittorrent", even if the alert's structural tags differ.
 - **Soft delete is safe** — `delete_entry` moves entries to trash (30-day retention). Bulk deletes show a dry-run count first and require `confirm=True`. Use `get_deleted` and `restore_entry` to recover.
