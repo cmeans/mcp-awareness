@@ -149,13 +149,11 @@ curl -s -o /dev/null -w "%{http_code}" https://yourdomain.com/mcp
 curl -s -o /dev/null -w "%{http_code}" https://yourdomain.com/<your-secret>/mcp
 ```
 
-### Step 6: Populate the store
+### Step 6: Populate the store (optional)
 
-```bash
-python examples/simulate_edge.py --data-dir ~/awareness
-```
+The store starts empty. You can populate it by talking to your AI — just tell it things and it will use the awareness tools to store them. If your client supports MCP prompts, try the `getting-started` prompt to have your AI interview you and store the results.
 
-Or add an active alert for testing:
+You can also seed data programmatically for testing:
 
 ```python
 from mcp_awareness.store import SQLiteStore
