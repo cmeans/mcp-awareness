@@ -52,6 +52,29 @@ class PostgresStore:
                 CREATE INDEX IF NOT EXISTS idx_entries_source ON entries(source);
                 CREATE INDEX IF NOT EXISTS idx_entries_type_source ON entries(type, source);
                 CREATE INDEX IF NOT EXISTS idx_entries_tags_gin ON entries USING GIN (tags);
+
+                CREATE TABLE IF NOT EXISTS reads (
+                    id       SERIAL PRIMARY KEY,
+                    entry_id TEXT NOT NULL REFERENCES entries(id) ON DELETE CASCADE,
+                    timestamp TIMESTAMPTZ NOT NULL DEFAULT now(),
+                    platform TEXT,
+                    tool_used TEXT
+                );
+                CREATE INDEX IF NOT EXISTS idx_reads_entry ON reads(entry_id);
+                CREATE INDEX IF NOT EXISTS idx_reads_timestamp ON reads(timestamp);
+
+                CREATE TABLE IF NOT EXISTS actions (
+                    id       SERIAL PRIMARY KEY,
+                    entry_id TEXT NOT NULL REFERENCES entries(id) ON DELETE CASCADE,
+                    timestamp TIMESTAMPTZ NOT NULL DEFAULT now(),
+                    platform TEXT,
+                    action   TEXT NOT NULL,
+                    detail   TEXT,
+                    tags     JSONB NOT NULL DEFAULT '[]'
+                );
+                CREATE INDEX IF NOT EXISTS idx_actions_entry ON actions(entry_id);
+                CREATE INDEX IF NOT EXISTS idx_actions_timestamp ON actions(timestamp);
+                CREATE INDEX IF NOT EXISTS idx_actions_tags_gin ON actions USING GIN (tags);
             """)
         self._conn.commit()
         # Note: schema migrations are managed by Alembic (see alembic/ directory).
@@ -588,7 +611,230 @@ class PostgresStore:
         self._conn.commit()
         return affected
 
+    # ------------------------------------------------------------------
+    # Read / action tracking
+    # ------------------------------------------------------------------
+
+    def log_read(self, entry_ids: list[str], tool_used: str, platform: str | None = None) -> None:
+        """Log that entries were read. Fire-and-forget — failures are silent."""
+        if not entry_ids:
+            return
+        try:
+            with self._conn.cursor() as cur:
+                for eid in entry_ids:
+                    cur.execute(
+                        "INSERT INTO reads (entry_id, platform, tool_used) VALUES (%s, %s, %s)",
+                        (eid, platform, tool_used),
+                    )
+            self._conn.commit()
+        except Exception:
+            # Fire-and-forget: read logging never blocks a response
+            import contextlib
+
+            with contextlib.suppress(Exception):
+                self._conn.rollback()
+
+    def log_action(
+        self,
+        entry_id: str,
+        action: str,
+        platform: str | None = None,
+        detail: str | None = None,
+        tags: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Log an action taken because of an entry. Returns the action record."""
+        # If no tags provided, copy from the referenced entry
+        if tags is None:
+            entry = self.get_entry_by_id(entry_id)
+            tags = entry.tags if entry else []
+        now = now_utc()
+        with self._conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO actions (entry_id, timestamp, platform, action, detail, tags) "
+                "VALUES (%s, %s, %s, %s, %s, %s::jsonb) RETURNING id",
+                (entry_id, now, platform, action, detail, json.dumps(tags)),
+            )
+            row = cur.fetchone()
+        self._conn.commit()
+        return {
+            "id": row["id"] if row else None,
+            "entry_id": entry_id,
+            "timestamp": to_iso(now),
+            "platform": platform,
+            "action": action,
+            "detail": detail,
+            "tags": tags,
+        }
+
+    def get_reads(
+        self,
+        entry_id: str | None = None,
+        since: datetime | None = None,
+        platform: str | None = None,
+        limit: int | None = None,
+    ) -> list[dict[str, Any]]:
+        """Get read history, optionally filtered."""
+        clauses: list[str] = []
+        params: list[Any] = []
+        if entry_id:
+            clauses.append("entry_id = %s")
+            params.append(entry_id)
+        if since:
+            clauses.append("timestamp >= %s")
+            params.append(since)
+        if platform:
+            clauses.append("platform = %s")
+            params.append(platform)
+        where = " AND ".join(clauses) if clauses else "1=1"
+        sql = f"SELECT * FROM reads WHERE {where} ORDER BY timestamp DESC"
+        if limit:
+            sql += f" LIMIT {int(limit)}"
+        with self._conn.cursor() as cur:
+            cur.execute(sql, tuple(params))
+            rows = cur.fetchall()
+        return [
+            {
+                "id": r["id"],
+                "entry_id": r["entry_id"],
+                "timestamp": to_iso(r["timestamp"]),
+                "platform": r["platform"],
+                "tool_used": r["tool_used"],
+            }
+            for r in rows
+        ]
+
+    def get_actions(
+        self,
+        entry_id: str | None = None,
+        since: datetime | None = None,
+        platform: str | None = None,
+        tags: list[str] | None = None,
+        limit: int | None = None,
+    ) -> list[dict[str, Any]]:
+        """Get action history, optionally filtered."""
+        clauses: list[str] = []
+        params: list[Any] = []
+        if entry_id:
+            clauses.append("entry_id = %s")
+            params.append(entry_id)
+        if since:
+            clauses.append("timestamp >= %s")
+            params.append(since)
+        if platform:
+            clauses.append("platform = %s")
+            params.append(platform)
+        if tags:
+            for t in tags:
+                clauses.append("tags @> %s::jsonb")
+                params.append(json.dumps([t]))
+        where = " AND ".join(clauses) if clauses else "1=1"
+        sql = f"SELECT * FROM actions WHERE {where} ORDER BY timestamp DESC"
+        if limit:
+            sql += f" LIMIT {int(limit)}"
+        with self._conn.cursor() as cur:
+            cur.execute(sql, tuple(params))
+            rows = cur.fetchall()
+        return [
+            {
+                "id": r["id"],
+                "entry_id": r["entry_id"],
+                "timestamp": to_iso(r["timestamp"]),
+                "platform": r["platform"],
+                "action": r["action"],
+                "detail": r["detail"],
+                "tags": r["tags"] if isinstance(r["tags"], list) else json.loads(r["tags"]),
+            }
+            for r in rows
+        ]
+
+    def get_unread(self, since: datetime | None = None) -> list[Entry]:
+        """Get entries with zero reads (optionally since a timestamp). Cleanup candidates."""
+        since_clause = ""
+        params: tuple[Any, ...] = ()
+        if since:
+            since_clause = "AND r.timestamp >= %s"
+            params = (since,)
+        with self._conn.cursor() as cur:
+            cur.execute(
+                f"SELECT e.* FROM entries e "
+                f"LEFT JOIN reads r ON e.id = r.entry_id {since_clause} "
+                f"WHERE e.deleted IS NULL AND r.id IS NULL "
+                f"ORDER BY e.created DESC",
+                params,
+            )
+            return [self._row_to_entry(r) for r in cur.fetchall()]
+
+    def get_activity(
+        self,
+        since: datetime | None = None,
+        platform: str | None = None,
+        limit: int | None = None,
+    ) -> list[dict[str, Any]]:
+        """Get combined read + action activity feed, chronologically."""
+        clauses_r: list[str] = []
+        clauses_a: list[str] = []
+        params_r: list[Any] = []
+        params_a: list[Any] = []
+        if since:
+            clauses_r.append("timestamp >= %s")
+            clauses_a.append("timestamp >= %s")
+            params_r.append(since)
+            params_a.append(since)
+        if platform:
+            clauses_r.append("platform = %s")
+            clauses_a.append("platform = %s")
+            params_r.append(platform)
+            params_a.append(platform)
+        where_r = " AND ".join(clauses_r) if clauses_r else "1=1"
+        where_a = " AND ".join(clauses_a) if clauses_a else "1=1"
+        limit_clause = f"LIMIT {int(limit)}" if limit else ""
+        sql = (
+            f"SELECT 'read' AS event_type, entry_id, timestamp, platform, "
+            f"tool_used AS detail, NULL AS action, '[]'::jsonb AS tags FROM reads WHERE {where_r} "
+            f"UNION ALL "
+            f"SELECT 'action' AS event_type, entry_id, timestamp, platform, "
+            f"detail, action, tags FROM actions WHERE {where_a} "
+            f"ORDER BY timestamp DESC {limit_clause}"
+        )
+        with self._conn.cursor() as cur:
+            cur.execute(sql, tuple(params_r + params_a))
+            rows = cur.fetchall()
+        return [
+            {
+                "event_type": r["event_type"],
+                "entry_id": r["entry_id"],
+                "timestamp": to_iso(r["timestamp"]),
+                "platform": r["platform"],
+                "action": r["action"],
+                "detail": r["detail"],
+                "tags": r["tags"] if isinstance(r["tags"], list) else json.loads(r["tags"]),
+            }
+            for r in rows
+        ]
+
+    def get_read_counts(self, entry_ids: list[str]) -> dict[str, dict[str, Any]]:
+        """Get read_count and last_read for a list of entry IDs. For list mode enrichment."""
+        if not entry_ids:
+            return {}
+        placeholders = ",".join("%s" for _ in entry_ids)
+        with self._conn.cursor() as cur:
+            cur.execute(
+                f"SELECT entry_id, COUNT(*) AS cnt, MAX(timestamp) AS last "
+                f"FROM reads WHERE entry_id IN ({placeholders}) GROUP BY entry_id",
+                tuple(entry_ids),
+            )
+            rows = cur.fetchall()
+        result: dict[str, dict[str, Any]] = {}
+        for r in rows:
+            result[r["entry_id"]] = {
+                "read_count": r["cnt"],
+                "last_read": to_iso(r["last"]) if r["last"] else None,
+            }
+        return result
+
     def clear(self) -> None:
         with self._conn.cursor() as cur:
+            cur.execute("DELETE FROM reads")
+            cur.execute("DELETE FROM actions")
             cur.execute("DELETE FROM entries")
         self._conn.commit()

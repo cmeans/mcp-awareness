@@ -1304,3 +1304,171 @@ class TestListModeAndSince:
 
         result = json.loads(await server_mod.get_deleted(since=""))
         assert "error" in result
+
+
+# ---------------------------------------------------------------------------
+# Read / action tracking tools
+# ---------------------------------------------------------------------------
+
+
+class TestReadActionTracking:
+    @pytest.mark.anyio
+    async def test_acted_on(self) -> None:
+        from mcp_awareness.schema import Entry, EntryType, make_id, now_utc
+
+        s = _store()
+        entry = s.add(
+            Entry(
+                id=make_id(),
+                type=EntryType.NOTE,
+                source="test",
+                tags=["project"],
+                created=now_utc(),
+                updated=now_utc(),
+                expires=None,
+                data={"description": "actionable note"},
+            )
+        )
+        result = json.loads(
+            await server_mod.acted_on(
+                entry_id=entry.id,
+                action="created issue #42",
+                platform="claude-code",
+                detail="https://github.com/example/42",
+            )
+        )
+        assert result["status"] == "ok"
+        assert result["action"] == "created issue #42"
+        assert result["tags"] == ["project"]  # copied from entry
+
+    @pytest.mark.anyio
+    async def test_get_reads_after_get_knowledge(self) -> None:
+        """get_knowledge auto-logs reads, get_reads retrieves them."""
+        from mcp_awareness.schema import Entry, EntryType, make_id, now_utc
+
+        s = _store()
+        s.add(
+            Entry(
+                id=make_id(),
+                type=EntryType.NOTE,
+                source="test",
+                tags=[],
+                created=now_utc(),
+                updated=now_utc(),
+                expires=None,
+                data={"description": "will be read"},
+            )
+        )
+        # This should auto-log reads
+        await server_mod.get_knowledge()
+        reads = json.loads(await server_mod.get_reads())
+        assert len(reads) >= 1
+        assert reads[0]["tool_used"] == "get_knowledge"
+
+    @pytest.mark.anyio
+    async def test_get_actions(self) -> None:
+        from mcp_awareness.schema import Entry, EntryType, make_id, now_utc
+
+        s = _store()
+        entry = s.add(
+            Entry(
+                id=make_id(),
+                type=EntryType.NOTE,
+                source="test",
+                tags=["demo"],
+                created=now_utc(),
+                updated=now_utc(),
+                expires=None,
+                data={"description": "test"},
+            )
+        )
+        await server_mod.acted_on(entry_id=entry.id, action="test action")
+        actions = json.loads(await server_mod.get_actions(entry_id=entry.id))
+        assert len(actions) == 1
+        assert actions[0]["action"] == "test action"
+
+    @pytest.mark.anyio
+    async def test_get_unread(self) -> None:
+        from mcp_awareness.schema import Entry, EntryType, make_id, now_utc
+
+        s = _store()
+        s.add(
+            Entry(
+                id=make_id(),
+                type=EntryType.NOTE,
+                source="test",
+                tags=[],
+                created=now_utc(),
+                updated=now_utc(),
+                expires=None,
+                data={"description": "never read"},
+            )
+        )
+        read_entry = s.add(
+            Entry(
+                id=make_id(),
+                type=EntryType.NOTE,
+                source="test",
+                tags=[],
+                created=now_utc(),
+                updated=now_utc(),
+                expires=None,
+                data={"description": "will be read"},
+            )
+        )
+        s.log_read([read_entry.id], tool_used="test")
+        unread = json.loads(await server_mod.get_unread())
+        assert len(unread) == 1
+        assert unread[0]["description"] == "never read"
+
+    @pytest.mark.anyio
+    async def test_get_activity(self) -> None:
+        from mcp_awareness.schema import Entry, EntryType, make_id, now_utc
+
+        s = _store()
+        entry = s.add(
+            Entry(
+                id=make_id(),
+                type=EntryType.NOTE,
+                source="test",
+                tags=[],
+                created=now_utc(),
+                updated=now_utc(),
+                expires=None,
+                data={"description": "test"},
+            )
+        )
+        s.log_read([entry.id], tool_used="test")
+        await server_mod.acted_on(entry_id=entry.id, action="used")
+        activity = json.loads(await server_mod.get_activity())
+        assert len(activity) >= 2
+        types = {a["event_type"] for a in activity}
+        assert "read" in types
+        assert "action" in types
+
+    @pytest.mark.anyio
+    async def test_list_mode_includes_read_counts(self) -> None:
+        """List mode enriches entries with read_count and last_read."""
+        from mcp_awareness.schema import Entry, EntryType, make_id, now_utc
+
+        s = _store()
+        entry = s.add(
+            Entry(
+                id=make_id(),
+                type=EntryType.NOTE,
+                source="test",
+                tags=[],
+                created=now_utc(),
+                updated=now_utc(),
+                expires=None,
+                data={"description": "popular entry"},
+            )
+        )
+        s.log_read([entry.id], tool_used="test")
+        s.log_read([entry.id], tool_used="test")
+        # get_knowledge itself also logs a read, so count will be 2 + 1 = 3
+        listing = json.loads(await server_mod.get_knowledge(mode="list"))
+        assert len(listing) >= 1
+        item = next(i for i in listing if i["description"] == "popular entry")
+        assert item["read_count"] == 3  # 2 manual + 1 from this get_knowledge call
+        assert item["last_read"] is not None
