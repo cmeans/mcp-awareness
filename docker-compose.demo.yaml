@@ -5,13 +5,10 @@ services:
     image: ghcr.io/cmeans/mcp-awareness:latest
     container_name: mcp-awareness-demo
     restart: unless-stopped
-    volumes:
-      - awareness-data:/app/data
     # Uncomment to access the server directly (without the tunnel)
     # ports:
     #   - "8420:8420"
     environment:
-      AWARENESS_DATA_DIR: /app/data
       AWARENESS_BACKEND: postgres
       # If you change this password, also update POSTGRES_PASSWORD below
       AWARENESS_DATABASE_URL: postgresql://awareness:mcp-awareness-demo@postgres:5432/awareness
@@ -69,5 +66,4 @@ services:
           memory: 64M
 
 volumes:
-  awareness-data:
   awareness-pg:
