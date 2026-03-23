@@ -75,6 +75,24 @@ class PostgresStore:
                 CREATE INDEX IF NOT EXISTS idx_actions_entry ON actions(entry_id);
                 CREATE INDEX IF NOT EXISTS idx_actions_timestamp ON actions(timestamp);
                 CREATE INDEX IF NOT EXISTS idx_actions_tags_gin ON actions USING GIN (tags);
+
+                CREATE EXTENSION IF NOT EXISTS vector;
+
+                CREATE TABLE IF NOT EXISTS embeddings (
+                    id          SERIAL PRIMARY KEY,
+                    entry_id    TEXT NOT NULL REFERENCES entries(id) ON DELETE CASCADE,
+                    model       TEXT NOT NULL,
+                    dimensions  INTEGER NOT NULL,
+                    text_hash   TEXT NOT NULL,
+                    embedding   VECTOR(768) NOT NULL,
+                    created     TIMESTAMPTZ NOT NULL DEFAULT now(),
+                    UNIQUE (entry_id, model)
+                );
+                CREATE INDEX IF NOT EXISTS idx_embeddings_entry
+                    ON embeddings(entry_id);
+                CREATE INDEX IF NOT EXISTS idx_embeddings_vector_hnsw
+                    ON embeddings USING hnsw (embedding vector_cosine_ops)
+                    WITH (m = 16, ef_construction = 64);
             """)
         self._conn.commit()
         # Note: schema migrations are managed by Alembic (see alembic/ directory).
@@ -387,6 +405,8 @@ class PostgresStore:
         until: datetime | None = None,
         source: str | None = None,
         learned_from: str | None = None,
+        created_after: datetime | None = None,
+        created_before: datetime | None = None,
         limit: int | None = None,
         offset: int | None = None,
     ) -> list[Entry]:
@@ -416,6 +436,12 @@ class PostgresStore:
         if learned_from is not None:
             clauses.append("data->>'learned_from' = %s")
             params.append(learned_from)
+        if created_after is not None:
+            clauses.append("created >= %s")
+            params.append(created_after)
+        if created_before is not None:
+            clauses.append("created <= %s")
+            params.append(created_before)
         where = " AND ".join(clauses)
         # Push LIMIT/OFFSET to SQL unless include_history="only" (post-filter changes count)
         sql_limit = limit if include_history != "only" else None
@@ -940,9 +966,107 @@ class PostgresStore:
             if e.data.get("deliver_at") and ensure_dt(e.data["deliver_at"]) <= now
         ]
 
+    # ------------------------------------------------------------------
+    # Embeddings / semantic search
+    # ------------------------------------------------------------------
+
+    def upsert_embedding(
+        self,
+        entry_id: str,
+        model: str,
+        dimensions: int,
+        text_hash: str,
+        embedding: list[float],
+    ) -> None:
+        """Store or update an embedding for an entry + model pair."""
+        vector_literal = "[" + ",".join(str(v) for v in embedding) + "]"
+        with self._conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO embeddings (entry_id, model, dimensions, text_hash, embedding) "
+                "VALUES (%s, %s, %s, %s, %s::vector) "
+                "ON CONFLICT (entry_id, model) DO UPDATE SET "
+                "embedding = EXCLUDED.embedding, text_hash = EXCLUDED.text_hash, "
+                "dimensions = EXCLUDED.dimensions, created = now()",
+                (entry_id, model, dimensions, text_hash, vector_literal),
+            )
+        self._conn.commit()
+
+    def get_entries_without_embeddings(
+        self,
+        model: str,
+        limit: int = 100,
+    ) -> list[Entry]:
+        """Find active entries that have no embedding for the given model.
+
+        Excludes suppression entries (short-lived, not worth embedding).
+        """
+        with self._conn.cursor() as cur:
+            cur.execute(
+                "SELECT e.* FROM entries e "
+                "LEFT JOIN embeddings emb ON e.id = emb.entry_id AND emb.model = %s "
+                "WHERE e.deleted IS NULL AND emb.id IS NULL "
+                "AND e.type != %s "
+                "ORDER BY e.updated DESC LIMIT %s",
+                (model, EntryType.SUPPRESSION.value, limit),
+            )
+            return [self._row_to_entry(r) for r in cur.fetchall()]
+
+    def semantic_search(
+        self,
+        embedding: list[float],
+        model: str,
+        entry_type: EntryType | None = None,
+        source: str | None = None,
+        tags: list[str] | None = None,
+        since: datetime | None = None,
+        until: datetime | None = None,
+        limit: int = 10,
+    ) -> list[tuple[Entry, float]]:
+        """Search entries by vector similarity, with optional filters.
+
+        Returns (entry, similarity_score) pairs sorted by relevance.
+        Similarity is 1 - cosine_distance (higher = more similar).
+        """
+        vector_literal = "[" + ",".join(str(v) for v in embedding) + "]"
+        clauses = ["e.deleted IS NULL"]
+        params: list[Any] = [model, vector_literal]
+        if entry_type is not None:
+            clauses.append("e.type = %s")
+            params.append(entry_type.value)
+        if source is not None:
+            clauses.append("e.source = %s")
+            params.append(source)
+        if tags:
+            for t in tags:
+                clauses.append("e.tags @> %s::jsonb")
+                params.append(json.dumps([t]))
+        if since is not None:
+            clauses.append("e.updated >= %s")
+            params.append(since)
+        if until is not None:
+            clauses.append("e.updated <= %s")
+            params.append(until)
+        where = " AND ".join(clauses)
+        params.append(limit)
+        sql = (
+            f"SELECT e.*, 1 - (emb.embedding <=> %s::vector) AS similarity "
+            f"FROM entries e "
+            f"JOIN embeddings emb ON e.id = emb.entry_id AND emb.model = %s "
+            f"WHERE {where} "
+            f"ORDER BY emb.embedding <=> %s::vector "
+            f"LIMIT %s"
+        )
+        # query_vector (similarity), model, ...filters, query_vector (ORDER BY), limit
+        ordered_params = [vector_literal, model, *params[2:-1], vector_literal, limit]
+        with self._conn.cursor() as cur:
+            cur.execute(sql, tuple(ordered_params))
+            rows = cur.fetchall()
+        return [(self._row_to_entry(r), float(r["similarity"])) for r in rows]
+
     def clear(self) -> None:
         with self._conn.cursor() as cur:
             cur.execute("DELETE FROM reads")
             cur.execute("DELETE FROM actions")
+            cur.execute("DELETE FROM embeddings")
             cur.execute("DELETE FROM entries")
         self._conn.commit()

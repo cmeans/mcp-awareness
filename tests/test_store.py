@@ -1480,3 +1480,443 @@ def test_get_knowledge_include_history_only_with_pagination(store):
     assert len(all_with_history) == 3
     page = store.get_knowledge(include_history="only", limit=2, offset=1)
     assert len(page) == 2
+
+
+# ---------------------------------------------------------------------------
+# created_after / created_before filters
+# ---------------------------------------------------------------------------
+
+
+def test_get_knowledge_created_after(store):
+    """created_after filters by creation time, not update time."""
+    from datetime import timedelta
+
+    early = now_utc() - timedelta(hours=2)
+    late = now_utc()
+    e1 = Entry(
+        id=make_id(),
+        type=EntryType.NOTE,
+        source="test",
+        tags=[],
+        created=early,
+        updated=late,  # updated recently, but created early
+        expires=None,
+        data={"description": "old note"},
+    )
+    e2 = Entry(
+        id=make_id(),
+        type=EntryType.NOTE,
+        source="test",
+        tags=[],
+        created=late,
+        updated=late,
+        expires=None,
+        data={"description": "new note"},
+    )
+    store.add(e1)
+    store.add(e2)
+    cutoff = now_utc() - timedelta(hours=1)
+    results = store.get_knowledge(created_after=cutoff)
+    assert len(results) == 1
+    assert results[0].data["description"] == "new note"
+
+
+def test_get_knowledge_created_before(store):
+    """created_before filters by creation time."""
+    from datetime import timedelta
+
+    early = now_utc() - timedelta(hours=2)
+    late = now_utc()
+    e1 = Entry(
+        id=make_id(),
+        type=EntryType.NOTE,
+        source="test",
+        tags=[],
+        created=early,
+        updated=early,
+        expires=None,
+        data={"description": "old note"},
+    )
+    e2 = Entry(
+        id=make_id(),
+        type=EntryType.NOTE,
+        source="test",
+        tags=[],
+        created=late,
+        updated=late,
+        expires=None,
+        data={"description": "new note"},
+    )
+    store.add(e1)
+    store.add(e2)
+    cutoff = now_utc() - timedelta(hours=1)
+    results = store.get_knowledge(created_before=cutoff)
+    assert len(results) == 1
+    assert results[0].data["description"] == "old note"
+
+
+# ---------------------------------------------------------------------------
+# Embeddings / semantic search
+# ---------------------------------------------------------------------------
+
+
+class TestEmbeddings:
+    """Store-level tests for embedding storage and vector search.
+
+    Uses hand-crafted vectors (unit vectors along axes) so similarity
+    ordering is deterministic without a real embedding model.
+    """
+
+    @staticmethod
+    def _vec(dim: int, axis: int) -> list[float]:
+        """Unit vector along a specific axis in `dim`-dimensional space."""
+        v = [0.0] * dim
+        v[axis] = 1.0
+        return v
+
+    def test_upsert_embedding(self, store):
+        """Store and retrieve an embedding."""
+        now = now_utc()
+        entry = Entry(
+            id=make_id(),
+            type=EntryType.NOTE,
+            source="test",
+            tags=["a"],
+            created=now,
+            updated=now,
+            expires=None,
+            data={"description": "test note"},
+        )
+        store.add(entry)
+        vec = self._vec(768, 0)
+        store.upsert_embedding(entry.id, "test-model", 768, "abc123", vec)
+        # Should be searchable
+        results = store.semantic_search(vec, "test-model", limit=5)
+        assert len(results) == 1
+        found_entry, score = results[0]
+        assert found_entry.id == entry.id
+        assert score > 0.99  # cosine similarity with itself should be ~1.0
+
+    def test_upsert_embedding_replaces(self, store):
+        """Upserting same entry+model replaces the embedding."""
+        now = now_utc()
+        entry = Entry(
+            id=make_id(),
+            type=EntryType.NOTE,
+            source="test",
+            tags=[],
+            created=now,
+            updated=now,
+            expires=None,
+            data={"description": "test"},
+        )
+        store.add(entry)
+        store.upsert_embedding(entry.id, "test-model", 768, "hash1", self._vec(768, 0))
+        store.upsert_embedding(entry.id, "test-model", 768, "hash2", self._vec(768, 1))
+        # Search along axis 1 should find it
+        results = store.semantic_search(self._vec(768, 1), "test-model", limit=5)
+        assert len(results) == 1
+        assert results[0][1] > 0.99
+
+    def test_semantic_search_ordering(self, store):
+        """Results are ordered by similarity (closest first)."""
+        now = now_utc()
+        ids = []
+        for i in range(3):
+            entry = Entry(
+                id=make_id(),
+                type=EntryType.NOTE,
+                source="test",
+                tags=[],
+                created=now,
+                updated=now,
+                expires=None,
+                data={"description": f"note-{i}"},
+            )
+            store.add(entry)
+            store.upsert_embedding(entry.id, "m", 768, f"h{i}", self._vec(768, i))
+            ids.append(entry.id)
+        # Query along axis 0 — entry 0 should be first
+        results = store.semantic_search(self._vec(768, 0), "m", limit=3)
+        assert results[0][0].id == ids[0]
+        assert results[0][1] > results[1][1]
+
+    def test_semantic_search_with_type_filter(self, store):
+        """Type filter narrows results."""
+        now = now_utc()
+        note = Entry(
+            id=make_id(),
+            type=EntryType.NOTE,
+            source="test",
+            tags=[],
+            created=now,
+            updated=now,
+            expires=None,
+            data={"description": "note"},
+        )
+        alert = Entry(
+            id=make_id(),
+            type=EntryType.ALERT,
+            source="test",
+            tags=[],
+            created=now,
+            updated=now,
+            expires=None,
+            data={"alert_id": "a1", "message": "alert", "level": "warning", "resolved": False},
+        )
+        store.add(note)
+        store.add(alert)
+        vec = self._vec(768, 0)
+        store.upsert_embedding(note.id, "m", 768, "h1", vec)
+        store.upsert_embedding(alert.id, "m", 768, "h2", vec)
+        # Filter to notes only
+        results = store.semantic_search(vec, "m", entry_type=EntryType.NOTE)
+        assert len(results) == 1
+        assert results[0][0].type == EntryType.NOTE
+
+    def test_semantic_search_with_source_filter(self, store):
+        """Source filter narrows results."""
+        now = now_utc()
+        e1 = Entry(
+            id=make_id(),
+            type=EntryType.NOTE,
+            source="nas",
+            tags=[],
+            created=now,
+            updated=now,
+            expires=None,
+            data={"description": "nas note"},
+        )
+        e2 = Entry(
+            id=make_id(),
+            type=EntryType.NOTE,
+            source="personal",
+            tags=[],
+            created=now,
+            updated=now,
+            expires=None,
+            data={"description": "personal note"},
+        )
+        store.add(e1)
+        store.add(e2)
+        vec = self._vec(768, 0)
+        store.upsert_embedding(e1.id, "m", 768, "h1", vec)
+        store.upsert_embedding(e2.id, "m", 768, "h2", vec)
+        results = store.semantic_search(vec, "m", source="nas")
+        assert len(results) == 1
+        assert results[0][0].source == "nas"
+
+    def test_semantic_search_with_tag_filter(self, store):
+        """Tag filter narrows results."""
+        now = now_utc()
+        e1 = Entry(
+            id=make_id(),
+            type=EntryType.NOTE,
+            source="test",
+            tags=["infra"],
+            created=now,
+            updated=now,
+            expires=None,
+            data={"description": "infra note"},
+        )
+        e2 = Entry(
+            id=make_id(),
+            type=EntryType.NOTE,
+            source="test",
+            tags=["personal"],
+            created=now,
+            updated=now,
+            expires=None,
+            data={"description": "personal note"},
+        )
+        store.add(e1)
+        store.add(e2)
+        vec = self._vec(768, 0)
+        store.upsert_embedding(e1.id, "m", 768, "h1", vec)
+        store.upsert_embedding(e2.id, "m", 768, "h2", vec)
+        results = store.semantic_search(vec, "m", tags=["infra"])
+        assert len(results) == 1
+        assert "infra" in results[0][0].tags
+
+    def test_semantic_search_excludes_deleted(self, store):
+        """Soft-deleted entries are excluded from search."""
+        now = now_utc()
+        entry = Entry(
+            id=make_id(),
+            type=EntryType.NOTE,
+            source="test",
+            tags=[],
+            created=now,
+            updated=now,
+            expires=None,
+            data={"description": "test"},
+        )
+        store.add(entry)
+        vec = self._vec(768, 0)
+        store.upsert_embedding(entry.id, "m", 768, "h1", vec)
+        store.soft_delete_by_id(entry.id)
+        results = store.semantic_search(vec, "m")
+        assert len(results) == 0
+
+    def test_semantic_search_empty_store(self, store):
+        """Search on empty store returns empty list."""
+        results = store.semantic_search(self._vec(768, 0), "m")
+        assert results == []
+
+    def test_get_entries_without_embeddings(self, store):
+        """Finds entries missing embeddings for a given model."""
+        now = now_utc()
+        e1 = Entry(
+            id=make_id(),
+            type=EntryType.NOTE,
+            source="test",
+            tags=[],
+            created=now,
+            updated=now,
+            expires=None,
+            data={"description": "has embedding"},
+        )
+        e2 = Entry(
+            id=make_id(),
+            type=EntryType.NOTE,
+            source="test",
+            tags=[],
+            created=now,
+            updated=now,
+            expires=None,
+            data={"description": "no embedding"},
+        )
+        store.add(e1)
+        store.add(e2)
+        store.upsert_embedding(e1.id, "m", 768, "h1", self._vec(768, 0))
+        missing = store.get_entries_without_embeddings("m")
+        assert len(missing) == 1
+        assert missing[0].id == e2.id
+
+    def test_get_entries_without_embeddings_skips_suppressions(self, store):
+        """Suppressions are excluded from the 'needs embedding' list."""
+        now = now_utc()
+        sup = Entry(
+            id=make_id(),
+            type=EntryType.SUPPRESSION,
+            source="test",
+            tags=[],
+            created=now,
+            updated=now,
+            expires=None,
+            data={"metric": "cpu", "suppress_level": "warning"},
+        )
+        store.add(sup)
+        missing = store.get_entries_without_embeddings("m")
+        assert all(e.type != EntryType.SUPPRESSION for e in missing)
+
+    def test_cascade_delete_removes_embedding(self, store):
+        """Hard delete (via clear) removes embeddings too."""
+        now = now_utc()
+        entry = Entry(
+            id=make_id(),
+            type=EntryType.NOTE,
+            source="test",
+            tags=[],
+            created=now,
+            updated=now,
+            expires=None,
+            data={"description": "test"},
+        )
+        store.add(entry)
+        store.upsert_embedding(entry.id, "m", 768, "h1", self._vec(768, 0))
+        store.clear()
+        results = store.semantic_search(self._vec(768, 0), "m")
+        assert results == []
+
+    def test_semantic_search_limit(self, store):
+        """Limit parameter caps results."""
+        now = now_utc()
+        vec = self._vec(768, 0)
+        for i in range(5):
+            entry = Entry(
+                id=make_id(),
+                type=EntryType.NOTE,
+                source="test",
+                tags=[],
+                created=now,
+                updated=now,
+                expires=None,
+                data={"description": f"note-{i}"},
+            )
+            store.add(entry)
+            store.upsert_embedding(entry.id, "m", 768, f"h{i}", vec)
+        results = store.semantic_search(vec, "m", limit=2)
+        assert len(results) == 2
+
+    def test_semantic_search_since_filter(self, store):
+        """since filter narrows by updated timestamp."""
+        from datetime import timedelta
+
+        old = now_utc() - timedelta(hours=2)
+        new = now_utc()
+        e1 = Entry(
+            id=make_id(),
+            type=EntryType.NOTE,
+            source="test",
+            tags=[],
+            created=old,
+            updated=old,
+            expires=None,
+            data={"description": "old"},
+        )
+        e2 = Entry(
+            id=make_id(),
+            type=EntryType.NOTE,
+            source="test",
+            tags=[],
+            created=new,
+            updated=new,
+            expires=None,
+            data={"description": "new"},
+        )
+        store.add(e1)
+        store.add(e2)
+        vec = self._vec(768, 0)
+        store.upsert_embedding(e1.id, "m", 768, "h1", vec)
+        store.upsert_embedding(e2.id, "m", 768, "h2", vec)
+        cutoff = now_utc() - timedelta(hours=1)
+        results = store.semantic_search(vec, "m", since=cutoff)
+        assert len(results) == 1
+        assert results[0][0].data["description"] == "new"
+
+    def test_semantic_search_until_filter(self, store):
+        """until filter narrows by updated timestamp."""
+        from datetime import timedelta
+
+        old = now_utc() - timedelta(hours=2)
+        new = now_utc()
+        e1 = Entry(
+            id=make_id(),
+            type=EntryType.NOTE,
+            source="test",
+            tags=[],
+            created=old,
+            updated=old,
+            expires=None,
+            data={"description": "old"},
+        )
+        e2 = Entry(
+            id=make_id(),
+            type=EntryType.NOTE,
+            source="test",
+            tags=[],
+            created=new,
+            updated=new,
+            expires=None,
+            data={"description": "new"},
+        )
+        store.add(e1)
+        store.add(e2)
+        vec = self._vec(768, 0)
+        store.upsert_embedding(e1.id, "m", 768, "h1", vec)
+        store.upsert_embedding(e2.id, "m", 768, "h2", vec)
+        cutoff = now_utc() - timedelta(hours=1)
+        results = store.semantic_search(vec, "m", until=cutoff)
+        assert len(results) == 1
+        assert results[0][0].data["description"] == "old"

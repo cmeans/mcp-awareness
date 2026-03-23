@@ -67,6 +67,8 @@ class Store(Protocol):
         until: datetime | None = None,
         source: str | None = None,
         learned_from: str | None = None,
+        created_after: datetime | None = None,
+        created_before: datetime | None = None,
         limit: int | None = None,
         offset: int | None = None,
     ) -> list[Entry]: ...
@@ -155,5 +157,34 @@ class Store(Protocol):
     ) -> Entry | None: ...
 
     def get_fired_intentions(self) -> list[Entry]: ...
+
+    # Embeddings / semantic search
+
+    def upsert_embedding(
+        self,
+        entry_id: str,
+        model: str,
+        dimensions: int,
+        text_hash: str,
+        embedding: list[float],
+    ) -> None: ...
+
+    def get_entries_without_embeddings(
+        self,
+        model: str,
+        limit: int = 100,
+    ) -> list[Entry]: ...
+
+    def semantic_search(
+        self,
+        embedding: list[float],
+        model: str,
+        entry_type: EntryType | None = None,
+        source: str | None = None,
+        tags: list[str] | None = None,
+        since: datetime | None = None,
+        until: datetime | None = None,
+        limit: int = 10,
+    ) -> list[tuple[Entry, float]]: ...
 
     def clear(self) -> None: ...

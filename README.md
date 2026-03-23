@@ -256,7 +256,7 @@ See [Security considerations](docs/deployment-guide.md#security-considerations) 
 - Suppression system with time-based expiry and escalation overrides
 
 ### MCP interface
-- Full MCP API: 6 resources + 26 tools + 5 prompts
+- Full MCP API: 6 resources + 27 tools + 5 prompts
 - Read tool mirrors for tools-only clients
 - User-defined custom prompts from store entries with `{{var}}` templates
 - Streamable HTTP + stdio transports
@@ -269,12 +269,12 @@ See [Security considerations](docs/deployment-guide.md#security-considerations) 
 - Secret path auth + Cloudflare WAF for edge-level access control
 - Docker Compose with Postgres, named Cloudflare Tunnel, or ephemeral quick tunnel
 - Request timing instrumentation and `/health` endpoint
-- 238 tests (all against real Postgres), strict type checking, CI pipeline with coverage, QA gate
+- 294 tests (all against real Postgres + Ollama in CI), strict type checking, CI pipeline with coverage, QA gate
 
 ### Not yet implemented
 - Layer 2 (baseline) detection — rolling averages and deviation calculation
 - Edge processes — no automated producers yet ([example script](examples/simulate_edge.py) demonstrates the write path)
-- Semantic search — current retrieval is tag/keyword-based; vector similarity is planned
+- Semantic search — `semantic_search` tool uses pgvector + Ollama for vector similarity (optional, self-hosted)
 - OAuth / API key authentication — current auth is secret-path-based
 
 ## Vision
