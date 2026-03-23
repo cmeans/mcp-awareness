@@ -1888,6 +1888,73 @@ class TestSemanticSearchTool:
 
 
 # ---------------------------------------------------------------------------
+# _generate_embedding edge cases
+# ---------------------------------------------------------------------------
+
+
+class TestGenerateEmbedding:
+    def test_suppression_skipped(self, monkeypatch) -> None:
+        """Suppression entries are not embedded (should_embed returns False)."""
+        from mcp_awareness.schema import Entry, EntryType, make_id, now_utc
+
+        class TrackingProvider:
+            model_name = "mock"
+            dimensions = 768
+            called = False
+
+            def embed(self, texts: list[str]) -> list[list[float]]:
+                self.called = True
+                return [[0.0] * 768 for _ in texts]
+
+            def is_available(self) -> bool:
+                return True
+
+        provider = TrackingProvider()
+        monkeypatch.setattr(server_mod, "_embedding_provider", provider)
+
+        now = now_utc()
+        suppression = Entry(
+            id=make_id(),
+            type=EntryType.SUPPRESSION,
+            source="nas",
+            tags=[],
+            created=now,
+            updated=now,
+            expires=None,
+            data={"metric": "cpu", "suppress_level": "warning"},
+        )
+        server_mod._generate_embedding(suppression)
+        assert provider.called is False
+
+    @pytest.mark.anyio
+    async def test_embedding_failure_silent(self, monkeypatch) -> None:
+        """_generate_embedding swallows exceptions silently."""
+
+        class ExplodingProvider:
+            model_name = "mock"
+            dimensions = 768
+
+            def embed(self, texts: list[str]) -> list[list[float]]:
+                raise RuntimeError("boom")
+
+            def is_available(self) -> bool:
+                return True
+
+        monkeypatch.setattr(server_mod, "_embedding_provider", ExplodingProvider())
+
+        # Should not raise — fire-and-forget catches the exception
+        result = json.loads(
+            await server_mod.remember(
+                source="test",
+                tags=["test"],
+                description="This should not blow up",
+                learned_from="test",
+            )
+        )
+        assert result["status"] == "ok"
+
+
+# ---------------------------------------------------------------------------
 # Semantic search integration tests (require Ollama)
 # ---------------------------------------------------------------------------
 
