@@ -1,5 +1,7 @@
 # From Metrics to Mental Models: Ambient System Awareness via MCP
 
+> **Note:** This document was written during initial design (March 2026) and describes the architectural thinking behind the project. Some details have evolved — notably, the storage backend is now PostgreSQL-only (SQLite was dropped in v0.6.0), and most P0–P2 items in the priority table have been implemented. See the [CHANGELOG](../CHANGELOG.md) for current state and the [vision document](vision.md) for where the project is heading.
+
 ## What This Is
 
 A design pattern for AI agents that don't just query systems — they understand them. The pattern combines edge intelligence (lightweight processes that compute contextual awareness), the Model Context Protocol (MCP) as the data transport, and an externalized knowledge store as the durable memory layer. The result is an agent that knows what "normal" looks like across multiple systems, notices when reality diverges from that model, and surfaces it conversationally with enough judgment to know when to speak up.

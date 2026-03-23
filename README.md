@@ -269,7 +269,7 @@ See [Security considerations](docs/deployment-guide.md#security-considerations) 
 - Secret path auth + Cloudflare WAF for edge-level access control
 - Docker Compose with Postgres, named Cloudflare Tunnel, or ephemeral quick tunnel
 - Request timing instrumentation and `/health` endpoint
-- 190 tests (all against real Postgres), strict type checking, CI pipeline with coverage, QA gate
+- 196 tests (all against real Postgres), strict type checking, CI pipeline with coverage, QA gate
 
 ### Not yet implemented
 - Layer 2 (baseline) detection — rolling averages and deviation calculation
@@ -279,40 +279,23 @@ See [Security considerations](docs/deployment-guide.md#security-considerations) 
 
 ## Vision
 
-Today, `mcp-awareness` is personal — one person's AI tools sharing a single knowledge store. That's where it starts, not where it ends.
+Every app you use knows one thing about you. Your calendar knows your schedule. Your health tracker knows your sleep. Your NAS knows your disk usage. None of them know each other.
 
-### Personal → Team → Organization
+Awareness fills that gap — a self-hosted store where knowledge from disconnected contexts accumulates, and agents surface the connections no single app can see.
 
-**Personal** (now): Your AIs share memory across every platform you use. Plan on your phone, implement on your laptop, review from your desktop. Context follows you, not the app.
+**The product is silence.** The most important briefing is `attention_needed: false` — confirmation that everything was checked and nothing needs you. An attention firewall, not another notification source.
 
-**Family & trusted circle** (next): A shared store for your household and the people in your life. Birthdays, wishlists, dietary restrictions, who's allergic to what, which kid has practice on Thursdays. "Plan a birthday dinner for Mom" and your AI already knows the date, her favorite restaurant, and who's in town. No shared spreadsheet to maintain — knowledge accumulates as family members mention things to their own AIs. Share specific notes or collections with people outside the household — change the door code while you're traveling, and the dog walker's AI surfaces the update on the way to your house.
+**Knowledge becomes ambient.** It accumulates through daily use, not documentation. A living estate document that's always current because it maintained itself as a side effect of living your life with an agent. A house that remembers when the furnace was serviced. A decision trail that preserves the reasoning at the moment you made the choice.
 
-**Team** (next): A shared awareness store for your team at work. Your AI knows the on-call runbook, the architecture decisions, the coding conventions — not because someone wrote a doc, but because the team's AIs have been accumulating knowledge through daily work. New team member's AI is productive on day one. Temporary context like "code freeze until Thursday" is automatically known by everyone's AI and automatically forgotten when it lifts.
+**Goals, not reminders.** The next major feature — intentions — turns awareness into a decision-support system. "Pick up milk" becomes a goal evaluated against real-world circumstances: Is the store open when you'd arrive? Do they have stock? Is it cheaper two minutes further? Is the route clear? Your phone triggers the evaluation; your agent delivers a recommendation with alternatives.
 
-**Organization** (future): Multiple teams, scoped access. Engineering, ops, product — each with their own store, plus cross-team shared knowledge.
+**Personal → family → team → community.** One person today. A shared household store next. Team knowledge that accumulates through work. Community institutional memory for organizations with zero software budget.
 
-Shared stores require trust boundaries — ownership, audit history, edit/view permissions, the ability to revert changes. The `changelog` is a starting point; full multi-user access control is on the roadmap alongside OAuth and the managed service.
-
-### Universal context, not just monitoring
-
-Awareness started as a system monitoring tool, but that's just one source of context. The real vision is broader: every tool you use feeds knowledge into every AI you use.
-
-Take meeting notes in Notion — an edge process summarizes them and stores them in awareness. Next time you open Claude Code to implement what was discussed, it already knows the decisions and context. Update a ticket in Linear, and your AI knows the priority changed. Merge a PR in GitHub, and every platform knows the feature shipped.
-
-Notion, Slack, Linear, Jira, Google Docs, health trackers, calendars, infrastructure monitors — any tool with an API becomes a source.
-
-And it flows both ways. Knowledge doesn't just come *in* — it goes *out*. Update a memory prompt in awareness, and an edge process auto-commits the change to your GitHub docs. Change your project status, and it shows up in Notion or Slack without anyone posting. Awareness becomes the hub, not a silo — your AI is the integration layer between everything you use, with context that flows automatically in both directions.
-
-### What makes this different from a wiki
-
-Knowledge accumulates through conversation and work, not documentation. Nobody has to stop what they're doing to write things down — the AI does it as part of the work, and edge processes capture it from the tools you already use. Unlike a wiki that someone has to remember to check, your AI reads from awareness automatically. The result is a living knowledge base that grows as people work, not as a separate task they avoid.
-
-### Proactive intelligence
-
-The system doesn't just store what happened — it helps you decide what to do about it. Baseline detection learns what "normal" looks like and flags deviations. Cross-domain inference connects data across sources: bad sleep from your health tracker + a packed calendar = a recommendation to reschedule the afternoon meeting. An alert from your infrastructure + context from last week's incident = "this looks like the same root cause."
+Read the full vision: **[What Knowledge Becomes When It's Ambient](docs/vision.md)**
 
 ## Design docs
 
+- [Vision](docs/vision.md) — what knowledge becomes when it's ambient: silence, estate planning, place memory, intentions, and the progression from personal to community
 - [Deployment Guide](docs/deployment-guide.md) — demo install, secure deployment with Cloudflare Tunnel + WAF, client configuration
 - [From Metrics to Mental Models](docs/from-metrics-to-mental-models.md) — core spec: three-layer detection model, API design, data schema
 - [Collation Layer](docs/collation-layer.md) — briefing resource, token optimization, escalation logic
