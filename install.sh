@@ -15,7 +15,8 @@ set -euo pipefail
 #   https://github.com/cmeans/mcp-awareness/blob/main/install.sh
 # ─────────────────────────────────────────────────────────────────────────────
 
-COMPOSE_URL="https://raw.githubusercontent.com/cmeans/mcp-awareness/main/docker-compose.demo.yaml"
+# TODO: change back to main before merging
+COMPOSE_URL="https://raw.githubusercontent.com/cmeans/mcp-awareness/one-click-install/docker-compose.demo.yaml"
 DEFAULT_DIR="$HOME/mcp-awareness"
 INSTALL_DIR=""
 
