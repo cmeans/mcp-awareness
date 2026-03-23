@@ -10,9 +10,6 @@ set -euo pipefail
 #
 # The quick tunnel URL is ephemeral — it changes every time you restart.
 # For a stable URL, see the Deployment Guide in the repo.
-#
-# Review this script before running it:
-#   https://github.com/cmeans/mcp-awareness/blob/main/install-demo.sh
 # ─────────────────────────────────────────────────────────────────────────────
 
 COMPOSE_URL="https://raw.githubusercontent.com/cmeans/mcp-awareness/main/docker-compose.demo.yaml"
