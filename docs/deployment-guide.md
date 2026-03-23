@@ -2,7 +2,7 @@
 
 This guide walks through deploying mcp-awareness locally — from starting the server to connecting your AI and seeing ambient awareness in action.
 
-The examples below use Cloudflare Tunnel and WAF for public access, but any reverse proxy that terminates TLS will work (nginx, Caddy, Tailscale, ngrok, etc.). The core requirement is HTTPS between your MCP client and the server.
+The [secure deployment](#secure-deployment-recommended) section uses a Cloudflare named tunnel and WAF for stable public access, but any reverse proxy that terminates TLS will work (nginx, Caddy, Tailscale, ngrok, etc.). The core requirement is HTTPS between your MCP client and the server.
 
 ## Demo install (quickest way to try it)
 
