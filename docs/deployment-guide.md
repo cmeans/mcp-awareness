@@ -336,7 +336,7 @@ The current approach uses two layers:
 - Claude.ai custom connectors support OAuth Client ID / Secret fields, but these follow standard OAuth flows — they are **not compatible** with Cloudflare Access service tokens (which use `CF-Access-Client-Id` / `CF-Access-Client-Secret` headers)
 - Cloudflare Managed OAuth requires dynamic client registration (RFC 8707), which Claude.ai does not support
 - cloudflared tunnel ingress rules cannot rewrite URL paths — the server must handle path rewriting
-- FastMCP's `mount_path` parameter only works for SSE transport, not streamable-http
+- FastMCP's `mount_path` parameter only works for SSE transport, not streamable-http — this is why we use custom `SecretPathMiddleware` instead of the built-in option
 
 ## Notes
 
