@@ -235,20 +235,16 @@ Start a **new conversation** and ask something unrelated:
 
 > What's the weather like this weekend?
 
-You should see Claude:
+If you populated the store in Step 6, your AI should:
 1. Call `get_briefing` (visible in the tool use area)
-2. Mention the alert as an FYI before answering
+2. Mention any alerts as an FYI before answering
 3. Answer your question normally
 
-<img src="images/android-briefing-demo.png" alt="Demo screenshot" width="220" align="right">
+If the store is empty, the briefing will return with `attention_needed: false` and your AI will answer normally without mentioning awareness. Try telling it something to store:
 
-Example output:
+> Remember that my home server runs Ubuntu 24.04 with 32GB RAM
 
-> **FYI:** qbittorrent container appears to be down on the NAS — disk I/O dropped to ~12% (normally 80-90%).
->
-> Weekend looks decent for Chicago...
-
-<br clear="both">
+Then start a new conversation and ask about your setup — it should retrieve what you stored.
 
 ### Step 10: Test suppression
 
