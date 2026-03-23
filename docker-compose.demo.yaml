@@ -1,0 +1,69 @@
+name: mcp-awareness-demo
+
+services:
+  mcp-awareness:
+    image: ghcr.io/cmeans/mcp-awareness:latest
+    container_name: mcp-awareness-demo
+    restart: unless-stopped
+    # Uncomment to access the server directly (without the tunnel)
+    # ports:
+    #   - "8420:8420"
+    environment:
+      AWARENESS_BACKEND: postgres
+      # If you change this password, also update POSTGRES_PASSWORD below
+      AWARENESS_DATABASE_URL: postgresql://awareness:mcp-awareness-demo@postgres:5432/awareness
+    depends_on:
+      postgres:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: '0.1'
+          memory: 64M
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; s = socket.create_connection(('localhost', 8420), timeout=2); s.close()"]
+      interval: 10s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  postgres:
+    image: pgvector/pgvector:pg17
+    container_name: mcp-awareness-demo-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: awareness
+      POSTGRES_USER: awareness
+      POSTGRES_PASSWORD: mcp-awareness-demo
+    volumes:
+      - awareness-pg:/var/lib/postgresql/data
+    # Uncomment to access Postgres directly (e.g., for debugging)
+    # ports:
+    #   - "5432:5432"
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U awareness"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  tunnel:
+    image: cloudflare/cloudflared:latest
+    container_name: mcp-awareness-demo-tunnel
+    command: tunnel --no-autoupdate --url http://mcp-awareness:8420
+    depends_on:
+      mcp-awareness:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: '0.05'
+          memory: 64M
+
+volumes:
+  awareness-pg:

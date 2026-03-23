@@ -9,7 +9,7 @@
 
 ## What this is
 
-`mcp-awareness` is shared memory for every AI you use. Any AI assistant can store and retrieve knowledge through it using the open [Model Context Protocol](https://modelcontextprotocol.io/) (MCP). Self-host it today, or use the managed service when it launches. It works with Claude.ai, Claude Code, Claude Desktop, Claude mobile (Android/iOS), Cursor, and any other MCP-compatible client.
+`mcp-awareness` is shared memory for every AI you use. Any AI assistant can store and retrieve knowledge through it using the open [Model Context Protocol](https://modelcontextprotocol.io/) (MCP). Self-host it today, or use the managed service when it launches. It works with any MCP-compatible client — Claude (all platforms), Cursor, VS Code, and more.
 
 **The problem:** Every AI platform keeps its own memory silo. What you teach Claude doesn't exist in ChatGPT. Your desktop assistant's context doesn't follow you to mobile. Switch platforms, and you start over.
 
@@ -116,15 +116,31 @@ flowchart TB
 
 ## Quick start
 
+### Try the demo (easiest)
+
+One script, three containers, a public URL. No account needed.
+
+```bash
+curl -sSL https://raw.githubusercontent.com/cmeans/mcp-awareness/main/install-demo.sh | bash
+```
+
+> **Prefer to review the script first?** [View it on GitHub](https://github.com/cmeans/mcp-awareness/blob/main/install-demo.sh), then download and run locally.
+
+This starts the Awareness server, Postgres, and a Cloudflare quick tunnel. You'll get a public URL and ready-to-paste config snippets for all major MCP clients. The instance comes pre-loaded with demo data — your AI will discover it automatically.
+
+> **Note:** The tunnel URL is ephemeral — it changes on restart. For a stable URL, see the [Deployment Guide](docs/deployment-guide.md).
+
+> **Model matters:** Best experience with Claude Sonnet 4.6 or Opus 4.6. Smaller models (Haiku, GPT-4o-mini) may not follow MCP prompts reliably.
+
+### Local development
+
 ```bash
 git clone https://github.com/cmeans/mcp-awareness.git
 cd mcp-awareness
 docker compose up -d
 ```
 
-That's it. The server is running on port 8420. Point any MCP client at `http://localhost:8420/mcp`.
-
-For remote access via Cloudflare Tunnel and secure deployment, see the [Deployment Guide](docs/deployment-guide.md).
+The server is running on port 8420. Point any MCP client at `http://localhost:8420/mcp`.
 
 ### Connect your AI
 
@@ -168,7 +184,7 @@ mypy src/mcp_awareness/    # type check
 
 ## Tools
 
-The server exposes 18 MCP tools. Clients that support MCP resources also get 6 read-only resources, but since many clients (including Claude.ai) only surface tools, every resource has a tool mirror.
+The server exposes 18 MCP tools. Clients that support MCP resources also get 6 read-only resources, but since not all clients surface resources, every resource has a tool mirror.
 
 ### Read tools
 
@@ -216,37 +232,48 @@ See [Security considerations](docs/deployment-guide.md#security-considerations) 
 
 ## Current status
 
-**Working end-to-end** — deployed on `mcpawareness.com` via Cloudflare Tunnel with WAF protection. Tested with Claude.ai, Claude Code, Claude Desktop, Claude mobile (Android), and Cursor.
+**Working end-to-end** — deployed on `mcpawareness.com` via Cloudflare Tunnel with WAF protection. Tested with Claude (all platforms), Cursor, and VS Code.
 
-**Implemented:**
-- Shared knowledge store: `remember`, `learn_pattern`, `add_context`, `set_preference` with filtered retrieval
-- Idempotent upserts via `logical_key` — same source + key updates in place with changelog tracking, no UUID needed
+### Getting started
+- **One-line demo install** — `curl | bash` sets up Awareness + Postgres + Cloudflare quick tunnel with pre-loaded demo data and a `getting-started` prompt that personalizes your instance
+- **Published Docker image** — `ghcr.io/cmeans/mcp-awareness`, auto-built on release tags
+
+### Knowledge store
+- `remember`, `learn_pattern`, `add_context`, `set_preference` with filtered retrieval
+- Idempotent upserts via `logical_key` — same source + key updates in place with changelog tracking
 - In-place updates with changelog tracking (`update_entry` + `include_history`)
-- Store introspection: `get_stats` for entry counts, `get_tags` for tag discovery
 - General-purpose notes with optional content payload and MIME type
-- Ambient awareness: status reporting, alert detection, suppression, briefing generation
-- PostgreSQL backend with pgvector (production default), TIMESTAMPTZ columns, GIN-indexed tag queries, Debezium CDC-ready (`wal_level=logical`)
-- SQLite backend available as lightweight alternative
-- Storage abstraction: `Store` protocol — backends are swappable without changing server or collator logic
-- Full MCP API: 6 resources + 18 tools + 5 prompts (read mirrors for tools-only clients like Claude.ai)
+- Store introspection: `get_stats` for entry counts, `get_tags` for tag discovery
 - Soft delete with 30-day trash, dry-run confirmation for bulk operations
-- Request timing instrumentation and `/health` endpoint for latency analysis
-- Streamable HTTP + stdio transports
-- Secret path auth + Cloudflare WAF for edge-level access control
-- Docker Compose with Postgres, named Cloudflare Tunnel, or ephemeral quick tunnel
+- Delete and restore by tags with AND logic
+- Pagination (`limit`/`offset`) on all list queries
+
+### Awareness engine
+- Ambient awareness: status reporting, alert detection, suppression, briefing generation
 - Three-layer detection model (threshold + knowledge implemented; baseline planned)
 - Suppression system with time-based expiry and escalation overrides
-- Alembic migration framework for PostgreSQL (version-tracked, raw SQL, auto-runs on Docker startup)
-- Pagination (`limit`/`offset`) on knowledge, alerts, entries, and trash queries
-- QA gate: `QA Approved` label required to merge PRs (pending status, not failed)
-- MCP Prompts: 5 built-in dynamic prompts + user-defined prompts from store entries with `{{var}}` templates
-- 181 tests, strict type checking, CI pipeline
 
-**Not yet implemented:**
+### MCP interface
+- Full MCP API: 6 resources + 18 tools + 5 prompts
+- Read tool mirrors for tools-only clients
+- User-defined custom prompts from store entries with `{{var}}` templates
+- Streamable HTTP + stdio transports
+
+### Infrastructure
+- PostgreSQL backend with pgvector (production default), GIN-indexed tag queries, Debezium CDC-ready
+- SQLite backend available as lightweight alternative
+- Storage abstraction: `Store` protocol — backends are swappable without changing server or collator logic
+- Alembic migration framework (version-tracked, raw SQL, auto-runs on Docker startup)
+- Secret path auth + Cloudflare WAF for edge-level access control
+- Docker Compose with Postgres, named Cloudflare Tunnel, or ephemeral quick tunnel
+- Request timing instrumentation and `/health` endpoint
+- 181 tests, strict type checking, CI pipeline, QA gate
+
+### Not yet implemented
 - Layer 2 (baseline) detection — rolling averages and deviation calculation
 - Edge processes — no automated producers yet ([example script](examples/simulate_edge.py) demonstrates the write path)
-- Semantic search — current knowledge retrieval is tag/keyword-based; vector similarity is planned
-- OAuth / API key authentication — current auth is secret-path-based; proper token auth requires MCP client support for auth flows
+- Semantic search — current retrieval is tag/keyword-based; vector similarity is planned
+- OAuth / API key authentication — current auth is secret-path-based
 
 ## Vision
 
@@ -284,7 +311,7 @@ The system doesn't just store what happened — it helps you decide what to do a
 
 ## Design docs
 
-- [Deployment Guide](docs/deployment-guide.md) — deployment walkthrough with Cloudflare Tunnel, WAF, and Claude.ai integration
+- [Deployment Guide](docs/deployment-guide.md) — demo install, secure deployment with Cloudflare Tunnel + WAF, client configuration
 - [From Metrics to Mental Models](docs/from-metrics-to-mental-models.md) — core spec: three-layer detection model, API design, data schema
 - [Collation Layer](docs/collation-layer.md) — briefing resource, token optimization, escalation logic
 - [Data Dictionary](docs/data-dictionary.md) — database schema, entry types, data field structures, lifecycle rules
@@ -305,7 +332,7 @@ The system doesn't just store what happened — it helps you decide what to do a
 
 ## How it's built
 
-This project is built using the thing it builds. Multiple AI instances across platforms — Claude.ai, Claude Code, Claude Desktop, Claude mobile — collaborate through awareness itself, and the friction they encounter drives the features they propose.
+This project is built using the thing it builds. Multiple AI instances across platforms collaborate through awareness itself, and the friction they encounter drives the features they propose.
 
 ### The feedback loop in action
 

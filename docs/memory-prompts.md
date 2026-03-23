@@ -2,11 +2,13 @@
 
 Connecting awareness as an MCP server gives your AI the tools — but without instructions, it won't know when or how to use them. Memory prompts bridge that gap: they tell your AI to check awareness at conversation start, store knowledge when it learns something, and maintain project status across platforms.
 
+If your client supports MCP prompts, the built-in `agent_instructions` prompt handles this automatically. The sections below are for clients that need manual configuration, or for fine-tuning behavior per platform.
+
 There are three levels of prompt integration, depending on your platform and use case.
 
-## 1. Platform memory (Claude.ai, Claude Desktop, Claude mobile)
+## 1. Platform memory (clients with persistent memory)
 
-These platforms support memory instructions — persistent prompts that apply to every conversation. The awareness prompt is split into sections, each under 500 characters (Claude Desktop's limit per entry).
+Some clients support memory instructions — persistent prompts that apply to every conversation (e.g., Claude.ai, Claude Desktop). The awareness prompt is split into sections, each under 500 characters to fit clients with per-entry limits.
 
 The prompt is stored in awareness itself. Any AI with access can retrieve it:
 
@@ -46,9 +48,8 @@ Or you can paste the sections into your platform's memory manually:
 
 ### Platform notes
 
-- **Claude Desktop** has a 500-character limit per memory entry. Each section above fits within that limit.
-- **Claude.ai** does not have the same limit — you can combine sections if preferred.
-- **`learned_from`** should be set to your platform name (e.g., `"claude-ai"`, `"claude-code"`, `"claude-desktop"`). Some platforms self-identify differently — Claude.ai may use `"claude-web"`. Don't fight it; the field is for traceability, not filtering.
+- Some clients have per-entry limits (e.g., Claude Desktop: 500 characters). Each section above fits within that limit. Clients without limits can combine sections.
+- **`learned_from`** should be set to your platform name (e.g., `"claude-code"`, `"cursor"`, `"vscode"`). The field is for traceability, not filtering.
 
 ## 2. Global CLAUDE.md (Claude Code — all projects)
 
@@ -78,7 +79,7 @@ in conjunction with your auto-memory for anything worth remembering.
   (e.g., `["mcp-awareness"]`, `["synology-mcp"]`).
 - **User references a system by name:** Check `get_status` for that source.
 - **Starting work:** Check if other platforms left context about what the user
-  was doing (e.g., "was debugging X in Claude.ai earlier").
+  was doing (e.g., "was debugging X on another platform earlier").
 
 ### Writing knowledge
 
@@ -178,7 +179,7 @@ The project CLAUDE.md is scoped and defensive:
 
 | Level | Where | Who sees it | What it does |
 |-------|-------|-------------|-------------|
-| Platform memory | Claude.ai / Desktop settings | That platform only | Core behavior: briefing, read, write, resilience |
+| Platform memory | Client memory settings | That platform only | Core behavior: briefing, read, write, resilience |
 | Global CLAUDE.md | `~/.claude/CLAUDE.md` | All Claude Code sessions | Detailed instructions: dedup, cross-platform sync, status |
 | Project CLAUDE.md | `CLAUDE.md` in repo root | Anyone working on that repo | Project-specific: verify connection, maintain status, record milestones |
 

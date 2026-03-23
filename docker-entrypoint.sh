@@ -5,6 +5,7 @@ set -e
 if [ "$AWARENESS_BACKEND" = "postgres" ] && [ -n "$AWARENESS_DATABASE_URL" ]; then
     echo "Running database migrations..."
     mcp-awareness-migrate
+    python /app/seed_demo.py
 fi
 
 # Start the server
