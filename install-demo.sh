@@ -15,8 +15,7 @@ set -euo pipefail
 #   https://github.com/cmeans/mcp-awareness/blob/main/install-demo.sh
 # ─────────────────────────────────────────────────────────────────────────────
 
-# TODO: change back to main before merging
-COMPOSE_URL="https://raw.githubusercontent.com/cmeans/mcp-awareness/one-click-install/docker-compose.demo.yaml"
+COMPOSE_URL="https://raw.githubusercontent.com/cmeans/mcp-awareness/main/docker-compose.demo.yaml"
 DEFAULT_DIR="$HOME/mcp-awareness-demo"
 INSTALL_DIR=""
 
@@ -73,7 +72,7 @@ echo "────────────────────────�
 echo ""
 echo "This will:"
 echo "  1. Download a Docker Compose file"
-echo "  2. Start three containers (awareness server, Postgres, Cloudflare tunnel)"
+echo "  2. Start three containers (Awareness server, Postgres, Cloudflare tunnel)"
 echo "  3. Give you a public URL to connect from any MCP client"
 echo ""
 
@@ -177,7 +176,7 @@ echo ""
 # ── Choose install directory ─────────────────────────────────────────────────
 
 if [ -z "$INSTALL_DIR" ]; then
-  printf "Where should we put the compose file? [${BOLD}%s${RESET}]: " "$DEFAULT_DIR"
+  printf "Install location? [${BOLD}%s${RESET}]: " "$DEFAULT_DIR"
   read -r INSTALL_DIR
   INSTALL_DIR="${INSTALL_DIR:-$DEFAULT_DIR}"
 fi
