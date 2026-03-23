@@ -1458,3 +1458,25 @@ def test_sql_pagination_limit_offset(store):
     ids1 = {e.id for e in page1}
     ids2 = {e.id for e in page2}
     assert ids1.isdisjoint(ids2)
+
+
+def test_get_knowledge_include_history_only_with_pagination(store):
+    """include_history='only' with limit/offset uses Python-side pagination."""
+    now = now_utc()
+    for i in range(3):
+        entry = Entry(
+            id=make_id(),
+            type=EntryType.NOTE,
+            source="test",
+            tags=[],
+            created=now,
+            updated=now,
+            expires=None,
+            data={"description": f"note-{i}"},
+        )
+        store.add(entry)
+        store.update_entry(entry.id, {"description": f"updated-{i}"})
+    all_with_history = store.get_knowledge(include_history="only")
+    assert len(all_with_history) == 3
+    page = store.get_knowledge(include_history="only", limit=2, offset=1)
+    assert len(page) == 2
