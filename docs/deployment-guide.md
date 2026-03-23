@@ -217,27 +217,17 @@ https://yourdomain.com/<your-secret>/mcp
 }
 ```
 
-### Step 8: Add the memory instruction
+### Step 8: Set up agent instructions
 
-The awareness prompt is stored in the awareness service itself. Once connected, ask your AI:
+If your client supports MCP prompts, the `agent_instructions` prompt provides your AI with the full awareness workflow automatically. No manual memory setup needed.
 
-> Check awareness for the memory prompt — `get_knowledge(source="awareness-prompt")`
+For clients without prompt support (like Claude.ai), ask your AI to retrieve the instructions:
 
-It will retrieve the full prompt entries and can add them to its memory. Alternatively, start a new conversation and paste:
+> Check awareness for agent instructions — `get_knowledge(source="awareness-prompt")`
 
-> Add this to your Memory:
->
-> **Awareness** is a portable knowledge store (MCP server). Use it in conjunction with your memory for anything worth remembering.
->
-> - **Start of conversation:** Call `get_briefing`. Mention only if `attention_needed` is true.
-> - **I tell you something worth remembering:** Store it — `remember` for general notes, `learn_pattern` for operational facts, `add_context` for time-limited, `set_preference` for behavior. Set `learned_from` to your platform name.
-> - **My question might have stored context:** Call `get_knowledge` before answering. Use source, tags, and entry_type filters.
-> - **Before creating tags:** Call `get_tags` to check what exists and prevent drift.
-> - **Updating knowledge:** Use `update_entry` to modify in place — changes tracked in `changelog`.
-> - **I say stop alerting:** Use `suppress_alert`.
-> - **If a tool call fails:** Retry once. If it fails again, the service may be restarting — try later.
+It will retrieve the prompt entries and can add them to its memory.
 
-For the full prompt with all sections, platform-specific notes, and Claude Code integration (global and project CLAUDE.md), see [Memory Prompts](memory-prompts.md).
+For platform-specific setup (Claude Code CLAUDE.md, Claude Desktop memory), see [Memory Prompts](memory-prompts.md).
 
 ### Step 9: Test it
 
