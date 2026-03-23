@@ -837,6 +837,103 @@ async def get_activity(
 
 
 # ---------------------------------------------------------------------------
+# Intention tools
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool()
+@_timed
+async def remind(
+    goal: str,
+    source: str,
+    tags: list[str],
+    deliver_at: str | None = None,
+    constraints: str | None = None,
+    urgency: str = "normal",
+    recurrence: str | None = None,
+    learned_from: str = "conversation",
+) -> str:
+    """Create an intention — a goal to be evaluated when conditions align.
+    Unlike remember (permanent knowledge) or add_context (time-limited facts),
+    intentions have a lifecycle: they start pending, fire when conditions are met,
+    and complete when you act on them.
+    goal: what outcome is desired (e.g., 'pick up milk', 'tell Mom about insurance').
+    deliver_at: ISO 8601 timestamp — when to surface this intention. Required for
+    time-based triggers. Omit for intentions that will be triggered by other
+    conditions (location, events) in the future.
+    constraints: optional preferences or requirements (e.g., 'organic, budget-conscious').
+    urgency: 'low', 'normal', or 'high'. High-urgency intentions surface more prominently.
+    recurrence: reserved for future use. Currently only one-shot intentions are supported.
+    This tool always returns structured JSON."""
+    now = now_utc()
+    deliver_at_dt = ensure_dt(deliver_at) if deliver_at else None
+    entry = Entry(
+        id=make_id(),
+        type=EntryType.INTENTION,
+        source=source,
+        tags=tags,
+        created=now,
+        updated=now,
+        expires=None,
+        data={
+            "goal": goal,
+            "state": "pending",
+            "deliver_at": to_iso(deliver_at_dt) if deliver_at_dt else None,
+            "constraints": constraints,
+            "urgency": urgency,
+            "recurrence": recurrence,
+            "learned_from": learned_from,
+        },
+    )
+    store.add(entry)
+    return json.dumps({"status": "ok", "id": entry.id, "state": "pending"}, indent=2)
+
+
+@mcp.tool()
+@_timed
+async def get_intentions(
+    state: str | None = None,
+    source: str | None = None,
+    tags: list[str] | None = None,
+    mode: str | None = None,
+    limit: int | None = None,
+) -> str:
+    """Get intentions, optionally filtered by state, source, or tags.
+    Valid states: 'pending', 'fired', 'completed', 'snoozed', 'cancelled'.
+    mode: omit for full entries, 'list' for metadata only.
+    This tool always returns structured JSON."""
+    entries = store.get_intentions(state=state, source=source, tags=tags, limit=limit)
+    if mode == "list":
+        return json.dumps([e.to_list_dict() for e in entries], indent=2)
+    return json.dumps([e.to_dict() for e in entries], indent=2)
+
+
+@mcp.tool()
+@_timed
+async def update_intention(
+    entry_id: str,
+    state: str,
+    reason: str | None = None,
+) -> str:
+    """Transition an intention to a new state.
+    Valid states: 'fired', 'completed', 'snoozed', 'cancelled'.
+    reason: optional explanation (e.g., 'completed at Mariano\\'s', 'not today').
+    Use 'completed' when the goal was achieved, 'snoozed' to defer,
+    'cancelled' to permanently dismiss.
+    This tool always returns structured JSON."""
+    from .schema import INTENTION_STATES
+
+    if state not in INTENTION_STATES:
+        return json.dumps(
+            {"status": "error", "message": f"Invalid state: {state}. Valid: {INTENTION_STATES}"}
+        )
+    result = store.update_intention_state(entry_id, state, reason)
+    if result is None:
+        return json.dumps({"status": "error", "message": "Intention not found"})
+    return json.dumps({"status": "ok", "id": entry_id, "state": state, "reason": reason}, indent=2)
+
+
+# ---------------------------------------------------------------------------
 # Prompts (discoverable agent instructions, built from store data)
 # ---------------------------------------------------------------------------
 

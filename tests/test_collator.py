@@ -781,3 +781,70 @@ class TestGenerateBriefing:
         briefing = generate_briefing(store)
         ev = briefing["evaluation"]
         assert ev["stale_sources"] == 1
+
+    # ------------------------------------------------------------------
+    # Intention evaluation in briefing
+    # ------------------------------------------------------------------
+
+    def test_briefing_fires_time_based_intention(self, store):
+        """Briefing surfaces intentions whose deliver_at has passed."""
+        from datetime import timedelta
+
+        past = now_utc() - timedelta(hours=1)
+        store.add(
+            Entry(
+                id=make_id(),
+                type=EntryType.INTENTION,
+                source="personal",
+                tags=["errands"],
+                created=now_utc(),
+                updated=now_utc(),
+                expires=None,
+                data={
+                    "goal": "Pick up milk",
+                    "state": "pending",
+                    "deliver_at": past.isoformat(),
+                },
+            )
+        )
+        briefing = generate_briefing(store)
+        assert briefing["attention_needed"] is True
+        assert len(briefing.get("fired_intentions", [])) == 1
+        assert briefing["fired_intentions"][0]["goal"] == "Pick up milk"
+        assert briefing["evaluation"]["intentions_fired"] == 1
+        assert briefing["evaluation"]["intentions_pending"] == 1  # still pending until transitioned
+        assert "intention" in briefing["summary"].lower()
+
+    def test_briefing_no_intentions_when_none_pending(self, store):
+        """Briefing doesn't include intentions when none exist."""
+        briefing = generate_briefing(store)
+        assert briefing.get("fired_intentions") is None
+        assert briefing["pending_intentions"] == 0
+        assert briefing["evaluation"]["intentions_pending"] == 0
+        assert briefing["evaluation"]["intentions_fired"] == 0
+
+    def test_briefing_future_intention_not_fired(self, store):
+        """Future intentions don't fire in the briefing."""
+        from datetime import timedelta
+
+        future = now_utc() + timedelta(hours=1)
+        store.add(
+            Entry(
+                id=make_id(),
+                type=EntryType.INTENTION,
+                source="personal",
+                tags=[],
+                created=now_utc(),
+                updated=now_utc(),
+                expires=None,
+                data={
+                    "goal": "Future task",
+                    "state": "pending",
+                    "deliver_at": future.isoformat(),
+                },
+            )
+        )
+        briefing = generate_briefing(store)
+        assert briefing.get("fired_intentions") is None
+        assert briefing["pending_intentions"] == 1
+        assert briefing["evaluation"]["intentions_fired"] == 0

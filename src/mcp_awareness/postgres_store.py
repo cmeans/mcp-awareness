@@ -837,6 +837,81 @@ class PostgresStore:
             }
         return result
 
+    # ------------------------------------------------------------------
+    # Intentions
+    # ------------------------------------------------------------------
+
+    def get_intentions(
+        self,
+        state: str | None = None,
+        source: str | None = None,
+        tags: list[str] | None = None,
+        limit: int | None = None,
+    ) -> list[Entry]:
+        """Get intention entries, optionally filtered by state, source, or tags."""
+        clauses = ["type = %s"]
+        params: list[Any] = [EntryType.INTENTION.value]
+        if state:
+            clauses.append("data->>'state' = %s")
+            params.append(state)
+        if source:
+            clauses.append("source = %s")
+            params.append(source)
+        if tags:
+            for t in tags:
+                clauses.append("tags @> %s::jsonb")
+                params.append(json.dumps([t]))
+        where = " AND ".join(clauses)
+        entries = self._query_entries(where, tuple(params))
+        if limit:
+            entries = entries[:limit]
+        return entries
+
+    def update_intention_state(
+        self, entry_id: str, new_state: str, reason: str | None = None
+    ) -> Entry | None:
+        """Transition an intention to a new state. Appends to changelog."""
+        entry = self.get_entry_by_id(entry_id)
+        if entry is None or entry.type != EntryType.INTENTION:
+            return None
+        old_state = entry.data.get("state", "pending")
+        now = now_utc()
+        # Update state
+        entry.data["state"] = new_state
+        if reason:
+            entry.data["state_reason"] = reason
+        # Changelog
+        changelog = entry.data.setdefault("changelog", [])
+        changed: dict[str, Any] = {"state": old_state}
+        if reason:
+            changed["state_reason"] = entry.data.get("state_reason", "")
+        changelog.append({"updated": to_iso(now), "changed": changed})
+        entry.updated = now
+        with self._conn.cursor() as cur:
+            cur.execute(
+                "UPDATE entries SET updated = %s, data = %s::jsonb WHERE id = %s",
+                (now, json.dumps(entry.data), entry.id),
+            )
+        self._conn.commit()
+        return entry
+
+    def get_fired_intentions(self) -> list[Entry]:
+        """Get intentions whose deliver_at has passed and state is still pending.
+
+        These are ready to be surfaced to the user. The caller (collator or
+        server tool) is responsible for transitioning them to 'fired'.
+        """
+        now = now_utc()
+        entries = self._query_entries(
+            "type = %s AND data->>'state' = %s",
+            (EntryType.INTENTION.value, "pending"),
+        )
+        return [
+            e
+            for e in entries
+            if e.data.get("deliver_at") and ensure_dt(e.data["deliver_at"]) <= now
+        ]
+
     def clear(self) -> None:
         with self._conn.cursor() as cur:
             cur.execute("DELETE FROM reads")

@@ -1077,3 +1077,199 @@ def test_clear_removes_reads_and_actions(store):
     store.clear()
     assert store.get_reads() == []
     assert store.get_actions() == []
+
+
+# ------------------------------------------------------------------
+# Intention tests
+# ------------------------------------------------------------------
+
+
+def test_create_and_get_intention(store):
+    """Create an intention and retrieve it."""
+    now = now_utc()
+    entry = Entry(
+        id=make_id(),
+        type=EntryType.INTENTION,
+        source="personal",
+        tags=["errands"],
+        created=now,
+        updated=now,
+        expires=None,
+        data={
+            "goal": "Pick up milk",
+            "state": "pending",
+            "deliver_at": None,
+            "constraints": "organic, oat-preferred",
+            "urgency": "normal",
+            "recurrence": None,
+            "learned_from": "test",
+        },
+    )
+    store.add(entry)
+    intentions = store.get_intentions()
+    assert len(intentions) == 1
+    assert intentions[0].data["goal"] == "Pick up milk"
+    assert intentions[0].data["state"] == "pending"
+
+
+def test_get_intentions_filter_by_state(store):
+    """get_intentions filters by state."""
+    now = now_utc()
+    for state in ("pending", "pending", "fired", "completed"):
+        store.add(
+            Entry(
+                id=make_id(),
+                type=EntryType.INTENTION,
+                source="test",
+                tags=[],
+                created=now,
+                updated=now,
+                expires=None,
+                data={"goal": f"goal-{state}", "state": state},
+            )
+        )
+    assert len(store.get_intentions(state="pending")) == 2
+    assert len(store.get_intentions(state="fired")) == 1
+    assert len(store.get_intentions(state="completed")) == 1
+    assert len(store.get_intentions()) == 4
+
+
+def test_get_intentions_filter_by_tags(store):
+    """get_intentions filters by tags."""
+    now = now_utc()
+    store.add(
+        Entry(
+            id=make_id(),
+            type=EntryType.INTENTION,
+            source="test",
+            tags=["errands", "groceries"],
+            created=now,
+            updated=now,
+            expires=None,
+            data={"goal": "buy milk", "state": "pending"},
+        )
+    )
+    store.add(
+        Entry(
+            id=make_id(),
+            type=EntryType.INTENTION,
+            source="test",
+            tags=["work"],
+            created=now,
+            updated=now,
+            expires=None,
+            data={"goal": "file report", "state": "pending"},
+        )
+    )
+    assert len(store.get_intentions(tags=["groceries"])) == 1
+    assert len(store.get_intentions(tags=["work"])) == 1
+
+
+def test_update_intention_state(store):
+    """update_intention_state transitions state and records changelog."""
+    now = now_utc()
+    entry = Entry(
+        id=make_id(),
+        type=EntryType.INTENTION,
+        source="test",
+        tags=[],
+        created=now,
+        updated=now,
+        expires=None,
+        data={"goal": "test goal", "state": "pending"},
+    )
+    store.add(entry)
+    result = store.update_intention_state(entry.id, "fired", reason="time-based trigger")
+    assert result is not None
+    assert result.data["state"] == "fired"
+    assert result.data["state_reason"] == "time-based trigger"
+    assert len(result.data["changelog"]) == 1
+    assert result.data["changelog"][0]["changed"]["state"] == "pending"
+
+
+def test_update_intention_state_not_found(store):
+    """update_intention_state returns None for nonexistent entry."""
+    assert store.update_intention_state("nonexistent", "fired") is None
+
+
+def test_update_intention_state_wrong_type(store):
+    """update_intention_state returns None for non-intention entries."""
+    now = now_utc()
+    entry = Entry(
+        id=make_id(),
+        type=EntryType.NOTE,
+        source="test",
+        tags=[],
+        created=now,
+        updated=now,
+        expires=None,
+        data={"description": "not an intention"},
+    )
+    store.add(entry)
+    assert store.update_intention_state(entry.id, "fired") is None
+
+
+def test_get_fired_intentions(store):
+    """get_fired_intentions returns pending intentions with past deliver_at."""
+    from datetime import timedelta
+
+    now = now_utc()
+    past = now - timedelta(hours=1)
+    future = now + timedelta(hours=1)
+
+    # Past deliver_at — should fire
+    store.add(
+        Entry(
+            id=make_id(),
+            type=EntryType.INTENTION,
+            source="test",
+            tags=[],
+            created=now,
+            updated=now,
+            expires=None,
+            data={"goal": "overdue", "state": "pending", "deliver_at": past.isoformat()},
+        )
+    )
+    # Future deliver_at — should not fire
+    store.add(
+        Entry(
+            id=make_id(),
+            type=EntryType.INTENTION,
+            source="test",
+            tags=[],
+            created=now,
+            updated=now,
+            expires=None,
+            data={"goal": "not yet", "state": "pending", "deliver_at": future.isoformat()},
+        )
+    )
+    # No deliver_at — should not fire
+    store.add(
+        Entry(
+            id=make_id(),
+            type=EntryType.INTENTION,
+            source="test",
+            tags=[],
+            created=now,
+            updated=now,
+            expires=None,
+            data={"goal": "no time", "state": "pending", "deliver_at": None},
+        )
+    )
+    # Already fired — should not appear
+    store.add(
+        Entry(
+            id=make_id(),
+            type=EntryType.INTENTION,
+            source="test",
+            tags=[],
+            created=now,
+            updated=now,
+            expires=None,
+            data={"goal": "already done", "state": "fired", "deliver_at": past.isoformat()},
+        )
+    )
+
+    fired = store.get_fired_intentions()
+    assert len(fired) == 1
+    assert fired[0].data["goal"] == "overdue"

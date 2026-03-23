@@ -1478,3 +1478,107 @@ class TestReadActionTracking:
         item = next(i for i in listing if i["description"] == "popular entry")
         assert item["read_count"] == 3  # 2 manual + 1 from this get_knowledge call
         assert item["last_read"] is not None
+
+
+# ---------------------------------------------------------------------------
+# Intention tools
+# ---------------------------------------------------------------------------
+
+
+class TestIntentionTools:
+    @pytest.mark.anyio
+    async def test_remind_creates_intention(self) -> None:
+        result = json.loads(
+            await server_mod.remind(
+                goal="Pick up milk",
+                source="personal",
+                tags=["errands"],
+                deliver_at="2026-03-24T18:00:00Z",
+                constraints="organic, oat-preferred",
+            )
+        )
+        assert result["status"] == "ok"
+        assert result["state"] == "pending"
+        # Verify it's in the store
+        intentions = json.loads(await server_mod.get_intentions(state="pending"))
+        assert len(intentions) >= 1
+        assert any(i["data"]["goal"] == "Pick up milk" for i in intentions)
+
+    @pytest.mark.anyio
+    async def test_get_intentions_filter_state(self) -> None:
+        await server_mod.remind(goal="pending one", source="test", tags=["qa"])
+        result = json.loads(await server_mod.remind(goal="will fire", source="test", tags=["qa"]))
+        await server_mod.update_intention(entry_id=result["id"], state="fired")
+        pending = json.loads(await server_mod.get_intentions(state="pending"))
+        fired = json.loads(await server_mod.get_intentions(state="fired"))
+        assert len(pending) >= 1
+        assert len(fired) >= 1
+
+    @pytest.mark.anyio
+    async def test_get_intentions_list_mode(self) -> None:
+        await server_mod.remind(goal="list mode test", source="test", tags=["qa"])
+        listing = json.loads(await server_mod.get_intentions(mode="list"))
+        assert len(listing) >= 1
+        assert "data" not in listing[0]
+        assert "description" in listing[0]
+
+    @pytest.mark.anyio
+    async def test_update_intention_state(self) -> None:
+        result = json.loads(await server_mod.remind(goal="completable", source="test", tags=["qa"]))
+        entry_id = result["id"]
+        # Fire it
+        fired = json.loads(await server_mod.update_intention(entry_id=entry_id, state="fired"))
+        assert fired["status"] == "ok"
+        assert fired["state"] == "fired"
+        # Complete it
+        completed = json.loads(
+            await server_mod.update_intention(
+                entry_id=entry_id, state="completed", reason="done at Mariano's"
+            )
+        )
+        assert completed["status"] == "ok"
+        assert completed["state"] == "completed"
+
+    @pytest.mark.anyio
+    async def test_update_intention_invalid_state(self) -> None:
+        result = json.loads(await server_mod.remind(goal="test", source="test", tags=[]))
+        error = json.loads(
+            await server_mod.update_intention(entry_id=result["id"], state="invalid")
+        )
+        assert error["status"] == "error"
+        assert "Invalid state" in error["message"]
+
+    @pytest.mark.anyio
+    async def test_update_intention_not_found(self) -> None:
+        error = json.loads(await server_mod.update_intention(entry_id="nonexistent", state="fired"))
+        assert error["status"] == "error"
+
+    @pytest.mark.anyio
+    async def test_briefing_surfaces_fired_intentions(self) -> None:
+        from datetime import timedelta
+
+        s = _store()
+        from mcp_awareness.schema import Entry, EntryType, make_id, now_utc
+
+        past = now_utc() - timedelta(hours=1)
+        s.add(
+            Entry(
+                id=make_id(),
+                type=EntryType.INTENTION,
+                source="personal",
+                tags=["errands"],
+                created=now_utc(),
+                updated=now_utc(),
+                expires=None,
+                data={
+                    "goal": "Pick up milk",
+                    "state": "pending",
+                    "deliver_at": past.isoformat(),
+                },
+            )
+        )
+        briefing = json.loads(await server_mod.get_briefing())
+        assert briefing["attention_needed"] is True
+        assert len(briefing.get("fired_intentions", [])) == 1
+        assert briefing["fired_intentions"][0]["goal"] == "Pick up milk"
+        assert briefing["evaluation"]["intentions_fired"] == 1

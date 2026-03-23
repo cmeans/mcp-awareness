@@ -17,6 +17,11 @@ class EntryType(str, Enum):
     CONTEXT = "context"
     PREFERENCE = "preference"
     NOTE = "note"
+    INTENTION = "intention"
+
+
+# Valid states for the INTENTION lifecycle
+INTENTION_STATES = {"pending", "fired", "completed", "snoozed", "cancelled"}
 
 
 SEVERITY_RANK = {
