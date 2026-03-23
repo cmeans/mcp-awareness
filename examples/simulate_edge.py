@@ -22,12 +22,12 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from mcp_awareness.collator import generate_briefing
+from mcp_awareness.postgres_store import PostgresStore
 from mcp_awareness.schema import Entry, EntryType, make_id, now_iso
-from mcp_awareness.store import SQLiteStore
 
 
-def simulate(data_dir: str = "./data") -> None:
-    store = SQLiteStore(Path(data_dir) / "awareness.db")
+def simulate(dsn: str = "postgresql://awareness:awareness-dev@localhost:5432/awareness") -> None:
+    store = PostgresStore(dsn)
 
     # -----------------------------------------------------------------------
     # 1. System awareness — edge process reporting status and alerts
@@ -202,7 +202,7 @@ def simulate(data_dir: str = "./data") -> None:
 
     # Summary
     all_knowledge = store.get_knowledge()
-    print(f"\n=== Store Summary ===")
+    print("\n=== Store Summary ===")
     print(f"   Knowledge entries: {len(all_knowledge)}")
     print(f"   Active alerts: {len(store.get_active_alerts())}")
     print(f"   Attention needed: {briefing['attention_needed']}")
@@ -217,7 +217,9 @@ if __name__ == "__main__":
         description="Populate the awareness store with demo data"
     )
     parser.add_argument(
-        "--data-dir", default="./data", help="Data directory for the store"
+        "--dsn",
+        default="postgresql://awareness:awareness-dev@localhost:5432/awareness",
+        help="PostgreSQL connection string",
     )
     args = parser.parse_args()
-    simulate(args.data_dir)
+    simulate(args.dsn)

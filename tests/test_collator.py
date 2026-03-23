@@ -3,8 +3,6 @@
 from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
-import pytest
-
 from mcp_awareness.collator import (
     compose_mention,
     compose_summary,
@@ -13,7 +11,6 @@ from mcp_awareness.collator import (
     matches_pattern,
 )
 from mcp_awareness.schema import Entry, EntryType, make_id, now_utc
-from mcp_awareness.store import SQLiteStore
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -359,9 +356,7 @@ class TestComposeMention:
 
 
 class TestGenerateBriefing:
-    @pytest.fixture
-    def store(self, tmp_path):
-        return SQLiteStore(tmp_path / "test.json")
+    # store fixture comes from conftest.py (testcontainers Postgres)
 
     def test_empty_store(self, store):
         briefing = generate_briefing(store)
@@ -530,10 +525,12 @@ class TestGenerateBriefing:
     def test_stale_source_detection(self, store):
         old = datetime.now(timezone.utc) - timedelta(seconds=300)
         store.upsert_status("nas", ["infra"], {"metrics": {}, "ttl_sec": 120})
-        store._conn.execute(
-            "UPDATE entries SET updated = ?, created = ? WHERE type = 'status' AND source = 'nas'",
-            (old, old),
-        )
+        with store._conn.cursor() as cur:
+            cur.execute(
+                "UPDATE entries SET updated = %s, created = %s"
+                " WHERE type = 'status' AND source = 'nas'",
+                (old, old),
+            )
         store._conn.commit()
         briefing = generate_briefing(store)
         assert briefing["attention_needed"] is True

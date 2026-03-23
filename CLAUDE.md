@@ -53,8 +53,7 @@ python -m pytest tests/test_collator.py::TestIsSuppressed::test_escalation_overr
 ruff check src/ tests/    # lint
 ruff format src/ tests/   # format (or --check to verify)
 mypy src/mcp_awareness/   # type check (strict mode)
-mcp-awareness             # run server via stdio
-AWARENESS_DATA_DIR=./data mcp-awareness  # custom data dir
+mcp-awareness             # run server via stdio (requires AWARENESS_DATABASE_URL)
 ```
 
 CI runs all three (ruff, mypy, pytest) on push/PR to main via `.github/workflows/ci.yml`.
@@ -65,7 +64,7 @@ CI runs all three (ruff, mypy, pytest) on push/PR to main via `.github/workflows
 src/mcp_awareness/
 ├── schema.py      # Entry types (status/alert/pattern/suppression/context/preference/note),
 │                  # common envelope, validation, TTL/expiry logic, severity ranking
-├── store.py           # Store protocol + SQLiteStore implementation (WAL mode), CRUD, soft delete, TTL cleanup
+├── store.py           # Store protocol (interface) — backend contract
 ├── postgres_store.py  # PostgresStore implementation (psycopg, JSONB, GIN indexes, pgvector-ready)
 ├── collator.py        # Briefing generation: applies suppressions + patterns, composes summary/mention
 └── server.py          # FastMCP server wiring — resources (read) + tools (write/update) + secret path middleware
@@ -73,10 +72,10 @@ src/mcp_awareness/
 
 **Data flow**: Edge processes → tools (`report_status`, `report_alert`) → `store` → `collator.generate_briefing()` → `awareness://briefing` resource
 
-**Storage abstraction**: `Store` protocol defines the interface; `SQLiteStore` (default) and `PostgresStore` (opt-in) implement it. Backend selected via `AWARENESS_BACKEND` env var. The collator depends on the protocol, not the concrete class. PostgresStore uses JSONB with GIN indexes for tags, psycopg sync driver, and pgvector extension (installed, ready for RAG). `wal_level=logical` configured for Debezium CDC readiness.
+**Storage abstraction**: `Store` protocol defines the interface; `PostgresStore` is the sole implementation. The collator depends on the protocol, not the concrete class. PostgresStore uses JSONB with GIN indexes for tags, psycopg sync driver, and pgvector extension (installed, ready for RAG). `wal_level=logical` configured for Debezium CDC readiness.
 
 **Key design decisions**:
-- Briefing is computed on-demand per read (not background task) — fine for SQLite with WAL
+- Briefing is computed on-demand per read (not background task)
 - Seven entry types: status, alert, pattern, suppression, context, preference, note
 - One status entry per source (upsert), alerts keyed by source + alert_id, preferences upsert by key + scope
 - Notes support optional content payload with MIME content_type
@@ -85,7 +84,7 @@ src/mcp_awareness/
 - Pattern matching uses word-overlap between effect string and alert fields (hyphens/dashes normalized); hour ranges handle overnight wraparound
 - Soft delete: `delete_entry` moves to trash (30-day retention), `restore_entry` recovers, `get_deleted` lists trash. Bulk deletes require `confirm=True` (dry-run by default). Auto-purged by existing `_cleanup_expired`.
 - Resource descriptions carry behavioral hints — duplicate guidance in both server instructions and docstrings
-- Store uses threading.Lock on writes for async safety; _cleanup_expired spawns a background daemon thread (never blocks the caller), debounced (10s interval), only triggered by writes
+- _cleanup_expired spawns a background daemon thread (never blocks the caller), debounced (10s interval), with alive-check guard to prevent thread accumulation
 - Transport: stdio (default) or streamable-http via AWARENESS_TRANSPORT env var; HTTP on AWARENESS_HOST:AWARENESS_PORT/mcp
 - Secret path auth: `AWARENESS_MOUNT_PATH` env var (e.g., `/my-secret`) rewrites `/my-secret/mcp` → `/mcp`, returns 404 for all other paths. Used with Cloudflare WAF to block unauthenticated traffic at the edge.
 
@@ -94,7 +93,7 @@ src/mcp_awareness/
 Docker Compose runs both the server and a Cloudflare named tunnel. See `docker-compose.yaml`.
 - Named tunnel: `docker compose up -d` (requires `~/.cloudflared/` credentials)
 - Quick tunnel: `docker compose --profile quick up -d mcp-awareness tunnel-quick` (ephemeral URL, no account needed)
-- Data is bind-mounted from host (default `~/awareness`, configurable via `AWARENESS_DATA`)
+- Postgres data stored in Docker volume (configurable via `AWARENESS_PG_DATA` in `.env`)
 
 ## Key Documents
 

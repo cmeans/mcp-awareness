@@ -1,16 +1,18 @@
+# Stable deployment — named tunnel, persistent data, published image
+name: mcp-awareness
+
 services:
   mcp-awareness:
-    build: .
+    image: ghcr.io/cmeans/mcp-awareness:0.5.0
+    # For local development, comment out 'image' and uncomment 'build':
+    # build: .
     container_name: mcp-awareness
     restart: unless-stopped
-    volumes:
-      - ${AWARENESS_DATA:-~/awareness}:/app/data
-    ports:
-      - "8420:8420"
+    # Uncomment to access the server directly (without the tunnel)
+    # ports:
+    #   - "8420:8420"
     environment:
-      - AWARENESS_DATA_DIR=/app/data
       - AWARENESS_MOUNT_PATH=${AWARENESS_MOUNT_PATH:-}
-      - AWARENESS_BACKEND=${AWARENESS_BACKEND:-sqlite}
       - AWARENESS_DATABASE_URL=${AWARENESS_DATABASE_URL:-}
     depends_on:
       postgres:
@@ -27,9 +29,9 @@ services:
       retries: 3
       start_period: 15s
 
-  # Named tunnel — stable URL at awareness.intfar.com
-  # Requires: cloudflared tunnel login + tunnel create (see Deployment Guide)
-  # To use quick tunnel instead: docker compose up mcp-awareness tunnel-quick
+  # Named tunnel — stable URL (see docs/deployment-guide.md)
+  # Requires: cloudflared tunnel login + tunnel create
+  # To use quick tunnel instead: docker compose --profile quick up -d mcp-awareness tunnel-quick
   tunnel:
     image: cloudflare/cloudflared:latest
     container_name: awareness-tunnel
@@ -37,7 +39,9 @@ services:
     command: tunnel --no-autoupdate run
     volumes:
       - ${CLOUDFLARED_CONFIG:-~/.cloudflared}/config.yml:/etc/cloudflared/config.yml:ro
-      - ${CLOUDFLARED_CREDS:-~/.cloudflared/6fcef8d8-5be9-46d2-990f-5043e4feb043.json}:/etc/cloudflared/credentials.json:ro
+      # Set CLOUDFLARED_CREDS to your tunnel credentials file path
+      # (e.g., ~/.cloudflared/<tunnel-id>.json from 'cloudflared tunnel create')
+      - ${CLOUDFLARED_CREDS:?Set CLOUDFLARED_CREDS to your tunnel credentials file}:/etc/cloudflared/credentials.json:ro
     depends_on:
       mcp-awareness:
         condition: service_healthy
@@ -47,7 +51,6 @@ services:
           cpus: '0.05'
           memory: 64M
 
-  # PostgreSQL backend (default when AWARENESS_BACKEND=postgres in .env)
   postgres:
     image: pgvector/pgvector:pg17
     container_name: awareness-postgres
@@ -58,8 +61,9 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-awareness-dev}
     volumes:
       - ${AWARENESS_PG_DATA:-~/awareness-pg}:/var/lib/postgresql/data
-    ports:
-      - "5432:5432"
+    # Uncomment to access Postgres directly (e.g., for debugging)
+    # ports:
+    #   - "5432:5432"
     command:
       - postgres
       - -c

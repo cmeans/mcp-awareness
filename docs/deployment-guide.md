@@ -52,7 +52,7 @@ cd mcp-awareness
 docker compose up -d
 ```
 
-The server is running on port 8420. Use `http://localhost:8420/mcp` as the endpoint in Claude Desktop or Claude Code. Data is stored in `~/awareness/awareness.db` by default.
+The server is running on port 8420 with Postgres for storage. Use `http://localhost:8420/mcp` as the endpoint in Claude Desktop or Claude Code.
 
 ## Secure deployment (recommended)
 
@@ -163,9 +163,9 @@ The store starts empty. You can populate it by talking to your AI — just tell 
 You can also seed data programmatically for testing:
 
 ```python
-from mcp_awareness.store import SQLiteStore
+from mcp_awareness.postgres_store import PostgresStore
 
-store = SQLiteStore("~/awareness/awareness.db")
+store = PostgresStore("postgresql://awareness:awareness-dev@localhost:5432/awareness")
 store.upsert_status("synology-nas", ["infra", "nas", "seedbox"], {
     "metrics": {"cpu": {"usage_pct": 45}, "memory": {"usage_pct": 78}},
     "inventory": {"docker": {"running": ["plex"], "stopped": ["qbittorrent"]}},

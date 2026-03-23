@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **List mode**: `get_knowledge(mode="list")` returns metadata only (id, type, source, description, tags, created, updated) — no content or changelog. Also available on `get_alerts` and `get_deleted`. Use to orient before pulling full entries.
+- **Since filter**: `get_knowledge(since="2026-03-23T06:00:00Z")` returns only entries updated after the given timestamp. SQL-level filtering (not post-query). Also available on `get_alerts`, `get_entries`, and `get_deleted`.
+- **Codecov coverage**: CI uploads coverage reports; badge on README
+- **README badges**: CI, coverage, Python versions, license, Docker image
+- Testcontainers for Postgres-based test suite (190 tests)
+
+### Changed
+- **`get_knowledge` source filter at SQL level**: `source` parameter now pushed to PostgresStore SQL query instead of Python-side post-filtering
+- **Empty `since` validation**: `get_knowledge`, `get_alerts`, and `get_deleted` now return an error for empty-string `since` instead of silently ignoring it
+- **PostgreSQL is the only backend** — SQLiteStore removed (~560 lines). All tests run against real Postgres via testcontainers. The Store protocol remains as the backend interface for future implementations.
+- **Lazy store initialization**: Server module no longer creates a DB connection at import time — store initializes on first access. Fixes review issue #7 (module-level side effects).
+- **psycopg and alembic are core dependencies** (moved from optional `[postgres]` extra)
+- Dockerfile installs base package (no `[postgres]` extra needed)
+- `AWARENESS_BACKEND` and `AWARENESS_DATA_DIR` env vars removed (Postgres-only)
+- `docker-entrypoint.sh` runs migrations unconditionally
+- `docker-compose.yaml` updated: uses published GHCR image, Postgres default, ports commented out, project name set, hardcoded tunnel credential UUID removed
+
+### Fixed
+- **Cleanup thread accumulation**: Background cleanup now checks if previous thread is still alive before spawning a new one
+- **pyproject.toml version**: Bumped from 0.1.0 to 0.6.0 to match release
+
+### Removed
+- SQLiteStore backend (`store.py` reduced to Store protocol only)
+- `examples/migrate_sqlite_to_postgres.py` (no SQLite to migrate from)
+- `AwarenessStore` backward-compatibility alias
+
 ## [0.5.0] - 2026-03-23
 
 ### Added

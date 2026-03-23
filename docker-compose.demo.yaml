@@ -9,7 +9,6 @@ services:
     # ports:
     #   - "8420:8420"
     environment:
-      AWARENESS_BACKEND: postgres
       # If you change this password, also update POSTGRES_PASSWORD below
       AWARENESS_DATABASE_URL: postgresql://awareness:mcp-awareness-demo@postgres:5432/awareness
     depends_on:

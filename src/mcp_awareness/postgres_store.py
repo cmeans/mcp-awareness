@@ -30,6 +30,7 @@ class PostgresStore:
         self._conn = psycopg.connect(dsn, row_factory=dict_row, autocommit=False)
         self._last_cleanup: float = 0.0
         self._cleanup_interval: float = 10.0
+        self._cleanup_thread: threading.Thread | None = None
         self._create_tables()
 
     def _create_tables(self) -> None:
@@ -100,13 +101,21 @@ class PostgresStore:
         )
 
     def _cleanup_expired(self) -> None:
-        """Schedule cleanup of expired entries on a background thread (debounced)."""
+        """Schedule cleanup of expired entries on a background thread (debounced).
+
+        Guards against thread accumulation: skips if a previous cleanup thread
+        is still running.
+        """
         now = time.monotonic()
         if now - self._last_cleanup < self._cleanup_interval:
             return
+        if self._cleanup_thread is not None and self._cleanup_thread.is_alive():
+            return
         self._last_cleanup = now
-        thread = threading.Thread(target=self._do_cleanup, name="awareness-pg-cleanup", daemon=True)
-        thread.start()
+        self._cleanup_thread = threading.Thread(
+            target=self._do_cleanup, name="awareness-pg-cleanup", daemon=True
+        )
+        self._cleanup_thread.start()
 
     def _do_cleanup(self) -> None:
         """Run the actual DELETE on a dedicated connection (background thread)."""
@@ -252,6 +261,7 @@ class PostgresStore:
         entry_type: EntryType | None = None,
         source: str | None = None,
         tags: list[str] | None = None,
+        since: datetime | None = None,
         limit: int | None = None,
         offset: int | None = None,
     ) -> list[Entry]:
@@ -268,6 +278,9 @@ class PostgresStore:
             tag_clauses = ["tags @> %s::jsonb" for _ in tags]
             clauses.append(f"({' OR '.join(tag_clauses)})")
             params.extend(json.dumps([t]) for t in tags)
+        if since is not None:
+            clauses.append("updated >= %s")
+            params.append(since)
         where = " AND ".join(clauses) if clauses else "1=1"
         results = self._query_entries(where, tuple(params))
         return self._paginate(results, limit, offset)
@@ -292,13 +305,20 @@ class PostgresStore:
         return self._row_to_entry(row) if row else None
 
     def get_active_alerts(
-        self, source: str | None = None, limit: int | None = None, offset: int | None = None
+        self,
+        source: str | None = None,
+        since: datetime | None = None,
+        limit: int | None = None,
+        offset: int | None = None,
     ) -> list[Entry]:
         clauses = ["type = %s"]
-        params: list[str] = [EntryType.ALERT.value]
+        params: list[Any] = [EntryType.ALERT.value]
         if source:
             clauses.append("source = %s")
             params.append(source)
+        if since is not None:
+            clauses.append("updated >= %s")
+            params.append(since)
         where = " AND ".join(clauses)
         alerts = self._query_entries(where, tuple(params))
         results = [a for a in alerts if not a.data.get("resolved")]
@@ -331,6 +351,8 @@ class PostgresStore:
         self,
         tags: list[str] | None = None,
         include_history: str | None = None,
+        since: datetime | None = None,
+        source: str | None = None,
         limit: int | None = None,
         offset: int | None = None,
     ) -> list[Entry]:
@@ -344,10 +366,16 @@ class PostgresStore:
         placeholders = ",".join("%s" for _ in types)
         clauses = [f"type IN ({placeholders})"]
         params: list[Any] = list(types)
+        if source is not None:
+            clauses.append("source = %s")
+            params.append(source)
         if tags:
             tag_clauses = ["tags @> %s::jsonb" for _ in tags]
             clauses.append(f"({' OR '.join(tag_clauses)})")
             params.extend(json.dumps([t]) for t in tags)
+        if since is not None:
+            clauses.append("updated >= %s")
+            params.append(since)
         where = " AND ".join(clauses)
         entries = self._query_entries(where, tuple(params))
         if include_history == "only":
@@ -514,10 +542,18 @@ class PostgresStore:
         self._conn.commit()
         return affected
 
-    def get_deleted(self, limit: int | None = None, offset: int | None = None) -> list[Entry]:
+    def get_deleted(
+        self, since: datetime | None = None, limit: int | None = None, offset: int | None = None
+    ) -> list[Entry]:
         """Get all soft-deleted entries (the trash)."""
+        clauses = ["deleted IS NOT NULL"]
+        params: list[Any] = []
+        if since is not None:
+            clauses.append("deleted >= %s")
+            params.append(since)
+        where = " AND ".join(clauses)
         with self._conn.cursor() as cur:
-            cur.execute("SELECT * FROM entries WHERE deleted IS NOT NULL")
+            cur.execute(f"SELECT * FROM entries WHERE {where}", tuple(params))
             results = [self._row_to_entry(r) for r in cur.fetchall()]
         return self._paginate(results, limit, offset)
 

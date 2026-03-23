@@ -1,12 +1,15 @@
 [project]
 name = "mcp-awareness-server"
-version = "0.1.0"
+version = "0.6.0"
 description = "Generic MCP server for ambient system awareness across monitored systems"
 readme = "README.md"
 license = "Apache-2.0"
 requires-python = ">=3.10"
 dependencies = [
     "mcp[cli]>=1.0.0",
+    "psycopg[binary]>=3.1",
+    "alembic>=1.13",
+    "sqlalchemy>=2.0",
 ]
 
 [project.scripts]
@@ -14,19 +17,12 @@ mcp-awareness = "mcp_awareness.server:main"
 mcp-awareness-migrate = "mcp_awareness.migrate:main"
 
 [project.optional-dependencies]
-postgres = [
-    "psycopg[binary]>=3.1",
-    "alembic>=1.13",
-    "sqlalchemy>=2.0",
-]
 dev = [
     "ruff",
     "mypy",
     "pytest",
     "pytest-cov",
-    "psycopg[binary]>=3.1",
-    "alembic>=1.13",
-    "sqlalchemy>=2.0",
+    "testcontainers[postgres]>=4.0",
 ]
 
 [build-system]

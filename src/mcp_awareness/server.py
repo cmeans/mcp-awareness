@@ -19,37 +19,53 @@ from typing import Any, Literal
 from mcp.server.fastmcp import FastMCP
 
 from .collator import generate_briefing
-from .schema import Entry, EntryType, make_id, now_utc, to_iso
-from .store import SQLiteStore, Store
+from .postgres_store import PostgresStore
+from .schema import Entry, EntryType, ensure_dt, make_id, now_utc, to_iso
+from .store import Store
 
 _start_time = time.monotonic()
 
-DATA_DIR = os.environ.get("AWARENESS_DATA_DIR", "./data")
 TRANSPORT: Literal["stdio", "streamable-http"] = os.environ.get(  # type: ignore[assignment]
     "AWARENESS_TRANSPORT", "stdio"
 )
 HOST = os.environ.get("AWARENESS_HOST", "0.0.0.0")
 PORT = int(os.environ.get("AWARENESS_PORT", "8420"))
 MOUNT_PATH = os.environ.get("AWARENESS_MOUNT_PATH", "")
-BACKEND = os.environ.get("AWARENESS_BACKEND", "sqlite")
 DATABASE_URL = os.environ.get("AWARENESS_DATABASE_URL", "")
 
 
 def _create_store() -> Store:
-    """Create the storage backend based on AWARENESS_BACKEND env var."""
-    if BACKEND == "postgres":
-        if not DATABASE_URL:
-            raise ValueError(
-                "AWARENESS_DATABASE_URL is required when AWARENESS_BACKEND=postgres. "
-                "Example: postgresql://user:pass@localhost:5432/awareness"
-            )
-        from .postgres_store import PostgresStore
+    """Create the PostgreSQL storage backend.
 
-        return PostgresStore(DATABASE_URL)
-    return SQLiteStore(os.path.join(DATA_DIR, "awareness.db"))
+    Returns a PostgresStore if DATABASE_URL is set, otherwise raises.
+    Called lazily at first use (not at import time) to avoid side effects
+    during testing and to allow monkeypatching before initialization.
+    """
+    url = os.environ.get("AWARENESS_DATABASE_URL", "")
+    if not url:
+        raise ValueError(
+            "AWARENESS_DATABASE_URL is required. "
+            "Example: postgresql://user:pass@localhost:5432/awareness"
+        )
+    return PostgresStore(url)
 
 
-store: Store = _create_store()
+class _LazyStore:
+    """Descriptor that initializes the store on first attribute access.
+
+    Avoids import-time side effects (DB connections, env var requirements).
+    Tests can monkeypatch server_mod.store before any access occurs.
+    """
+
+    _instance: Store | None = None
+
+    def __getattr__(self, name: str) -> Any:
+        if _LazyStore._instance is None:
+            _LazyStore._instance = _create_store()
+        return getattr(_LazyStore._instance, name)
+
+
+store: Any = _LazyStore()
 
 
 def _log_timing(tool_name: str, elapsed_ms: float) -> None:
@@ -182,16 +198,25 @@ async def get_briefing() -> str:
 @_timed
 async def get_alerts(
     source: str | None = None,
+    since: str | None = None,
+    mode: str | None = None,
     limit: int | None = None,
     offset: int | None = None,
 ) -> str:
     """Get active alerts, optionally filtered by source.
     Drill-down from briefing — call when briefing shows attention_needed
     and you want alert details. Returns full alert entries with diagnostics.
+    since: ISO 8601 timestamp — only return alerts updated after this time.
+    mode: omit for full entries, 'list' for metadata only.
     Use limit/offset for pagination (e.g., limit=10, offset=0 for first page).
     This tool always returns structured JSON. If you receive an unstructured
     error, the failure is in the transport or platform layer, not in awareness."""
-    alerts = store.get_active_alerts(source, limit=limit, offset=offset)
+    if since is not None and not since:
+        return json.dumps({"error": "since cannot be empty; omit or provide an ISO 8601 timestamp"})
+    since_dt = ensure_dt(since) if since else None
+    alerts = store.get_active_alerts(source, since=since_dt, limit=limit, offset=offset)
+    if mode == "list":
+        return json.dumps([a.to_list_dict() for a in alerts], indent=2)
     return json.dumps([a.to_dict() for a in alerts], indent=2)
 
 
@@ -216,6 +241,8 @@ async def get_knowledge(
     tags: list[str] | None = None,
     entry_type: str | None = None,
     include_history: str | None = None,
+    since: str | None = None,
+    mode: str | None = None,
     limit: int | None = None,
     offset: int | None = None,
 ) -> str:
@@ -226,21 +253,39 @@ async def get_knowledge(
     Valid entry_type values: 'pattern', 'context', 'preference', 'note'.
     include_history: omit or 'false' to strip change history, 'true' to include,
     'only' to return only entries with change history.
+    since: ISO 8601 timestamp — only return entries updated after this time.
+    Useful for catching up on recent changes (e.g., since='2026-03-23T06:00:00Z').
+    mode: omit for full entries, 'list' for metadata only (id, type, source,
+    description, tags, created, updated — no content or changelog). Use 'list'
+    to orient before pulling full entries.
     Use limit/offset for pagination (e.g., limit=10, offset=0 for first page).
     This tool always returns JSON with a status field or an entry list.
     If you receive an unstructured error, the failure is in the transport
     or platform layer, not in awareness."""
+    if since is not None and not since:
+        return json.dumps({"error": "since cannot be empty; omit or provide an ISO 8601 timestamp"})
+    since_dt = ensure_dt(since) if since else None
     if entry_type:
         et = EntryType(entry_type)
         entries = store.get_entries(
-            entry_type=et, source=source, tags=tags, limit=limit, offset=offset
+            entry_type=et,
+            source=source,
+            tags=tags,
+            since=since_dt,
+            limit=limit,
+            offset=offset,
         )
     else:
         entries = store.get_knowledge(
-            tags=tags, include_history=include_history, limit=limit, offset=offset
+            tags=tags,
+            include_history=include_history,
+            since=since_dt,
+            source=source,
+            limit=limit,
+            offset=offset,
         )
-        if source:
-            entries = [e for e in entries if e.source == source]
+    if mode == "list":
+        return json.dumps([e.to_list_dict() for e in entries], indent=2)
     return json.dumps([e.to_dict() for e in entries], indent=2)
 
 
@@ -650,14 +695,23 @@ async def restore_entry(
 @mcp.tool()
 @_timed
 async def get_deleted(
+    since: str | None = None,
+    mode: str | None = None,
     limit: int | None = None,
     offset: int | None = None,
 ) -> str:
     """List all entries in the trash (soft-deleted, recoverable).
     Returns entries with their IDs so they can be restored via restore_entry.
     Trashed entries auto-purge after 30 days.
+    since: ISO 8601 timestamp — only return entries deleted after this time.
+    mode: omit for full entries, 'list' for metadata only.
     Use limit/offset for pagination."""
-    entries = store.get_deleted(limit=limit, offset=offset)
+    if since is not None and not since:
+        return json.dumps({"error": "since cannot be empty; omit or provide an ISO 8601 timestamp"})
+    since_dt = ensure_dt(since) if since else None
+    entries = store.get_deleted(since=since_dt, limit=limit, offset=offset)
+    if mode == "list":
+        return json.dumps([e.to_list_dict() for e in entries], indent=2)
     return json.dumps([e.to_dict() for e in entries], indent=2)
 
 
@@ -965,8 +1019,8 @@ def _sync_custom_prompts() -> None:
         pm._prompts[name] = prompt
 
 
-# Sync custom prompts at startup
-_sync_custom_prompts()
+# Custom prompt sync happens at server start (in main()), not at import time.
+# This avoids triggering a DB connection when the module is imported for testing.
 
 
 def _health_response() -> dict[str, Any]:
@@ -980,6 +1034,8 @@ def _health_response() -> dict[str, Any]:
 
 
 def main() -> None:
+    # Sync custom prompts from the store at server start (not at import time)
+    _sync_custom_prompts()
     try:
         _run()
     except KeyboardInterrupt:

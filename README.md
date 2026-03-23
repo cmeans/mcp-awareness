@@ -1,6 +1,10 @@
 # mcp-awareness
 
 [![CI](https://github.com/cmeans/mcp-awareness/actions/workflows/ci.yml/badge.svg)](https://github.com/cmeans/mcp-awareness/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/cmeans/mcp-awareness/branch/main/graph/badge.svg)](https://codecov.io/gh/cmeans/mcp-awareness)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/downloads/)
+[![License](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
+[![Docker](https://img.shields.io/badge/docker-ghcr.io-blue)](https://ghcr.io/cmeans/mcp-awareness)
 
 > **Your AI's memory shouldn't be locked to one app. It should follow you everywhere.**
 
@@ -103,7 +107,7 @@ flowchart TB
 
     subgraph Server["mcp-awareness"]
         direction LR
-        Store["Store\n(SQLite / Postgres)"]
+        Store["Store\n(Postgres)"]
         Collator["Collator\n• suppressions\n• patterns\n• escalation"]
         Briefing["Briefing\n~200 tokens"]
         Store --> Collator --> Briefing
@@ -168,9 +172,7 @@ The server is running on port 8420. Point any MCP client at `http://localhost:84
 | `AWARENESS_TRANSPORT` | `stdio` | Transport: `stdio` or `streamable-http` |
 | `AWARENESS_HOST` | `0.0.0.0` | Bind address (HTTP mode) |
 | `AWARENESS_PORT` | `8420` | Port (HTTP mode) |
-| `AWARENESS_DATA_DIR` | `./data` | SQLite database directory |
-| `AWARENESS_BACKEND` | `sqlite` | Storage backend: `sqlite` or `postgres` |
-| `AWARENESS_DATABASE_URL` | _(none)_ | PostgreSQL connection string (required when backend is `postgres`). Example: `postgresql://user:pass@localhost:5432/awareness` |
+| `AWARENESS_DATABASE_URL` | _(required)_ | PostgreSQL connection string. Example: `postgresql://user:pass@localhost:5432/awareness` |
 | `AWARENESS_MOUNT_PATH` | _(none)_ | Secret path prefix for access control (e.g., `/my-secret`). When set, only `/<secret>/mcp` is served; all other paths return 404. Use with a Cloudflare WAF rule. |
 
 ### Development
@@ -261,13 +263,13 @@ See [Security considerations](docs/deployment-guide.md#security-considerations) 
 
 ### Infrastructure
 - PostgreSQL backend with pgvector (production default), GIN-indexed tag queries, Debezium CDC-ready
-- SQLite backend available as lightweight alternative
+- List mode and since filter for lightweight queries
 - Storage abstraction: `Store` protocol — backends are swappable without changing server or collator logic
 - Alembic migration framework (version-tracked, raw SQL, auto-runs on Docker startup)
 - Secret path auth + Cloudflare WAF for edge-level access control
 - Docker Compose with Postgres, named Cloudflare Tunnel, or ephemeral quick tunnel
 - Request timing instrumentation and `/health` endpoint
-- 181 tests, strict type checking, CI pipeline, QA gate
+- 190 tests (all against real Postgres), strict type checking, CI pipeline with coverage, QA gate
 
 ### Not yet implemented
 - Layer 2 (baseline) detection — rolling averages and deviation calculation
