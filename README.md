@@ -116,15 +116,31 @@ flowchart TB
 
 ## Quick start
 
+### Try the demo (easiest)
+
+One script, three containers, a public URL. No account needed.
+
+```bash
+curl -sSL https://raw.githubusercontent.com/cmeans/mcp-awareness/main/install-demo.sh | bash
+```
+
+> **Prefer to review the script first?** [View it on GitHub](https://github.com/cmeans/mcp-awareness/blob/main/install-demo.sh), then download and run locally.
+
+This starts the Awareness server, Postgres, and a Cloudflare quick tunnel. You'll get a public URL and ready-to-paste config snippets for Claude.ai, Claude Desktop, Claude Code, Cursor, and VS Code. The instance comes pre-loaded with demo data — your AI will discover it automatically.
+
+> **Note:** The tunnel URL is ephemeral — it changes on restart. For a stable URL, see the [Deployment Guide](docs/deployment-guide.md).
+
+> **Model matters:** Best experience with Claude Sonnet 4.6 or Opus 4.6. Smaller models (Haiku, GPT-4o-mini) may not follow MCP prompts reliably.
+
+### Local development
+
 ```bash
 git clone https://github.com/cmeans/mcp-awareness.git
 cd mcp-awareness
 docker compose up -d
 ```
 
-That's it. The server is running on port 8420. Point any MCP client at `http://localhost:8420/mcp`.
-
-For remote access via Cloudflare Tunnel and secure deployment, see the [Deployment Guide](docs/deployment-guide.md).
+The server is running on port 8420. Point any MCP client at `http://localhost:8420/mcp`.
 
 ### Connect your AI
 

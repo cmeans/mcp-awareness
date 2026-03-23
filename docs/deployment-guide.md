@@ -4,13 +4,35 @@ This guide walks through deploying mcp-awareness — from starting the server to
 
 The examples below use Cloudflare Tunnel and WAF for public access, but any reverse proxy that terminates TLS will work (nginx, Caddy, Tailscale, ngrok, etc.). The core requirement is HTTPS between your MCP client and the server.
 
+## Demo install (quickest way to try it)
+
+One script, three containers, a public URL. No Cloudflare account needed.
+
+```bash
+curl -sSL https://raw.githubusercontent.com/cmeans/mcp-awareness/main/install-demo.sh | bash
+```
+
+> **Prefer to review first?** [View the script on GitHub](https://github.com/cmeans/mcp-awareness/blob/main/install-demo.sh)
+
+This starts the Awareness server, Postgres, and a Cloudflare quick tunnel. You'll get:
+- A public URL usable from any MCP client
+- Ready-to-paste config snippets for Claude.ai, Claude Desktop, Claude Code, Cursor, and VS Code
+- Pre-loaded demo data your AI discovers automatically
+- A `getting-started` prompt that interviews you and personalizes the instance
+
+The tunnel URL is ephemeral — it changes on restart. Data persists in Docker named volumes across restarts. To remove everything: `docker compose -f ~/mcp-awareness-demo/docker-compose-demo.yaml down -v`
+
+> **Model matters:** Best experience with Claude Sonnet 4.6 or Opus 4.6. Smaller models (Haiku, GPT-4o-mini) may not follow MCP prompts reliably.
+
+When you're ready for a stable URL, continue to the secure deployment section below.
+
 ## Prerequisites
 
 > **Platform note:** These instructions were developed on Fedora Linux. Other Linux distributions and macOS should work with minor adjustments. Windows is untested and likely requires WSL or similar.
 
-- Python 3.10+ with `mcp-awareness` installed (`pip install -e .`)
 - Docker and Docker Compose
 - [cloudflared](https://github.com/cloudflare/cloudflared/releases) installed
+- A [Cloudflare account](https://dash.cloudflare.com/sign-up) with a domain (for named tunnel)
 - A [Claude.ai](https://claude.ai) account (Pro plan or higher recommended; free plan may work but is unverified)
 
 ## Quick start (local only)
@@ -258,7 +280,7 @@ See the [Data Dictionary](data-dictionary.md#backend-specific-details) for Postg
 
 ## Alternative: Quick tunnel (no account needed)
 
-For quick testing without a Cloudflare account or domain:
+The easiest way is the [demo installer](#demo-install-quickest-way-to-try-it) at the top of this page. If you prefer to do it manually:
 
 ```bash
 docker compose --profile quick up -d mcp-awareness tunnel-quick
