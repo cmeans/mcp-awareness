@@ -264,13 +264,20 @@ async def get_knowledge(
     if entry_type:
         et = EntryType(entry_type)
         entries = store.get_entries(
-            entry_type=et, source=source, tags=tags, since=since_dt,
-            limit=limit, offset=offset,
+            entry_type=et,
+            source=source,
+            tags=tags,
+            since=since_dt,
+            limit=limit,
+            offset=offset,
         )
     else:
         entries = store.get_knowledge(
-            tags=tags, include_history=include_history, since=since_dt,
-            limit=limit, offset=offset,
+            tags=tags,
+            include_history=include_history,
+            since=since_dt,
+            limit=limit,
+            offset=offset,
         )
         if source:
             entries = [e for e in entries if e.source == source]

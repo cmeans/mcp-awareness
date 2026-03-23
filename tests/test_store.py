@@ -792,7 +792,9 @@ def test_get_active_alerts_since(store):
     cutoff = datetime.now(timezone.utc) - timedelta(hours=1)
 
     store.upsert_alert(
-        "src", ["t"], "old-alert",
+        "src",
+        ["t"],
+        "old-alert",
         {"alert_id": "old-alert", "level": "warning", "message": "old", "resolved": False},
     )
     # Backdate the alert
@@ -804,7 +806,9 @@ def test_get_active_alerts_since(store):
     store._conn.commit()
 
     store.upsert_alert(
-        "src", ["t"], "new-alert",
+        "src",
+        ["t"],
+        "new-alert",
         {"alert_id": "new-alert", "level": "warning", "message": "new", "resolved": False},
     )
     assert len(store.get_active_alerts()) == 2

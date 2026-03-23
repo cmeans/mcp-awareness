@@ -1156,7 +1156,9 @@ class TestListModeAndSince:
     async def test_get_alerts_list_mode(self) -> None:
         s = _store()
         s.upsert_alert(
-            "nas", ["infra"], "a1",
+            "nas",
+            ["infra"],
+            "a1",
             {"alert_id": "a1", "level": "warning", "message": "CPU high", "resolved": False},
         )
         full = json.loads(await server_mod.get_alerts())
