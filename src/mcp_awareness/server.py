@@ -909,7 +909,7 @@ async def get_intentions(
     limit: int | None = None,
 ) -> str:
     """Get intentions, optionally filtered by state, source, or tags.
-    Valid states: 'pending', 'fired', 'completed', 'snoozed', 'cancelled'.
+    Valid states: 'pending', 'fired', 'active', 'completed', 'snoozed', 'cancelled'.
     mode: omit for full entries, 'list' for metadata only.
     This tool always returns structured JSON."""
     entries = store.get_intentions(state=state, source=source, tags=tags, limit=limit)
@@ -926,10 +926,10 @@ async def update_intention(
     reason: str | None = None,
 ) -> str:
     """Transition an intention to a new state.
-    Valid states: 'fired', 'completed', 'snoozed', 'cancelled'.
+    Valid states: 'fired', 'active', 'completed', 'snoozed', 'cancelled'.
     reason: optional explanation (e.g., 'completed at Mariano\\'s', 'not today').
-    Use 'completed' when the goal was achieved, 'snoozed' to defer,
-    'cancelled' to permanently dismiss.
+    Use 'active' when you've started working on it, 'completed' when done,
+    'snoozed' to defer, 'cancelled' to permanently dismiss.
     This tool always returns structured JSON."""
     from .schema import INTENTION_STATES
 
