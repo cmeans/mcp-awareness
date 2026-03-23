@@ -270,31 +270,6 @@ You can verify what's stored:
 
 > What tags are in use?
 
-## Alternative: PostgreSQL backend
-
-For better concurrency, JSONB queries, and future RAG support, switch to PostgreSQL:
-
-```bash
-# Start Postgres (pgvector pre-installed)
-docker compose --profile postgres up -d postgres
-
-# Migrate existing SQLite data (optional, safe to run multiple times)
-python examples/migrate_sqlite_to_postgres.py \
-    --sqlite ~/awareness/awareness.db \
-    --postgres postgresql://awareness:awareness-dev@localhost:5432/awareness
-```
-
-Add to your `.env` file:
-
-```bash
-AWARENESS_BACKEND=postgres
-AWARENESS_DATABASE_URL=postgresql://awareness:awareness-dev@localhost:5432/awareness
-```
-
-Then restart the awareness server (`docker compose up -d`). All tools work identically — the `Store` protocol abstracts the backend.
-
-See the [Data Dictionary](data-dictionary.md#backend-specific-details) for PostgreSQL-specific details including RDS compatibility and replication readiness.
-
 ## Alternative: Quick tunnel (no account needed)
 
 The easiest way is the [demo installer](#demo-install-quickest-way-to-try-it) at the top of this page. If you prefer to do it manually:
