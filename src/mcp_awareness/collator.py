@@ -260,9 +260,8 @@ def generate_briefing(store: Store) -> dict[str, Any]:
         alerts = store.get_active_alerts(source)
         suppressions = store.get_active_suppressions(source)
 
-        eval_alerts_checked += len(alerts)
-
-        # Check for stale sources (TTL expired)
+        # Check for stale sources (TTL expired) — alerts from stale sources
+        # are not evaluated (suppression/pattern filtering is skipped)
         if status and status.is_stale():
             eval_stale_sources += 1
             age = int(status.age_sec)
@@ -274,6 +273,9 @@ def generate_briefing(store: Store) -> dict[str, Any]:
             }
             briefing["attention_needed"] = True
             continue
+
+        # Count alerts only for non-stale sources (we actually evaluate these)
+        eval_alerts_checked += len(alerts)
 
         # Apply suppressions — filter out suppressed alerts
         pre_suppression = len(alerts)

@@ -694,6 +694,76 @@ class TestGenerateBriefing:
         assert ev["suppressed"] == 1
         assert ev["surfaced"] == 0
 
+    def test_evaluation_counts_pattern_matched(self, store):
+        """Evaluation tracks alerts dismissed by pattern matching."""
+        from mcp_awareness.schema import Entry, EntryType, make_id, now_utc
+
+        store.upsert_status("nas", ["infra"], {"metrics": {}, "ttl_sec": 3600})
+        store.upsert_alert(
+            "nas",
+            ["infra"],
+            "cpu-spike",
+            {
+                "alert_id": "cpu-spike",
+                "level": "warning",
+                "alert_type": "threshold",
+                "metric": "cpu_pct",
+                "message": "CPU spike detected",
+                "resolved": False,
+            },
+        )
+        # Add a pattern that matches this alert
+        now = now_utc()
+        store.add(
+            Entry(
+                id=make_id(),
+                type=EntryType.PATTERN,
+                source="nas",
+                tags=["infra"],
+                created=now,
+                updated=now,
+                expires=None,
+                data={
+                    "description": "Backup causes CPU spikes",
+                    "conditions": {},
+                    "effect": "CPU spike during backup",
+                    "learned_from": "test",
+                },
+            )
+        )
+        briefing = generate_briefing(store)
+        ev = briefing["evaluation"]
+        assert ev["alerts_checked"] == 1
+        assert ev["pattern_matched"] == 1
+        assert ev["surfaced"] == 0
+
+    def test_evaluation_stale_source_alerts_not_counted(self, store):
+        """Alerts from stale sources are not counted in alerts_checked."""
+        from datetime import datetime, timedelta, timezone
+
+        store.upsert_status("nas", ["infra"], {"metrics": {}, "ttl_sec": 120})
+        store.upsert_alert(
+            "nas",
+            ["infra"],
+            "a1",
+            {"alert_id": "a1", "level": "warning", "message": "test", "resolved": False},
+        )
+        # Backdate to make source stale
+        old = datetime.now(timezone.utc) - timedelta(seconds=300)
+        with store._conn.cursor() as cur:
+            cur.execute(
+                "UPDATE entries SET updated = %s, created = %s"
+                " WHERE type = 'status' AND source = 'nas'",
+                (old, old),
+            )
+        store._conn.commit()
+        briefing = generate_briefing(store)
+        ev = briefing["evaluation"]
+        assert ev["stale_sources"] == 1
+        # Alerts from stale sources are skipped, not evaluated
+        assert ev["alerts_checked"] == 0
+        assert ev["surfaced"] == 0
+
     def test_evaluation_counts_stale(self, store):
         """Evaluation tracks stale sources."""
         from datetime import datetime, timedelta, timezone
