@@ -93,7 +93,7 @@ src/mcp_awareness/
 Docker Compose runs both the server and a Cloudflare named tunnel. See `docker-compose.yaml`.
 - Named tunnel: `docker compose up -d` (requires `~/.cloudflared/` credentials)
 - Quick tunnel: `docker compose --profile quick up -d mcp-awareness tunnel-quick` (ephemeral URL, no account needed)
-- Data is bind-mounted from host (default `~/awareness`, configurable via `AWARENESS_DATA`)
+- Postgres data stored in Docker volume (configurable via `AWARENESS_PG_DATA` in `.env`)
 
 ## Key Documents
 
