@@ -2,14 +2,37 @@
 
 from __future__ import annotations
 
+import os
+
+import pytest
+
 from mcp_awareness.embeddings import (
     NullEmbedding,
+    OllamaEmbedding,
     compose_embedding_text,
     create_provider,
     should_embed,
     text_hash,
 )
 from mcp_awareness.schema import Entry, EntryType, now_utc
+
+# Check if Ollama is available (set by CI or local dev)
+_OLLAMA_URL = os.environ.get("AWARENESS_OLLAMA_URL", "http://localhost:11434")
+_ollama_available: bool | None = None
+
+
+def _is_ollama_available() -> bool:
+    global _ollama_available
+    if _ollama_available is None:
+        p = OllamaEmbedding(base_url=_OLLAMA_URL)
+        _ollama_available = p.is_available()
+    return _ollama_available
+
+
+skip_no_ollama = pytest.mark.skipif(
+    "not _is_ollama_available()",
+    reason="Ollama not available",
+)
 
 
 def _make_entry(
@@ -159,9 +182,63 @@ class TestCreateProvider:
         assert isinstance(p, NullEmbedding)
 
     def test_ollama_creates_provider(self):
-        from mcp_awareness.embeddings import OllamaEmbedding
-
         p = create_provider(provider="ollama", ollama_url="http://localhost:11434")
         assert isinstance(p, OllamaEmbedding)
         assert p.model_name == "nomic-embed-text"
         assert p.dimensions == 768
+
+
+# ---------------------------------------------------------------------------
+# OllamaEmbedding integration tests (require running Ollama with model)
+# ---------------------------------------------------------------------------
+
+
+class TestOllamaIntegration:
+    @skip_no_ollama
+    def test_is_available(self):
+        p = OllamaEmbedding(base_url=_OLLAMA_URL)
+        assert p.is_available() is True
+
+    @skip_no_ollama
+    def test_embed_single_text(self):
+        p = OllamaEmbedding(base_url=_OLLAMA_URL)
+        vectors = p.embed(["Hello world"])
+        assert len(vectors) == 1
+        assert len(vectors[0]) == 768
+        assert all(isinstance(v, float) for v in vectors[0])
+
+    @skip_no_ollama
+    def test_embed_batch(self):
+        p = OllamaEmbedding(base_url=_OLLAMA_URL)
+        vectors = p.embed(["Hello world", "Goodbye world"])
+        assert len(vectors) == 2
+        assert len(vectors[0]) == 768
+        assert len(vectors[1]) == 768
+
+    @skip_no_ollama
+    def test_similar_texts_closer_than_different(self):
+        """Semantically similar texts should have higher cosine similarity."""
+        p = OllamaEmbedding(base_url=_OLLAMA_URL)
+        vectors = p.embed(
+            [
+                "retirement planning and 401k contributions",
+                "pension fund investment strategy",
+                "how to fix a leaking kitchen faucet",
+            ]
+        )
+
+        def cosine_sim(a: list[float], b: list[float]) -> float:
+            dot = sum(x * y for x, y in zip(a, b, strict=True))
+            norm_a = sum(x * x for x in a) ** 0.5
+            norm_b = sum(x * x for x in b) ** 0.5
+            return dot / (norm_a * norm_b)
+
+        sim_related = cosine_sim(vectors[0], vectors[1])
+        sim_unrelated = cosine_sim(vectors[0], vectors[2])
+        assert sim_related > sim_unrelated
+
+    @skip_no_ollama
+    def test_is_available_wrong_model(self):
+        """is_available returns False when model isn't pulled."""
+        p = OllamaEmbedding(base_url=_OLLAMA_URL, model="nonexistent-model-xyz")
+        assert p.is_available() is False

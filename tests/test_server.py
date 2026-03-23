@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import json
+import os
 
 import pytest
 
 from mcp_awareness import server as server_mod
+from mcp_awareness.embeddings import OllamaEmbedding
 from mcp_awareness.postgres_store import PostgresStore
 from mcp_awareness.store import Store
 
@@ -1845,3 +1847,80 @@ class TestSemanticSearchTool:
         result = json.loads(await server_mod.semantic_search(query="test", source="nas"))
         assert len(result) == 1
         assert result[0]["source"] == "nas"
+
+
+# ---------------------------------------------------------------------------
+# Semantic search integration tests (require Ollama)
+# ---------------------------------------------------------------------------
+
+_OLLAMA_URL = os.environ.get("AWARENESS_OLLAMA_URL", "http://localhost:11434")
+_ollama_available: bool | None = None
+
+
+def _is_ollama_available() -> bool:
+    global _ollama_available
+    if _ollama_available is None:
+        p = OllamaEmbedding(base_url=_OLLAMA_URL)
+        _ollama_available = p.is_available()
+    return _ollama_available
+
+
+skip_no_ollama = pytest.mark.skipif(
+    "not _is_ollama_available()",
+    reason="Ollama not available",
+)
+
+
+class TestSemanticSearchIntegration:
+    """End-to-end tests with real Ollama embeddings."""
+
+    @skip_no_ollama
+    @pytest.mark.anyio
+    async def test_write_and_search_round_trip(self, monkeypatch) -> None:
+        """remember → semantic_search finds entry by meaning."""
+        provider = OllamaEmbedding(base_url=_OLLAMA_URL)
+        monkeypatch.setattr(server_mod, "_embedding_provider", provider)
+
+        # Write two entries with different topics
+        await server_mod.remember(
+            source="test-rag",
+            tags=["finance"],
+            description="401k contribution limits increased to $23,500 for 2026",
+            learned_from="test",
+        )
+        await server_mod.remember(
+            source="test-rag",
+            tags=["infra"],
+            description="NAS RAID array rebuilt after replacing drive sdb",
+            learned_from="test",
+        )
+
+        # Search for financial concepts
+        result = json.loads(await server_mod.semantic_search(query="retirement savings"))
+        assert len(result) >= 1
+        # The finance entry should rank higher than the infra entry
+        assert "401k" in result[0]["data"]["description"]
+        assert result[0]["similarity"] > 0.5
+
+    @skip_no_ollama
+    @pytest.mark.anyio
+    async def test_generate_embedding_on_write(self, monkeypatch) -> None:
+        """_generate_embedding fires on remember and creates an embedding."""
+        provider = OllamaEmbedding(base_url=_OLLAMA_URL)
+        monkeypatch.setattr(server_mod, "_embedding_provider", provider)
+
+        result = json.loads(
+            await server_mod.remember(
+                source="test-rag",
+                tags=["test"],
+                description="This is a test entry for embedding generation",
+                learned_from="test",
+            )
+        )
+        entry_id = result["id"]
+
+        # Verify embedding was created in the store
+        s = _store()
+        missing = s.get_entries_without_embeddings("nomic-embed-text")
+        missing_ids = [e.id for e in missing]
+        assert entry_id not in missing_ids
