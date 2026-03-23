@@ -1,5 +1,7 @@
 # Architecture Addendum: Collation Layer & Token Optimization
 
+> **Note:** Written during initial design. The collation logic described here is implemented and live. Backend references to SQLite are historical — the storage backend is now PostgreSQL-only (v0.6.0). The network topology diagram reflects the original plan; current deployment uses Docker Compose with Cloudflare Tunnel (see [deployment guide](deployment-guide.md)).
+
 Supplement to `from-metrics-to-mental-models.md`. These additions should be integrated into the main spec.
 
 ---
