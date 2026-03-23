@@ -1,6 +1,6 @@
 # Deployment Guide
 
-This guide walks through deploying mcp-awareness — from starting the server to seeing an ambient awareness alert surface during an unrelated conversation in Claude.ai.
+This guide walks through deploying mcp-awareness locally — from starting the server to connecting your AI and seeing ambient awareness in action.
 
 The examples below use Cloudflare Tunnel and WAF for public access, but any reverse proxy that terminates TLS will work (nginx, Caddy, Tailscale, ngrok, etc.). The core requirement is HTTPS between your MCP client and the server.
 
@@ -16,7 +16,7 @@ curl -sSL https://raw.githubusercontent.com/cmeans/mcp-awareness/main/install-de
 
 This starts the Awareness server, Postgres, and a Cloudflare quick tunnel. You'll get:
 - A public URL usable from any MCP client
-- Ready-to-paste config snippets for Claude.ai, Claude Desktop, Claude Code, Cursor, and VS Code
+- Ready-to-paste config snippets for all major MCP clients
 - Pre-loaded demo data your AI discovers automatically
 - A `getting-started` prompt that interviews you and personalizes the instance
 
@@ -33,7 +33,7 @@ When you're ready for a stable URL, continue to the secure deployment section be
 - Docker and Docker Compose
 - [cloudflared](https://github.com/cloudflare/cloudflared/releases) installed
 - A [Cloudflare account](https://dash.cloudflare.com/sign-up) with a domain (for named tunnel)
-- An MCP-compatible AI client (Claude.ai, Claude Desktop, Claude Code, Cursor, VS Code, etc.). Best results with capable models like Claude Sonnet 4.6 or Opus 4.6
+- An MCP-compatible AI client. Best results with capable models like Claude Sonnet 4.6 or Opus 4.6
 
 ## Quick start (local only)
 
@@ -221,7 +221,7 @@ https://yourdomain.com/<your-secret>/mcp
 
 If your client supports MCP prompts, the `agent_instructions` prompt provides your AI with the full awareness workflow automatically. No manual memory setup needed.
 
-For clients without prompt support (like Claude.ai), ask your AI to retrieve the instructions:
+For clients without prompt support, ask your AI to retrieve the instructions:
 
 > Check awareness for agent instructions — `get_knowledge(source="awareness-prompt")`
 
