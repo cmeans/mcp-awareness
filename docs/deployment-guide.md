@@ -347,3 +347,7 @@ The current approach uses two layers:
 - **Model matters** — best experience with Claude Sonnet 4.6 or Opus 4.6. Smaller models (Haiku, GPT-4o-mini) may not follow MCP prompts or call tools proactively.
 - **Suppression matching is content-aware** — a suppression tagged `["qbittorrent"]` will match alerts whose alert_id or message contains "qbittorrent", even if the alert's structural tags differ.
 - **Soft delete is safe** — `delete_entry` moves entries to trash (30-day retention). Bulk deletes show a dry-run count first and require `confirm=True`. Delete and restore by tags with AND logic (e.g., `delete_entry(tags=["demo"], confirm=True)` deletes entries matching all given tags). Use `get_deleted` and `restore_entry` to recover.
+
+---
+
+*[mcp-awareness](https://github.com/cmeans/mcp-awareness) is open source under the [Apache 2.0 License](../LICENSE). Copyright 2026 Chris Means.*
