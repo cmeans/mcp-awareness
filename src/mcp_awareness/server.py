@@ -684,6 +684,7 @@ def _extract_entry_number(desc: str) -> int:
 @_timed
 async def agent_instructions() -> str:
     """Compose agent instructions from awareness-prompt entries in the store."""
+    _sync_custom_prompts()
     entries = store.get_knowledge(tags=["memory-prompt"])
     # Sort by entry number (Entry 1, Entry 2, etc.)
     entries.sort(key=lambda e: _extract_entry_number(e.data.get("description", "")))
@@ -964,27 +965,8 @@ def _sync_custom_prompts() -> None:
         pm._prompts[name] = prompt
 
 
-# Patch list_prompts to sync custom prompts before listing
-_original_list_prompts = mcp.list_prompts
-
-
-async def _list_prompts_with_sync() -> list[Any]:
-    _sync_custom_prompts()
-    return await _original_list_prompts()
-
-
-mcp.list_prompts = _list_prompts_with_sync  # type: ignore[method-assign]
-
-# Also sync before get_prompt so new prompts are available immediately
-_original_get_prompt = mcp.get_prompt
-
-
-async def _get_prompt_with_sync(name: str, arguments: dict[str, str] | None = None) -> Any:
-    _sync_custom_prompts()
-    return await _original_get_prompt(name, arguments)
-
-
-mcp.get_prompt = _get_prompt_with_sync  # type: ignore[method-assign]
+# Sync custom prompts at startup
+_sync_custom_prompts()
 
 
 def _health_response() -> dict[str, Any]:
