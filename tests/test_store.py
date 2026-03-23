@@ -1165,6 +1165,39 @@ def test_get_intentions_filter_by_tags(store):
     assert len(store.get_intentions(tags=["work"])) == 1
 
 
+def test_get_intentions_filter_by_source_and_limit(store):
+    """get_intentions filters by source and respects limit."""
+    now = now_utc()
+    for i in range(3):
+        store.add(
+            Entry(
+                id=make_id(),
+                type=EntryType.INTENTION,
+                source="personal",
+                tags=[],
+                created=now,
+                updated=now,
+                expires=None,
+                data={"goal": f"personal-{i}", "state": "pending"},
+            )
+        )
+    store.add(
+        Entry(
+            id=make_id(),
+            type=EntryType.INTENTION,
+            source="work",
+            tags=[],
+            created=now,
+            updated=now,
+            expires=None,
+            data={"goal": "work goal", "state": "pending"},
+        )
+    )
+    assert len(store.get_intentions(source="personal")) == 3
+    assert len(store.get_intentions(source="work")) == 1
+    assert len(store.get_intentions(limit=2)) == 2
+
+
 def test_update_intention_state(store):
     """update_intention_state transitions state and records changelog."""
     now = now_utc()
