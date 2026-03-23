@@ -599,14 +599,15 @@ class PostgresStore:
             clauses.append("deleted >= %s")
             params.append(since)
         where = " AND ".join(clauses)
-        limit_clause = f" LIMIT {int(limit)}" if limit else ""
-        offset_clause = f" OFFSET {int(offset)}" if offset else ""
+        sql = f"SELECT * FROM entries WHERE {where} ORDER BY deleted DESC"
+        if limit is not None:
+            sql += " LIMIT %s"
+            params.append(limit)
+        if offset is not None:
+            sql += " OFFSET %s"
+            params.append(offset)
         with self._conn.cursor() as cur:
-            cur.execute(
-                f"SELECT * FROM entries WHERE {where} ORDER BY deleted DESC"
-                f"{limit_clause}{offset_clause}",
-                tuple(params),
-            )
+            cur.execute(sql, tuple(params))
             return [self._row_to_entry(r) for r in cur.fetchall()]
 
     def restore_by_id(self, entry_id: str) -> bool:
