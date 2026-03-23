@@ -188,13 +188,44 @@ Agent-reported records of concrete actions taken because of an entry. Permanent 
 | `idx_actions_timestamp` | `timestamp` | B-tree | Time-range queries |
 | `idx_actions_tags_gin` | `tags` | GIN | Fast tag containment queries |
 
+## Table: `embeddings`
+
+Stores vector embeddings for semantic search. One embedding per entry per model.
+
+| Column | Type | Nullable | Default | Description |
+|--------|------|----------|---------|-------------|
+| `id` | `SERIAL` | NO | auto | Row ID |
+| `entry_id` | `TEXT` | NO | — | FK → `entries.id` (`ON DELETE CASCADE`) |
+| `model` | `TEXT` | NO | — | Embedding model name (e.g., `nomic-embed-text`) |
+| `dimensions` | `INTEGER` | NO | — | Vector dimension count (e.g., 768) |
+| `text_hash` | `TEXT` | NO | — | SHA-256 of embedded text (staleness detection) |
+| `embedding` | `VECTOR(768)` | NO | — | pgvector embedding |
+| `created` | `TIMESTAMPTZ` | NO | `now()` | When this embedding was generated |
+
+**Constraints:** `UNIQUE (entry_id, model)` — one embedding per entry per model, upsert on conflict.
+
+### Indexes
+
+| Index | Columns | Type | Purpose |
+|-------|---------|------|---------|
+| `idx_embeddings_entry` | `entry_id` | B-tree | Look up embeddings for a specific entry |
+| `idx_embeddings_vector_hnsw` | `embedding` | HNSW (`vector_cosine_ops`) | Fast approximate nearest neighbor search |
+
+### Notes
+
+- Embeddings are generated fire-and-forget on write (never blocks the response)
+- Suppression entries are not embedded (short-lived, not worth searching)
+- The `text_hash` column enables detection of stale embeddings after entry updates
+- `ON DELETE CASCADE` ensures embeddings are cleaned up when entries are deleted
+- Requires `AWARENESS_EMBEDDING_PROVIDER=ollama` to activate (optional)
+
 ## Backend details
 
 - **Version:** PostgreSQL 17 recommended (matches RDS support, pgvector 0.8.1)
 - **Driver:** psycopg (sync) — matches the synchronous Store protocol
 - **Tags/data stored as:** JSONB columns, queried via `jsonb_array_elements_text()` and GIN-indexed `@>` containment
 - **GIN index** on `tags` column for fast tag containment queries
-- **pgvector extension:** Installed via `pgvector/pgvector:pg17` Docker image. Not yet used — ready for future embedding/RAG support.
+- **pgvector extension:** Installed via `pgvector/pgvector:pg17` Docker image. Used by the `embeddings` table for HNSW vector similarity search.
 - **WAL level:** `wal_level=logical` configured for Debezium CDC readiness and logical replication
 - **Replication slots:** `max_replication_slots=4` for future replication/CDC
 - **Background cleanup:** Daemon thread with its own psycopg connection, debounced (10s), with alive-check guard to prevent thread accumulation

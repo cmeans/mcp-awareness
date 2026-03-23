@@ -1582,3 +1582,179 @@ class TestIntentionTools:
         assert len(briefing.get("fired_intentions", [])) == 1
         assert briefing["fired_intentions"][0]["goal"] == "Pick up milk"
         assert briefing["evaluation"]["intentions_fired"] == 1
+
+
+# ---------------------------------------------------------------------------
+# Semantic search tool tests
+# ---------------------------------------------------------------------------
+
+
+class TestSemanticSearchTool:
+    """Tests for the semantic_search tool.
+
+    Uses monkeypatch to inject a mock embedding provider.
+    """
+
+    @staticmethod
+    def _vec(dim: int, axis: int) -> list[float]:
+        v = [0.0] * dim
+        v[axis] = 1.0
+        return v
+
+    @pytest.mark.anyio
+    async def test_no_provider_returns_error(self, monkeypatch) -> None:
+        """When no embedding provider is configured, returns helpful error."""
+        from mcp_awareness.embeddings import NullEmbedding
+
+        monkeypatch.setattr(server_mod, "_embedding_provider", NullEmbedding())
+        result = json.loads(await server_mod.semantic_search(query="test"))
+        assert result["status"] == "error"
+        assert "embedding provider" in result["message"].lower()
+
+    @pytest.mark.anyio
+    async def test_search_with_mock_provider(self, monkeypatch) -> None:
+        """With mock embeddings, returns ranked results."""
+
+        class MockProvider:
+            model_name = "mock"
+            dimensions = 768
+
+            def embed(self, texts):
+                # Always return a unit vector along axis 0
+                return [self._vec(768, 0) for _ in texts]
+
+            def is_available(self):
+                return True
+
+            @staticmethod
+            def _vec(dim, axis):
+                v = [0.0] * dim
+                v[axis] = 1.0
+                return v
+
+        provider = MockProvider()
+        monkeypatch.setattr(server_mod, "_embedding_provider", provider)
+
+        # Create an entry and embed it
+        s = _store()
+        from mcp_awareness.schema import Entry, EntryType, make_id, now_utc
+
+        now = now_utc()
+        entry = Entry(
+            id=make_id(),
+            type=EntryType.NOTE,
+            source="test",
+            tags=["finance"],
+            created=now,
+            updated=now,
+            expires=None,
+            data={"description": "401k retirement planning notes"},
+        )
+        s.add(entry)
+        s.upsert_embedding(entry.id, "mock", 768, "h1", provider._vec(768, 0))
+
+        result = json.loads(await server_mod.semantic_search(query="retirement"))
+        assert len(result) >= 1
+        assert result[0]["id"] == entry.id
+        assert "similarity" in result[0]
+        assert result[0]["similarity"] > 0.99
+
+    @pytest.mark.anyio
+    async def test_search_list_mode(self, monkeypatch) -> None:
+        """List mode returns lightweight entries with similarity scores."""
+
+        class MockProvider:
+            model_name = "mock"
+            dimensions = 768
+
+            def embed(self, texts):
+                v = [0.0] * 768
+                v[0] = 1.0
+                return [v for _ in texts]
+
+            def is_available(self):
+                return True
+
+        provider = MockProvider()
+        monkeypatch.setattr(server_mod, "_embedding_provider", provider)
+
+        s = _store()
+        from mcp_awareness.schema import Entry, EntryType, make_id, now_utc
+
+        now = now_utc()
+        entry = Entry(
+            id=make_id(),
+            type=EntryType.NOTE,
+            source="test",
+            tags=["test"],
+            created=now,
+            updated=now,
+            expires=None,
+            data={"description": "test entry"},
+        )
+        s.add(entry)
+        vec = [0.0] * 768
+        vec[0] = 1.0
+        s.upsert_embedding(entry.id, "mock", 768, "h1", vec)
+
+        result = json.loads(await server_mod.semantic_search(query="test", mode="list"))
+        assert len(result) >= 1
+        assert "similarity" in result[0]
+        assert "description" in result[0]
+        # Full mode fields should NOT be present in list mode
+        assert "data" not in result[0]
+
+    @pytest.mark.anyio
+    async def test_search_with_filters(self, monkeypatch) -> None:
+        """Filters narrow results in semantic search."""
+
+        class MockProvider:
+            model_name = "mock"
+            dimensions = 768
+
+            def embed(self, texts):
+                v = [0.0] * 768
+                v[0] = 1.0
+                return [v for _ in texts]
+
+            def is_available(self):
+                return True
+
+        provider = MockProvider()
+        monkeypatch.setattr(server_mod, "_embedding_provider", provider)
+
+        s = _store()
+        from mcp_awareness.schema import Entry, EntryType, make_id, now_utc
+
+        now = now_utc()
+        e1 = Entry(
+            id=make_id(),
+            type=EntryType.NOTE,
+            source="nas",
+            tags=["infra"],
+            created=now,
+            updated=now,
+            expires=None,
+            data={"description": "nas disk health"},
+        )
+        e2 = Entry(
+            id=make_id(),
+            type=EntryType.NOTE,
+            source="personal",
+            tags=["finance"],
+            created=now,
+            updated=now,
+            expires=None,
+            data={"description": "retirement plan"},
+        )
+        s.add(e1)
+        s.add(e2)
+        vec = [0.0] * 768
+        vec[0] = 1.0
+        s.upsert_embedding(e1.id, "mock", 768, "h1", vec)
+        s.upsert_embedding(e2.id, "mock", 768, "h2", vec)
+
+        # Filter by source
+        result = json.loads(await server_mod.semantic_search(query="test", source="nas"))
+        assert len(result) == 1
+        assert result[0]["source"] == "nas"

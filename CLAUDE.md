@@ -65,14 +65,15 @@ src/mcp_awareness/
 ├── schema.py      # Entry types (status/alert/pattern/suppression/context/preference/note),
 │                  # common envelope, validation, TTL/expiry logic, severity ranking
 ├── store.py           # Store protocol (interface) — backend contract
-├── postgres_store.py  # PostgresStore implementation (psycopg, JSONB, GIN indexes, pgvector-ready)
+├── postgres_store.py  # PostgresStore implementation (psycopg, JSONB, GIN indexes, pgvector)
+├── embeddings.py      # Embedding provider abstraction (Ollama, Null), text composition, hashing
 ├── collator.py        # Briefing generation: applies suppressions + patterns, composes summary/mention
 └── server.py          # FastMCP server wiring — resources (read) + tools (write/update) + secret path middleware
 ```
 
 **Data flow**: Edge processes → tools (`report_status`, `report_alert`) → `store` → `collator.generate_briefing()` → `awareness://briefing` resource
 
-**Storage abstraction**: `Store` protocol defines the interface; `PostgresStore` is the sole implementation. The collator depends on the protocol, not the concrete class. PostgresStore uses JSONB with GIN indexes for tags, psycopg sync driver, and pgvector extension (installed, ready for RAG). `wal_level=logical` configured for Debezium CDC readiness.
+**Storage abstraction**: `Store` protocol defines the interface; `PostgresStore` is the sole implementation. The collator depends on the protocol, not the concrete class. PostgresStore uses JSONB with GIN indexes for tags, psycopg sync driver, and pgvector for semantic search (HNSW-indexed embeddings table). `wal_level=logical` configured for Debezium CDC readiness.
 
 **Key design decisions**:
 - Briefing is computed on-demand per read (not background task)

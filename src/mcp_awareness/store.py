@@ -156,4 +156,33 @@ class Store(Protocol):
 
     def get_fired_intentions(self) -> list[Entry]: ...
 
+    # Embeddings / semantic search
+
+    def upsert_embedding(
+        self,
+        entry_id: str,
+        model: str,
+        dimensions: int,
+        text_hash: str,
+        embedding: list[float],
+    ) -> None: ...
+
+    def get_entries_without_embeddings(
+        self,
+        model: str,
+        limit: int = 100,
+    ) -> list[Entry]: ...
+
+    def semantic_search(
+        self,
+        embedding: list[float],
+        model: str,
+        entry_type: EntryType | None = None,
+        source: str | None = None,
+        tags: list[str] | None = None,
+        since: datetime | None = None,
+        until: datetime | None = None,
+        limit: int = 10,
+    ) -> list[tuple[Entry, float]]: ...
+
     def clear(self) -> None: ...

@@ -3,7 +3,7 @@ name: mcp-awareness
 
 services:
   mcp-awareness:
-    image: ghcr.io/cmeans/mcp-awareness:0.6.0
+    image: ghcr.io/cmeans/mcp-awareness:0.9.0
     # For local development, comment out 'image' and uncomment 'build':
     # build: .
     container_name: mcp-awareness
@@ -14,6 +14,9 @@ services:
     environment:
       - AWARENESS_MOUNT_PATH=${AWARENESS_MOUNT_PATH:-}
       - AWARENESS_DATABASE_URL=${AWARENESS_DATABASE_URL:-}
+      - AWARENESS_EMBEDDING_PROVIDER=${AWARENESS_EMBEDDING_PROVIDER:-}
+      - AWARENESS_EMBEDDING_MODEL=${AWARENESS_EMBEDDING_MODEL:-nomic-embed-text}
+      - AWARENESS_OLLAMA_URL=${AWARENESS_OLLAMA_URL:-http://ollama:11434}
     depends_on:
       postgres:
         condition: service_healthy
@@ -81,6 +84,29 @@ services:
       timeout: 5s
       retries: 5
       start_period: 10s
+
+  # Ollama — local embedding model for semantic search
+  # Usage: docker compose --profile embeddings up -d
+  # Then: docker exec awareness-ollama ollama pull nomic-embed-text
+  ollama:
+    image: ollama/ollama:latest
+    container_name: awareness-ollama
+    restart: unless-stopped
+    volumes:
+      - ${AWARENESS_OLLAMA_DATA:-~/awareness-ollama}:/root/.ollama
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 2G
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:11434/api/tags"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    profiles:
+      - embeddings
 
   # Quick tunnel — ephemeral URL, no account needed
   # Usage: docker compose up mcp-awareness tunnel-quick

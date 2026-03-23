@@ -19,8 +19,15 @@ from typing import Any, Literal
 from mcp.server.fastmcp import FastMCP
 
 from .collator import generate_briefing
+from .embeddings import (
+    EmbeddingProvider,
+    compose_embedding_text,
+    create_provider,
+    should_embed,
+    text_hash,
+)
 from .postgres_store import PostgresStore
-from .schema import Entry, EntryType, ensure_dt, make_id, now_utc, to_iso
+from .schema import Entry, EntryType, ensure_dt, make_id, now_utc, parse_iso, to_iso
 from .store import Store
 
 _start_time = time.monotonic()
@@ -66,6 +73,46 @@ class _LazyStore:
 
 
 store: Any = _LazyStore()
+
+# Embedding provider — optional, configured via env vars
+EMBEDDING_PROVIDER = os.environ.get("AWARENESS_EMBEDDING_PROVIDER", "")
+EMBEDDING_MODEL = os.environ.get("AWARENESS_EMBEDDING_MODEL", "nomic-embed-text")
+OLLAMA_URL = os.environ.get("AWARENESS_OLLAMA_URL", "http://ollama:11434")
+EMBEDDING_DIMENSIONS = int(os.environ.get("AWARENESS_EMBEDDING_DIMENSIONS", "768"))
+
+_embedding_provider: EmbeddingProvider | None = None
+
+
+def _get_embedding_provider() -> EmbeddingProvider:
+    """Lazy-init the embedding provider from env vars."""
+    global _embedding_provider
+    if _embedding_provider is None:
+        _embedding_provider = create_provider(
+            provider=EMBEDDING_PROVIDER,
+            model=EMBEDDING_MODEL,
+            ollama_url=OLLAMA_URL,
+            dimensions=EMBEDDING_DIMENSIONS,
+        )
+    return _embedding_provider
+
+
+def _generate_embedding(entry: Entry) -> None:
+    """Fire-and-forget embedding generation. Never blocks the response."""
+    try:
+        provider = _get_embedding_provider()
+        if not provider.is_available():
+            return
+        if not should_embed(entry):
+            return
+        text = compose_embedding_text(entry)
+        h = text_hash(text)
+        vectors = provider.embed([text])
+        if vectors:
+            store.upsert_embedding(
+                entry.id, provider.model_name, provider.dimensions, h, vectors[0]
+            )
+    except Exception:
+        pass  # Background catch-up will handle failures
 
 
 def _log_reads(entries: list[Any], tool_name: str) -> None:
@@ -350,6 +397,7 @@ async def report_status(
     if inventory:
         data["inventory"] = inventory
     entry = store.upsert_status(source, tags, data)
+    _generate_embedding(entry)
     return json.dumps({"status": "ok", "id": entry.id, "source": source})
 
 
@@ -382,6 +430,7 @@ async def report_alert(
     if diagnostics:
         data["diagnostics"] = diagnostics
     entry = store.upsert_alert(source, tags, alert_id, data)
+    _generate_embedding(entry)
     action = "resolved" if resolved else "reported"
     return json.dumps({"status": "ok", "id": entry.id, "action": action, "alert_id": alert_id})
 
@@ -420,6 +469,7 @@ async def learn_pattern(
         },
     )
     store.add(entry)
+    _generate_embedding(entry)
     return json.dumps({"status": "ok", "id": entry.id, "description": description})
 
 
@@ -466,11 +516,13 @@ async def remember(
     )
     if logical_key:
         result, created = store.upsert_by_logical_key(source, logical_key, entry)
+        _generate_embedding(result)
         action = "created" if created else "updated"
         return json.dumps(
             {"status": "ok", "id": result.id, "action": action, "description": description}
         )
     store.add(entry)
+    _generate_embedding(entry)
     return json.dumps({"status": "ok", "id": entry.id, "description": description})
 
 
@@ -513,6 +565,7 @@ async def update_entry(
                 "message": "Entry not found or type is immutable (status/alert/suppression)",
             }
         )
+    _generate_embedding(result)
     return json.dumps({"status": "ok", "id": result.id, "updated": to_iso(result.updated)})
 
 
@@ -598,6 +651,7 @@ async def add_context(
         data={"description": description},
     )
     store.add(entry)
+    _generate_embedding(entry)
     return json.dumps({"status": "ok", "id": entry.id, "expires": to_iso(expires)})
 
 
@@ -941,6 +995,76 @@ async def update_intention(
     if result is None:
         return json.dumps({"status": "error", "message": "Intention not found"})
     return json.dumps({"status": "ok", "id": entry_id, "state": state, "reason": reason}, indent=2)
+
+
+@mcp.tool()
+@_timed
+async def semantic_search(
+    query: str,
+    source: str | None = None,
+    tags: list[str] | None = None,
+    entry_type: str | None = None,
+    since: str | None = None,
+    until: str | None = None,
+    limit: int = 10,
+    mode: str | None = None,
+) -> str:
+    """Search knowledge by meaning using semantic similarity.
+    Use when tag-based filtering (get_knowledge) isn't specific enough,
+    or when you need to find entries related to a concept without knowing exact tags.
+    Example: semantic_search(query="retirement planning") finds entries
+    about 401k, pension, financial goals — even if not tagged that way.
+    Combines with filters: source, tags, entry_type, since, until.
+    Returns entries sorted by relevance with similarity scores.
+    Requires an embedding provider (AWARENESS_EMBEDDING_PROVIDER env var).
+    mode: omit for full entries, 'list' for metadata only + similarity."""
+    provider = _get_embedding_provider()
+    if not provider.is_available():
+        return json.dumps(
+            {
+                "status": "error",
+                "message": (
+                    "Semantic search requires an embedding provider. "
+                    "Set AWARENESS_EMBEDDING_PROVIDER=ollama and ensure Ollama is running."
+                ),
+            }
+        )
+    # Generate query embedding
+    try:
+        vectors = provider.embed([query])
+        if not vectors:
+            return json.dumps({"status": "error", "message": "Failed to generate query embedding"})
+    except Exception as exc:
+        return json.dumps({"status": "error", "message": f"Embedding error: {exc}"})
+
+    et = EntryType(entry_type) if entry_type else None
+    since_dt = parse_iso(since) if since else None
+    until_dt = parse_iso(until) if until else None
+
+    results = store.semantic_search(
+        embedding=vectors[0],
+        model=provider.model_name,
+        entry_type=et,
+        source=source,
+        tags=tags,
+        since=since_dt,
+        until=until_dt,
+        limit=limit,
+    )
+    _log_reads([e for e, _ in results], "semantic_search")
+    if mode == "list":
+        items = []
+        for entry, score in results:
+            d = entry.to_list_dict()
+            d["similarity"] = round(score, 4)
+            items.append(d)
+        return json.dumps(items, indent=2)
+    items = []
+    for entry, score in results:
+        d = entry.to_dict()
+        d["similarity"] = round(score, 4)
+        items.append(d)
+    return json.dumps(items, indent=2)
 
 
 # ---------------------------------------------------------------------------
