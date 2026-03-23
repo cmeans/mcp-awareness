@@ -90,6 +90,9 @@ class PostgresStore:
                 );
                 CREATE INDEX IF NOT EXISTS idx_embeddings_entry
                     ON embeddings(entry_id);
+                CREATE INDEX IF NOT EXISTS idx_embeddings_vector_hnsw
+                    ON embeddings USING hnsw (embedding vector_cosine_ops)
+                    WITH (m = 16, ef_construction = 64);
             """)
         self._conn.commit()
         # Note: schema migrations are managed by Alembic (see alembic/ directory).

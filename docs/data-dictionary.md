@@ -218,6 +218,7 @@ Stores vector embeddings for semantic search. One embedding per entry per model.
 - The `text_hash` column enables detection of stale embeddings after entry updates
 - `ON DELETE CASCADE` ensures embeddings are cleaned up when entries are deleted
 - Requires `AWARENESS_EMBEDDING_PROVIDER=ollama` to activate (optional)
+- **Dimension constraint**: `VECTOR(768)` is hardcoded in both inline DDL and Alembic migration, matching `nomic-embed-text`. To use a model with different dimensions, both the DDL and migration must be updated. `AWARENESS_EMBEDDING_DIMENSIONS` configures the provider but does not alter the column type.
 
 ## Backend details
 
