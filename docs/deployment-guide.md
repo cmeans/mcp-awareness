@@ -173,15 +173,49 @@ store.upsert_alert("synology-nas", ["infra", "nas", "docker"], "struct-qbt-stopp
 })
 ```
 
-### Step 7: Connect Claude.ai
+### Step 7: Connect your AI
 
-1. Go to [claude.ai](https://claude.ai) → **Settings** → **Connectors**
-2. Click **Add custom connector**
-3. Enter:
-   - **Name**: `awareness` (Claude uses this name for context)
-   - **URL**: `https://yourdomain.com/<your-secret>/mcp`
-   - Leave OAuth fields **blank**
-4. Click **Add**, then **Connect**
+Point any MCP client that supports streamable HTTP at your endpoint:
+
+```
+https://yourdomain.com/<your-secret>/mcp
+```
+
+**Claude.ai**: Settings → Connectors → Add custom connector → paste the URL
+
+**Claude Desktop / Claude Code**: add to MCP settings:
+```json
+{
+  "mcpServers": {
+    "awareness": {
+      "url": "https://yourdomain.com/<your-secret>/mcp"
+    }
+  }
+}
+```
+
+**VS Code**: add to `.vscode/mcp.json`:
+```json
+{
+  "servers": {
+    "awareness": {
+      "type": "http",
+      "url": "https://yourdomain.com/<your-secret>/mcp"
+    }
+  }
+}
+```
+
+**Cursor**: add to `.cursor/mcp.json`:
+```json
+{
+  "mcpServers": {
+    "awareness": {
+      "url": "https://yourdomain.com/<your-secret>/mcp"
+    }
+  }
+}
+```
 
 ### Step 8: Add the memory instruction
 
