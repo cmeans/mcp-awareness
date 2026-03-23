@@ -249,13 +249,22 @@ def generate_briefing(store: Store) -> dict[str, Any]:
         "attention_needed": False,
     }
 
+    # Evaluation trace — tracks what the collator checked and dismissed
+    eval_alerts_checked = 0
+    eval_suppressed = 0
+    eval_pattern_matched = 0
+    eval_stale_sources = 0
+
     for source in store.get_sources():
         status = store.get_latest_status(source)
         alerts = store.get_active_alerts(source)
         suppressions = store.get_active_suppressions(source)
 
+        eval_alerts_checked += len(alerts)
+
         # Check for stale sources (TTL expired)
         if status and status.is_stale():
+            eval_stale_sources += 1
             age = int(status.age_sec)
             briefing["sources"][source] = {
                 "status": "stale",
@@ -267,11 +276,15 @@ def generate_briefing(store: Store) -> dict[str, Any]:
             continue
 
         # Apply suppressions — filter out suppressed alerts
+        pre_suppression = len(alerts)
         active_alerts = [a for a in alerts if not is_suppressed(a, suppressions)]
+        eval_suppressed += pre_suppression - len(active_alerts)
 
         # Apply learned patterns — filter out expected anomalies
         patterns = store.get_patterns(source)
+        pre_pattern = len(active_alerts)
         active_alerts = [a for a in active_alerts if not matches_pattern(a, patterns)]
+        eval_pattern_matched += pre_pattern - len(active_alerts)
 
         # Determine source status
         if any(a.data.get("level") == "critical" for a in active_alerts):
@@ -299,6 +312,13 @@ def generate_briefing(store: Store) -> dict[str, Any]:
         briefing["sources"][source] = source_entry
 
     briefing["active_suppressions"] = store.count_active_suppressions()
+    briefing["evaluation"] = {
+        "alerts_checked": eval_alerts_checked,
+        "suppressed": eval_suppressed,
+        "pattern_matched": eval_pattern_matched,
+        "stale_sources": eval_stale_sources,
+        "surfaced": briefing["active_alerts"],
+    }
     briefing["summary"] = compose_summary(briefing)
 
     if briefing["attention_needed"]:
