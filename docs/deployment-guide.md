@@ -188,7 +188,7 @@ Point any MCP client that supports streamable HTTP at your endpoint:
 https://yourdomain.com/<your-secret>/mcp
 ```
 
-**Claude.ai**: Settings → Connectors → Add custom connector → paste the URL
+**Claude.ai**: Settings → Connectors → Add custom connector. Name it `awareness` — Claude uses the connector name as context when deciding which tools to call. Paste the URL.
 
 **Claude Desktop / Claude Code**: add to MCP settings:
 ```json
