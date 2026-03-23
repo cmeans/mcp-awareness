@@ -54,7 +54,7 @@ This section sets up a publicly accessible deployment with Docker Compose, a sta
 ### Step 1: Set up Cloudflare
 
 1. Create a free [Cloudflare account](https://dash.cloudflare.com/sign-up)
-2. Register or connect a domain (Cloudflare is also a registrar — domains at cost, ~$10/year)
+2. Add a domain to your Cloudflare account (any registrar works)
 3. Authenticate cloudflared:
    ```bash
    cloudflared tunnel login
