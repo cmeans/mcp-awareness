@@ -155,19 +155,25 @@ class PostgresStore:
 
     _ACTIVE = "deleted IS NULL"
 
-    def _query_entries(self, where: str = "1=1", params: tuple[Any, ...] = ()) -> list[Entry]:
+    def _query_entries(
+        self,
+        where: str = "1=1",
+        params: tuple[Any, ...] = (),
+        order_by: str = "updated DESC",
+        limit: int | None = None,
+        offset: int | None = None,
+    ) -> list[Entry]:
+        sql = f"SELECT * FROM entries WHERE {self._ACTIVE} AND ({where}) ORDER BY {order_by}"
+        query_params = list(params)
+        if limit is not None:
+            sql += " LIMIT %s"
+            query_params.append(limit)
+        if offset is not None:
+            sql += " OFFSET %s"
+            query_params.append(offset)
         with self._conn.cursor() as cur:
-            cur.execute(f"SELECT * FROM entries WHERE {self._ACTIVE} AND ({where})", params)
+            cur.execute(sql, tuple(query_params))
             return [self._row_to_entry(r) for r in cur.fetchall()]
-
-    @staticmethod
-    def _paginate(entries: list[Entry], limit: int | None, offset: int | None) -> list[Entry]:
-        """Apply offset and limit to a list of entries."""
-        if offset:
-            entries = entries[offset:]
-        if limit:
-            entries = entries[:limit]
-        return entries
 
     # ------------------------------------------------------------------
     # Public API
@@ -305,8 +311,7 @@ class PostgresStore:
             clauses.append("updated >= %s")
             params.append(since)
         where = " AND ".join(clauses) if clauses else "1=1"
-        results = self._query_entries(where, tuple(params))
-        return self._paginate(results, limit, offset)
+        return self._query_entries(where, tuple(params), limit=limit, offset=offset)
 
     def get_sources(self) -> list[str]:
         """Get all unique sources that have reported status."""
@@ -334,7 +339,10 @@ class PostgresStore:
         limit: int | None = None,
         offset: int | None = None,
     ) -> list[Entry]:
-        clauses = ["type = %s"]
+        clauses = [
+            "type = %s",
+            "NOT (data @> '{\"resolved\": true}'::jsonb)",
+        ]
         params: list[Any] = [EntryType.ALERT.value]
         if source:
             clauses.append("source = %s")
@@ -343,15 +351,16 @@ class PostgresStore:
             clauses.append("updated >= %s")
             params.append(since)
         where = " AND ".join(clauses)
-        alerts = self._query_entries(where, tuple(params))
-        results = [a for a in alerts if not a.data.get("resolved")]
-        return self._paginate(results, limit, offset)
+        return self._query_entries(where, tuple(params), limit=limit, offset=offset)
 
     def get_active_suppressions(self, source: str | None = None) -> list[Entry]:
-        entries = self._query_entries("type = %s", (EntryType.SUPPRESSION.value,))
+        clauses = ["type = %s", "(expires IS NULL OR expires > NOW())"]
+        params: list[Any] = [EntryType.SUPPRESSION.value]
         if source:
-            entries = [s for s in entries if s.source == source or s.source == ""]
-        return entries
+            clauses.append("(source = %s OR source = '')")
+            params.append(source)
+        where = " AND ".join(clauses)
+        return self._query_entries(where, tuple(params))
 
     def get_patterns(self, source: str | None = None) -> list[Entry]:
         if source:
@@ -375,7 +384,9 @@ class PostgresStore:
         tags: list[str] | None = None,
         include_history: str | None = None,
         since: datetime | None = None,
+        until: datetime | None = None,
         source: str | None = None,
+        learned_from: str | None = None,
         limit: int | None = None,
         offset: int | None = None,
     ) -> list[Entry]:
@@ -399,14 +410,27 @@ class PostgresStore:
         if since is not None:
             clauses.append("updated >= %s")
             params.append(since)
+        if until is not None:
+            clauses.append("updated <= %s")
+            params.append(until)
+        if learned_from is not None:
+            clauses.append("data->>'learned_from' = %s")
+            params.append(learned_from)
         where = " AND ".join(clauses)
-        entries = self._query_entries(where, tuple(params))
+        # Push LIMIT/OFFSET to SQL unless include_history="only" (post-filter changes count)
+        sql_limit = limit if include_history != "only" else None
+        sql_offset = offset if include_history != "only" else None
+        entries = self._query_entries(where, tuple(params), limit=sql_limit, offset=sql_offset)
         if include_history == "only":
             entries = [e for e in entries if e.data.get("changelog")]
+            if offset:
+                entries = entries[offset:]
+            if limit:
+                entries = entries[:limit]
         elif include_history != "true":
             for e in entries:
                 e.data.pop("changelog", None)
-        return self._paginate(entries, limit, offset)
+        return entries
 
     def get_entry_by_id(self, entry_id: str) -> Entry | None:
         """Get a single entry by ID (active only)."""
@@ -575,10 +599,16 @@ class PostgresStore:
             clauses.append("deleted >= %s")
             params.append(since)
         where = " AND ".join(clauses)
+        sql = f"SELECT * FROM entries WHERE {where} ORDER BY deleted DESC"
+        if limit is not None:
+            sql += " LIMIT %s"
+            params.append(limit)
+        if offset is not None:
+            sql += " OFFSET %s"
+            params.append(offset)
         with self._conn.cursor() as cur:
-            cur.execute(f"SELECT * FROM entries WHERE {where}", tuple(params))
-            results = [self._row_to_entry(r) for r in cur.fetchall()]
-        return self._paginate(results, limit, offset)
+            cur.execute(sql, tuple(params))
+            return [self._row_to_entry(r) for r in cur.fetchall()]
 
     def restore_by_id(self, entry_id: str) -> bool:
         """Restore a soft-deleted entry. Returns True if restored."""
@@ -862,10 +892,7 @@ class PostgresStore:
                 clauses.append("tags @> %s::jsonb")
                 params.append(json.dumps([t]))
         where = " AND ".join(clauses)
-        entries = self._query_entries(where, tuple(params))
-        if limit:
-            entries = entries[:limit]
-        return entries
+        return self._query_entries(where, tuple(params), limit=limit)
 
     def update_intention_state(
         self, entry_id: str, new_state: str, reason: str | None = None

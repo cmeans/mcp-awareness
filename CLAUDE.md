@@ -48,7 +48,7 @@ Every PR that changes functionality must include:
 
 ```bash
 pip install -e ".[dev]"   # install with dev dependencies (ruff, mypy, pytest, pytest-cov)
-python -m pytest tests/   # run all tests
+python -m pytest tests/   # run all tests (requires Docker — testcontainers spins up Postgres)
 python -m pytest tests/test_collator.py::TestIsSuppressed::test_escalation_override_breaks_through  # single test
 ruff check src/ tests/    # lint
 ruff format src/ tests/   # format (or --check to verify)

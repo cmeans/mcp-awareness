@@ -186,3 +186,44 @@ def test_validate_entry_data_bad_data_field():
 def test_validate_entry_data_bad_tags():
     errors = validate_entry_data({"type": "status", "source": "s", "tags": "string"})
     assert any("list" in e for e in errors)
+
+
+# ------------------------------------------------------------------
+# to_list_dict type-aware metadata
+# ------------------------------------------------------------------
+
+
+def test_to_list_dict_alert_uses_message():
+    """Alerts use message as description fallback in list mode."""
+    now = now_utc()
+    entry = Entry(
+        id=make_id(),
+        type=EntryType.ALERT,
+        source="nas",
+        tags=["infra"],
+        created=now,
+        updated=now,
+        expires=None,
+        data={"alert_id": "a1", "level": "warning", "message": "CPU high"},
+    )
+    d = entry.to_list_dict()
+    assert d["description"] == "CPU high"
+
+
+def test_to_list_dict_intention_includes_goal_state():
+    """Intentions include goal and state in list mode."""
+    now = now_utc()
+    entry = Entry(
+        id=make_id(),
+        type=EntryType.INTENTION,
+        source="personal",
+        tags=["errands"],
+        created=now,
+        updated=now,
+        expires=None,
+        data={"goal": "Pick up milk", "state": "pending"},
+    )
+    d = entry.to_list_dict()
+    assert d["goal"] == "Pick up milk"
+    assert d["state"] == "pending"
+    assert "data" not in d

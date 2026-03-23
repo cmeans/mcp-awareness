@@ -2,7 +2,8 @@
 """Test the new knowledge layer v2 tools via MCP over HTTP.
 
 Requires the server to be running:
-    AWARENESS_DATA_DIR=./test-data AWARENESS_TRANSPORT=streamable-http python -m mcp_awareness.server
+    AWARENESS_DATABASE_URL=postgresql://awareness:awareness-dev@localhost:5432/awareness \
+    AWARENESS_TRANSPORT=streamable-http python -m mcp_awareness.server
 
 Usage:
     python examples/test_new_tools.py [--url http://localhost:8420/mcp]

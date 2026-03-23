@@ -253,6 +253,8 @@ async def get_knowledge(
     entry_type: str | None = None,
     include_history: str | None = None,
     since: str | None = None,
+    until: str | None = None,
+    learned_from: str | None = None,
     mode: str | None = None,
     limit: int | None = None,
     offset: int | None = None,
@@ -266,16 +268,22 @@ async def get_knowledge(
     'only' to return only entries with change history.
     since: ISO 8601 timestamp — only return entries updated after this time.
     Useful for catching up on recent changes (e.g., since='2026-03-23T06:00:00Z').
+    until: ISO 8601 timestamp — only return entries updated before this time.
+    Combine with since for date ranges (e.g., "what happened in March?").
+    learned_from: filter by platform that created the entry (e.g., 'claude-code',
+    'claude.ai', 'conversation'). Useful when multiple platforms write entries.
     mode: omit for full entries, 'list' for metadata only (id, type, source,
     description, tags, created, updated — no content or changelog). Use 'list'
     to orient before pulling full entries.
     Use limit/offset for pagination (e.g., limit=10, offset=0 for first page).
+    Results are sorted by most recently updated first.
     This tool always returns JSON with a status field or an entry list.
     If you receive an unstructured error, the failure is in the transport
     or platform layer, not in awareness."""
     if since is not None and not since:
         return json.dumps({"error": "since cannot be empty; omit or provide an ISO 8601 timestamp"})
     since_dt = ensure_dt(since) if since else None
+    until_dt = ensure_dt(until) if until else None
     if entry_type:
         et = EntryType(entry_type)
         entries = store.get_entries(
@@ -291,7 +299,9 @@ async def get_knowledge(
             tags=tags,
             include_history=include_history,
             since=since_dt,
+            until=until_dt,
             source=source,
+            learned_from=learned_from,
             limit=limit,
             offset=offset,
         )

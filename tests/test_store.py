@@ -1306,3 +1306,177 @@ def test_get_fired_intentions(store):
     fired = store.get_fired_intentions()
     assert len(fired) == 1
     assert fired[0].data["goal"] == "overdue"
+
+
+# ------------------------------------------------------------------
+# SQL-level improvements
+# ------------------------------------------------------------------
+
+
+def test_get_knowledge_default_sort_desc(store):
+    """get_knowledge returns most recent entries first (updated DESC)."""
+    from datetime import timedelta
+
+    now = now_utc()
+    old = now - timedelta(hours=2)
+    store.add(
+        Entry(
+            id=make_id(),
+            type=EntryType.NOTE,
+            source="test",
+            tags=[],
+            created=old,
+            updated=old,
+            expires=None,
+            data={"description": "old note"},
+        )
+    )
+    store.add(
+        Entry(
+            id=make_id(),
+            type=EntryType.NOTE,
+            source="test",
+            tags=[],
+            created=now,
+            updated=now,
+            expires=None,
+            data={"description": "recent note"},
+        )
+    )
+    entries = store.get_knowledge(limit=1)
+    assert len(entries) == 1
+    assert entries[0].data["description"] == "recent note"
+
+
+def test_get_knowledge_until(store):
+    """until param filters by updated <= timestamp."""
+    from datetime import timedelta
+
+    now = now_utc()
+    old = now - timedelta(hours=2)
+    cutoff = now - timedelta(hours=1)
+    store.add(
+        Entry(
+            id=make_id(),
+            type=EntryType.NOTE,
+            source="test",
+            tags=[],
+            created=old,
+            updated=old,
+            expires=None,
+            data={"description": "old note"},
+        )
+    )
+    store.add(
+        Entry(
+            id=make_id(),
+            type=EntryType.NOTE,
+            source="test",
+            tags=[],
+            created=now,
+            updated=now,
+            expires=None,
+            data={"description": "recent note"},
+        )
+    )
+    entries = store.get_knowledge(until=cutoff)
+    assert len(entries) == 1
+    assert entries[0].data["description"] == "old note"
+
+
+def test_get_knowledge_learned_from(store):
+    """learned_from param filters by data->>'learned_from'."""
+    now = now_utc()
+    store.add(
+        Entry(
+            id=make_id(),
+            type=EntryType.NOTE,
+            source="test",
+            tags=[],
+            created=now,
+            updated=now,
+            expires=None,
+            data={"description": "from code", "learned_from": "claude-code"},
+        )
+    )
+    store.add(
+        Entry(
+            id=make_id(),
+            type=EntryType.NOTE,
+            source="test",
+            tags=[],
+            created=now,
+            updated=now,
+            expires=None,
+            data={"description": "from desktop", "learned_from": "claude.ai"},
+        )
+    )
+    entries = store.get_knowledge(learned_from="claude-code")
+    assert len(entries) == 1
+    assert entries[0].data["description"] == "from code"
+
+
+def test_get_active_alerts_resolved_filtered_in_sql(store):
+    """Resolved alerts are filtered in SQL, not post-fetch."""
+    store.upsert_alert(
+        "src",
+        ["t"],
+        "active",
+        {"alert_id": "active", "level": "warning", "message": "active", "resolved": False},
+    )
+    store.upsert_alert(
+        "src",
+        ["t"],
+        "resolved",
+        {"alert_id": "resolved", "level": "warning", "message": "resolved", "resolved": True},
+    )
+    alerts = store.get_active_alerts()
+    assert len(alerts) == 1
+    assert alerts[0].data["alert_id"] == "active"
+
+
+def test_sql_pagination_limit_offset(store):
+    """LIMIT/OFFSET pushed to SQL — verify with get_entries."""
+    for i in range(5):
+        store.add(
+            Entry(
+                id=make_id(),
+                type=EntryType.NOTE,
+                source="test",
+                tags=[],
+                created=now_utc(),
+                updated=now_utc(),
+                expires=None,
+                data={"description": f"note-{i}"},
+            )
+        )
+    page1 = store.get_entries(limit=2)
+    assert len(page1) == 2
+    page2 = store.get_entries(limit=2, offset=2)
+    assert len(page2) == 2
+    # Pages shouldn't overlap
+    ids1 = {e.id for e in page1}
+    ids2 = {e.id for e in page2}
+    assert ids1.isdisjoint(ids2)
+
+
+def test_get_knowledge_include_history_only_with_pagination(store):
+    """include_history='only' with limit/offset uses Python-side pagination."""
+    now = now_utc()
+    for i in range(3):
+        entry = Entry(
+            id=make_id(),
+            type=EntryType.NOTE,
+            source="test",
+            tags=[],
+            created=now,
+            updated=now,
+            expires=None,
+            data={"description": f"note-{i}"},
+        )
+        store.add(entry)
+        store.update_entry(entry.id, {"description": f"updated-{i}"})
+    all_with_history = store.get_knowledge(include_history="only")
+    assert len(all_with_history) == 3
+    page = store.get_knowledge(include_history="only", limit=2, offset=1)
+    assert len(page) == 2
