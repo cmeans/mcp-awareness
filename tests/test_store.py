@@ -938,6 +938,13 @@ def test_log_action_custom_tags(store):
     assert result["tags"] == ["custom", "tags"]
 
 
+def test_log_action_invalid_entry_id(store):
+    """log_action returns error for nonexistent entry_id."""
+    result = store.log_action(entry_id="nonexistent-id", action="test")
+    assert result["status"] == "error"
+    assert "not found" in result["message"].lower()
+
+
 def test_get_actions_filter_by_tags(store):
     """get_actions can filter by tags."""
     entry = store.add(

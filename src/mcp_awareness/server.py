@@ -762,6 +762,8 @@ async def acted_on(
     result = store.log_action(
         entry_id=entry_id, action=action, platform=platform, detail=detail, tags=tags
     )
+    if result.get("status") == "error":
+        return json.dumps(result)
     return json.dumps({"status": "ok", **result}, indent=2)
 
 

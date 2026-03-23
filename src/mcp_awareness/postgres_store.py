@@ -642,11 +642,16 @@ class PostgresStore:
         detail: str | None = None,
         tags: list[str] | None = None,
     ) -> dict[str, Any]:
-        """Log an action taken because of an entry. Returns the action record."""
-        # If no tags provided, copy from the referenced entry
+        """Log an action taken because of an entry. Returns the action record.
+
+        Returns {"status": "error", ...} if the entry doesn't exist.
+        """
+        # Validate entry exists and copy tags if not provided
+        entry = self.get_entry_by_id(entry_id)
+        if entry is None:
+            return {"status": "error", "message": f"Entry not found: {entry_id}"}
         if tags is None:
-            entry = self.get_entry_by_id(entry_id)
-            tags = entry.tags if entry else []
+            tags = entry.tags
         now = now_utc()
         with self._conn.cursor() as cur:
             cur.execute(

@@ -1342,6 +1342,12 @@ class TestReadActionTracking:
         assert result["tags"] == ["project"]  # copied from entry
 
     @pytest.mark.anyio
+    async def test_acted_on_invalid_entry(self) -> None:
+        result = json.loads(await server_mod.acted_on(entry_id="nonexistent-id", action="test"))
+        assert result["status"] == "error"
+        assert "not found" in result["message"].lower()
+
+    @pytest.mark.anyio
     async def test_get_reads_after_get_knowledge(self) -> None:
         """get_knowledge auto-logs reads, get_reads retrieves them."""
         from mcp_awareness.schema import Entry, EntryType, make_id, now_utc
