@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **MCP Prompts** — 5 dynamic prompts built from store data:
+  - `agent_instructions` — complete workflow conventions from `source="awareness-prompt"` entries
+  - `project_context(repo_name)` — knowledge, alerts, and status for a project
+  - `system_status(source)` — status, alerts, and patterns for a monitored system
+  - `write_guide` — existing sources, tags with counts, and entry type reference
+  - `catchup(hours)` — what changed recently across knowledge and alerts
+- **User-defined prompts**: store entries with `source="custom-prompt"` and they automatically appear as MCP prompts. Template variables (`{{var}}`) become prompt arguments. Prompts are namespaced under `user/` and synced dynamically on every list/get.
+- **Delete by tags**: `delete_entry(tags=["qa-test"], confirm=True)` soft-deletes all entries matching ALL given tags (AND logic). Supports dry-run without `confirm`.
+- **Restore by tags**: `restore_entry(tags=["qa-test"])` restores all trashed entries matching ALL given tags (AND logic).
+- 19 new tests (181 total)
+
 ## [0.4.1] - 2026-03-22
 
 ### Fixed

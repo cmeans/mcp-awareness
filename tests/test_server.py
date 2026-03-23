@@ -607,7 +607,7 @@ class TestRestoreEntryTool:
         restore_result = await server_mod.restore_entry(entry_id=entry_id)
         data = json.loads(restore_result)
         assert data["status"] == "ok"
-        assert data["restored"] is True
+        assert data["restored"] == 1
         assert len(_store().get_patterns()) == 1
 
     @pytest.mark.anyio
@@ -615,7 +615,7 @@ class TestRestoreEntryTool:
         result = await server_mod.restore_entry(entry_id="nonexistent")
         data = json.loads(result)
         assert data["status"] == "not_found"
-        assert data["restored"] is False
+        assert data["restored"] == 0
 
 
 class TestGetDeletedTool:
@@ -938,3 +938,178 @@ class TestLogicalKeyUpsert:
             await server_mod.get_knowledge(entry_type="note", include_history="true")
         )
         assert "changelog" not in entries[0]["data"]
+
+
+# ------------------------------------------------------------------
+# Prompts
+# ------------------------------------------------------------------
+
+
+class TestPrompts:
+    @pytest.mark.anyio
+    async def test_agent_instructions_empty(self) -> None:
+        """Returns fallback message when no prompt entries exist."""
+        result = await server_mod.agent_instructions()
+        assert "No agent instructions found" in result
+
+    @pytest.mark.anyio
+    async def test_agent_instructions_from_store(self) -> None:
+        """Composes instructions from awareness-prompt entries."""
+        await server_mod.remember(
+            source="awareness-prompt",
+            tags=["memory-prompt"],
+            description="Awareness prompt Entry 1 (Core): Start with get_briefing.",
+        )
+        await server_mod.remember(
+            source="awareness-prompt",
+            tags=["memory-prompt"],
+            description="Awareness prompt Entry 2 (Reading): Call get_knowledge before answering.",
+        )
+        result = await server_mod.agent_instructions()
+        assert "# Awareness Agent Instructions" in result
+        assert "## Core" in result
+        assert "## Reading" in result
+        assert "get_briefing" in result
+
+    @pytest.mark.anyio
+    async def test_agent_instructions_sorted(self) -> None:
+        """Entries are sorted by entry number, not insertion order."""
+        # Insert out of order
+        await server_mod.remember(
+            source="awareness-prompt",
+            tags=["memory-prompt"],
+            description="Awareness prompt Entry 3 (Writing): Use remember for notes.",
+        )
+        await server_mod.remember(
+            source="awareness-prompt",
+            tags=["memory-prompt"],
+            description="Awareness prompt Entry 1 (Core): Start with get_briefing.",
+        )
+        result = await server_mod.agent_instructions()
+        core_pos = result.index("## Core")
+        writing_pos = result.index("## Writing")
+        assert core_pos < writing_pos
+
+    @pytest.mark.anyio
+    async def test_project_context_empty(self) -> None:
+        result = await server_mod.project_context(repo_name="nonexistent")
+        assert "No knowledge or alerts found" in result
+
+    @pytest.mark.anyio
+    async def test_project_context_with_entries(self) -> None:
+        await server_mod.remember(
+            source="test-project",
+            tags=["my-repo"],
+            description="Architecture uses 4-file layout.",
+        )
+        result = await server_mod.project_context(repo_name="my-repo")
+        assert "# Project Context: my-repo" in result
+        assert "Architecture uses 4-file layout" in result
+
+    @pytest.mark.anyio
+    async def test_system_status_empty(self) -> None:
+        result = await server_mod.system_status(source="nonexistent")
+        assert "No status or alerts found" in result
+
+    @pytest.mark.anyio
+    async def test_system_status_with_data(self) -> None:
+        await server_mod.report_status(
+            source="test-nas",
+            tags=["infra"],
+            metrics={"cpu": 45, "memory": 60},
+        )
+        result = await server_mod.system_status(source="test-nas")
+        assert "# System Status: test-nas" in result
+        assert "cpu: 45" in result
+
+    @pytest.mark.anyio
+    async def test_write_guide(self) -> None:
+        await server_mod.remember(
+            source="test-src", tags=["alpha", "beta"], description="test note"
+        )
+        result = await server_mod.write_guide()
+        assert "# Awareness Write Guide" in result
+        assert "test-src" in result
+        assert "alpha" in result
+
+    @pytest.mark.anyio
+    async def test_catchup_empty(self) -> None:
+        result = await server_mod.catchup(hours=24)
+        assert "Nothing changed" in result
+
+    @pytest.mark.anyio
+    async def test_catchup_with_recent(self) -> None:
+        await server_mod.remember(source="test-src", tags=["t"], description="recent note")
+        result = await server_mod.catchup(hours=24)
+        assert "recent note" in result
+        assert "[new]" in result
+
+
+class TestCustomPrompts:
+    @pytest.mark.anyio
+    async def test_custom_prompt_no_vars(self) -> None:
+        """Custom prompt with no template variables."""
+        await server_mod.remember(
+            source="custom-prompt",
+            tags=["prompt"],
+            description="Daily standup summary",
+            content="Summarize all active alerts and recent changes.",
+            logical_key="standup",
+        )
+        server_mod._sync_custom_prompts()
+        pm = server_mod.mcp._prompt_manager
+        assert "user/standup" in pm._prompts
+        prompt = pm._prompts["user/standup"]
+        assert prompt.description == "Daily standup summary"
+
+    @pytest.mark.anyio
+    async def test_custom_prompt_with_vars(self) -> None:
+        """Custom prompt extracts {{var}} as arguments."""
+        await server_mod.remember(
+            source="custom-prompt",
+            tags=["prompt"],
+            description="Project review",
+            content="Review project {{repo_name}} focusing on {{area}}.",
+            logical_key="project-review",
+        )
+        server_mod._sync_custom_prompts()
+        pm = server_mod.mcp._prompt_manager
+        prompt = pm._prompts["user/project-review"]
+        arg_names = [a.name for a in (prompt.arguments or [])]
+        assert "repo_name" in arg_names
+        assert "area" in arg_names
+
+    @pytest.mark.anyio
+    async def test_custom_prompt_renders(self) -> None:
+        """Custom prompt renders template variables."""
+        await server_mod.remember(
+            source="custom-prompt",
+            tags=["prompt"],
+            description="Greeting",
+            content="Hello {{name}}, welcome to {{project}}!",
+            logical_key="greeting",
+        )
+        server_mod._sync_custom_prompts()
+        pm = server_mod.mcp._prompt_manager
+        prompt = pm._prompts["user/greeting"]
+        result = await prompt.fn(name="Chris", project="awareness")
+        assert result == "Hello Chris, welcome to awareness!"
+
+    @pytest.mark.anyio
+    async def test_custom_prompt_removal(self) -> None:
+        """Deleted custom prompts are removed on next sync."""
+        await server_mod.remember(
+            source="custom-prompt",
+            tags=["prompt"],
+            description="Temporary",
+            content="temp",
+            logical_key="temp",
+        )
+        server_mod._sync_custom_prompts()
+        pm = server_mod.mcp._prompt_manager
+        assert "user/temp" in pm._prompts
+        # Delete and re-sync
+        entry_id = server_mod.store.get_entries(source="custom-prompt")[0].id
+        server_mod.store.soft_delete_by_id(entry_id)
+        server_mod._sync_custom_prompts()
+        assert "user/temp" not in pm._prompts

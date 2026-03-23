@@ -468,6 +468,29 @@ class PostgresStore:
         self._conn.commit()
         return affected > 0
 
+    def soft_delete_by_tags(self, tags: list[str]) -> int:
+        """Soft-delete all entries matching ALL given tags (AND logic).
+
+        Returns the number of trashed entries.
+        """
+        if not tags:
+            return 0
+        now = datetime.now(timezone.utc)
+        expires = now + timedelta(days=TRASH_RETENTION_DAYS)
+        # AND: entry must contain every tag — use @> for each
+        tag_clauses = " AND ".join("tags @> %s::jsonb" for _ in tags)
+        params: list[Any] = [now, expires]
+        params.extend(json.dumps([t]) for t in tags)
+        with self._conn.cursor() as cur:
+            cur.execute(
+                f"UPDATE entries SET deleted = %s, expires = %s "
+                f"WHERE {self._ACTIVE} AND {tag_clauses}",
+                tuple(params),
+            )
+            affected = cur.rowcount
+        self._conn.commit()
+        return affected
+
     def soft_delete_by_source(
         self,
         source: str,
@@ -509,6 +532,25 @@ class PostgresStore:
             affected = cur.rowcount
         self._conn.commit()
         return affected > 0
+
+    def restore_by_tags(self, tags: list[str]) -> int:
+        """Restore all soft-deleted entries matching ALL given tags (AND logic).
+
+        Returns the number of restored entries.
+        """
+        if not tags:
+            return 0
+        tag_clauses = " AND ".join("tags @> %s::jsonb" for _ in tags)
+        params = [json.dumps([t]) for t in tags]
+        with self._conn.cursor() as cur:
+            cur.execute(
+                "UPDATE entries SET deleted = NULL, expires = NULL "
+                f"WHERE deleted IS NOT NULL AND {tag_clauses}",
+                tuple(params),
+            )
+            affected = cur.rowcount
+        self._conn.commit()
+        return affected
 
     def clear(self) -> None:
         with self._conn.cursor() as cur:

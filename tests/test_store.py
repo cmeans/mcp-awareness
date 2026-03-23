@@ -614,3 +614,125 @@ def test_upsert_preference_updates_existing(store):
     prefs = store.get_entries(entry_type=EntryType.PREFERENCE)
     assert len(prefs) == 1
     assert prefs[0].data["value"] == "light"
+
+
+# ------------------------------------------------------------------
+# Delete by tags
+# ------------------------------------------------------------------
+
+
+def test_soft_delete_by_tags_and_logic(store):
+    """Only entries matching ALL tags are deleted."""
+    store.add(
+        Entry(
+            id=make_id(),
+            type=EntryType.NOTE,
+            source="test",
+            tags=["qa", "project"],
+            created=now_utc(),
+            updated=now_utc(),
+            expires=None,
+            data={"description": "both tags"},
+        )
+    )
+    store.add(
+        Entry(
+            id=make_id(),
+            type=EntryType.NOTE,
+            source="test",
+            tags=["qa"],
+            created=now_utc(),
+            updated=now_utc(),
+            expires=None,
+            data={"description": "only qa"},
+        )
+    )
+    store.add(
+        Entry(
+            id=make_id(),
+            type=EntryType.NOTE,
+            source="test",
+            tags=["project"],
+            created=now_utc(),
+            updated=now_utc(),
+            expires=None,
+            data={"description": "only project"},
+        )
+    )
+    count = store.soft_delete_by_tags(["qa", "project"])
+    assert count == 1
+    remaining = store.get_entries()
+    assert len(remaining) == 2
+    descs = {e.data["description"] for e in remaining}
+    assert descs == {"only qa", "only project"}
+
+
+def test_soft_delete_by_tags_empty(store):
+    """Empty tag list deletes nothing."""
+    store.add(
+        Entry(
+            id=make_id(),
+            type=EntryType.NOTE,
+            source="test",
+            tags=["qa"],
+            created=now_utc(),
+            updated=now_utc(),
+            expires=None,
+            data={"description": "test"},
+        )
+    )
+    assert store.soft_delete_by_tags([]) == 0
+    assert len(store.get_entries()) == 1
+
+
+def test_soft_delete_by_tags_single(store):
+    """Single tag matches all entries with that tag."""
+    for i in range(3):
+        store.add(
+            Entry(
+                id=make_id(),
+                type=EntryType.NOTE,
+                source="test",
+                tags=["qa-test"] if i < 2 else ["other"],
+                created=now_utc(),
+                updated=now_utc(),
+                expires=None,
+                data={"description": f"note-{i}"},
+            )
+        )
+    count = store.soft_delete_by_tags(["qa-test"])
+    assert count == 2
+    assert len(store.get_entries()) == 1
+
+
+# ------------------------------------------------------------------
+# Restore by tags
+# ------------------------------------------------------------------
+
+
+def test_restore_by_tags(store):
+    """Restore trashed entries matching ALL tags."""
+    for i in range(3):
+        entry = store.add(
+            Entry(
+                id=make_id(),
+                type=EntryType.NOTE,
+                source="test",
+                tags=["qa-test", "batch"] if i < 2 else ["other"],
+                created=now_utc(),
+                updated=now_utc(),
+                expires=None,
+                data={"description": f"note-{i}"},
+            )
+        )
+        store.soft_delete_by_id(entry.id)
+    assert len(store.get_deleted()) == 3
+    restored = store.restore_by_tags(["qa-test", "batch"])
+    assert restored == 2
+    assert len(store.get_entries()) == 2
+    assert len(store.get_deleted()) == 1
+
+
+def test_restore_by_tags_empty(store):
+    """Empty tag list restores nothing."""
+    assert store.restore_by_tags([]) == 0
