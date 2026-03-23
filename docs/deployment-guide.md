@@ -33,7 +33,7 @@ When you're ready for a stable URL, continue to the secure deployment section be
 - Docker and Docker Compose
 - [cloudflared](https://github.com/cloudflare/cloudflared/releases) installed
 - A [Cloudflare account](https://dash.cloudflare.com/sign-up) with a domain (for named tunnel)
-- A [Claude.ai](https://claude.ai) account (Pro plan or higher recommended; free plan may work but is unverified)
+- An MCP-compatible AI client (Claude.ai, Claude Desktop, Claude Code, Cursor, VS Code, etc.). Best results with capable models like Claude Sonnet 4.6 or Opus 4.6
 
 ## Quick start (local only)
 
