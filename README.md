@@ -9,7 +9,7 @@
 
 ## What this is
 
-`mcp-awareness` is shared memory for every AI you use. Any AI assistant can store and retrieve knowledge through it using the open [Model Context Protocol](https://modelcontextprotocol.io/) (MCP). Self-host it today, or use the managed service when it launches. It works with Claude.ai, Claude Code, Claude Desktop, Claude mobile (Android/iOS), Cursor, and any other MCP-compatible client.
+`mcp-awareness` is shared memory for every AI you use. Any AI assistant can store and retrieve knowledge through it using the open [Model Context Protocol](https://modelcontextprotocol.io/) (MCP). Self-host it today, or use the managed service when it launches. It works with any MCP-compatible client — Claude (all platforms), Cursor, VS Code, and more.
 
 **The problem:** Every AI platform keeps its own memory silo. What you teach Claude doesn't exist in ChatGPT. Your desktop assistant's context doesn't follow you to mobile. Switch platforms, and you start over.
 
@@ -126,7 +126,7 @@ curl -sSL https://raw.githubusercontent.com/cmeans/mcp-awareness/main/install-de
 
 > **Prefer to review the script first?** [View it on GitHub](https://github.com/cmeans/mcp-awareness/blob/main/install-demo.sh), then download and run locally.
 
-This starts the Awareness server, Postgres, and a Cloudflare quick tunnel. You'll get a public URL and ready-to-paste config snippets for Claude.ai, Claude Desktop, Claude Code, Cursor, and VS Code. The instance comes pre-loaded with demo data — your AI will discover it automatically.
+This starts the Awareness server, Postgres, and a Cloudflare quick tunnel. You'll get a public URL and ready-to-paste config snippets for all major MCP clients. The instance comes pre-loaded with demo data — your AI will discover it automatically.
 
 > **Note:** The tunnel URL is ephemeral — it changes on restart. For a stable URL, see the [Deployment Guide](docs/deployment-guide.md).
 
@@ -184,7 +184,7 @@ mypy src/mcp_awareness/    # type check
 
 ## Tools
 
-The server exposes 18 MCP tools. Clients that support MCP resources also get 6 read-only resources, but since many clients (including Claude.ai) only surface tools, every resource has a tool mirror.
+The server exposes 18 MCP tools. Clients that support MCP resources also get 6 read-only resources, but since not all clients surface resources, every resource has a tool mirror.
 
 ### Read tools
 
@@ -232,7 +232,7 @@ See [Security considerations](docs/deployment-guide.md#security-considerations) 
 
 ## Current status
 
-**Working end-to-end** — deployed on `mcpawareness.com` via Cloudflare Tunnel with WAF protection. Tested with Claude.ai, Claude Code, Claude Desktop, Claude mobile (Android), Cursor, and VS Code.
+**Working end-to-end** — deployed on `mcpawareness.com` via Cloudflare Tunnel with WAF protection. Tested with Claude (all platforms), Cursor, and VS Code.
 
 ### Getting started
 - **One-line demo install** — `curl | bash` sets up Awareness + Postgres + Cloudflare quick tunnel with pre-loaded demo data and a `getting-started` prompt that personalizes your instance
@@ -332,7 +332,7 @@ The system doesn't just store what happened — it helps you decide what to do a
 
 ## How it's built
 
-This project is built using the thing it builds. Multiple AI instances across platforms — Claude.ai, Claude Code, Claude Desktop, Claude mobile — collaborate through awareness itself, and the friction they encounter drives the features they propose.
+This project is built using the thing it builds. Multiple AI instances across platforms collaborate through awareness itself, and the friction they encounter drives the features they propose.
 
 ### The feedback loop in action
 
