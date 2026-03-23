@@ -7,14 +7,14 @@ import json
 import pytest
 
 from mcp_awareness import server as server_mod
-from mcp_awareness.store import SQLiteStore
+from mcp_awareness.postgres_store import PostgresStore
+from mcp_awareness.store import Store
 
 
 @pytest.fixture(autouse=True)
-def _use_temp_store(tmp_path: object, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Replace the module-level store with a fresh temp store for each test."""
-    temp_store = SQLiteStore(f"{tmp_path}/test.db")
-    monkeypatch.setattr(server_mod, "store", temp_store)
+def _use_temp_store(store: Store, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Replace the module-level store with the conftest Postgres store for each test."""
+    monkeypatch.setattr(server_mod, "store", store)
 
 
 # ---------------------------------------------------------------------------
@@ -22,7 +22,7 @@ def _use_temp_store(tmp_path: object, monkeypatch: pytest.MonkeyPatch) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _store() -> SQLiteStore:
+def _store() -> PostgresStore:
     return server_mod.store  # type: ignore[return-value]
 
 
@@ -1113,3 +1113,113 @@ class TestCustomPrompts:
         server_mod.store.soft_delete_by_id(entry_id)
         server_mod._sync_custom_prompts()
         assert "user/temp" not in pm._prompts
+
+
+# ---------------------------------------------------------------------------
+# List mode and since filter
+# ---------------------------------------------------------------------------
+
+
+class TestListModeAndSince:
+    @pytest.mark.anyio
+    async def test_get_knowledge_list_mode(self) -> None:
+        s = _store()
+        from mcp_awareness.schema import Entry, EntryType, make_id, now_utc
+
+        s.add(
+            Entry(
+                id=make_id(),
+                type=EntryType.NOTE,
+                source="test",
+                tags=["demo"],
+                created=now_utc(),
+                updated=now_utc(),
+                expires=None,
+                data={"description": "A test note", "content": "lots of content here"},
+            )
+        )
+        # Full mode — includes data with content
+        full = json.loads(await server_mod.get_knowledge())
+        assert len(full) == 1
+        assert "data" in full[0]
+        assert full[0]["data"].get("content") == "lots of content here"
+
+        # List mode — metadata only, no data/content
+        listing = json.loads(await server_mod.get_knowledge(mode="list"))
+        assert len(listing) == 1
+        assert "data" not in listing[0]
+        assert listing[0]["description"] == "A test note"
+        assert listing[0]["source"] == "test"
+        assert listing[0]["tags"] == ["demo"]
+
+    @pytest.mark.anyio
+    async def test_get_alerts_list_mode(self) -> None:
+        s = _store()
+        s.upsert_alert(
+            "nas", ["infra"], "a1",
+            {"alert_id": "a1", "level": "warning", "message": "CPU high", "resolved": False},
+        )
+        full = json.loads(await server_mod.get_alerts())
+        assert "data" in full[0]
+        listing = json.loads(await server_mod.get_alerts(mode="list"))
+        assert "data" not in listing[0]
+
+    @pytest.mark.anyio
+    async def test_get_knowledge_since(self) -> None:
+        from datetime import datetime, timedelta, timezone
+
+        from mcp_awareness.schema import Entry, EntryType, make_id
+
+        s = _store()
+        old = datetime.now(timezone.utc) - timedelta(hours=2)
+        s.add(
+            Entry(
+                id=make_id(),
+                type=EntryType.NOTE,
+                source="test",
+                tags=[],
+                created=old,
+                updated=old,
+                expires=None,
+                data={"description": "old note"},
+            )
+        )
+        s.add(
+            Entry(
+                id=make_id(),
+                type=EntryType.NOTE,
+                source="test",
+                tags=[],
+                created=datetime.now(timezone.utc),
+                updated=datetime.now(timezone.utc),
+                expires=None,
+                data={"description": "recent note"},
+            )
+        )
+        cutoff = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
+        result = json.loads(await server_mod.get_knowledge(since=cutoff))
+        assert len(result) == 1
+        assert result[0]["data"]["description"] == "recent note"
+
+    @pytest.mark.anyio
+    async def test_get_deleted_list_mode(self) -> None:
+        from mcp_awareness.schema import Entry, EntryType, make_id, now_utc
+
+        s = _store()
+        entry = s.add(
+            Entry(
+                id=make_id(),
+                type=EntryType.NOTE,
+                source="test",
+                tags=["demo"],
+                created=now_utc(),
+                updated=now_utc(),
+                expires=None,
+                data={"description": "will delete", "content": "big content"},
+            )
+        )
+        s.soft_delete_by_id(entry.id)
+        listing = json.loads(await server_mod.get_deleted(mode="list"))
+        assert len(listing) == 1
+        assert "data" not in listing[0]
+        assert listing[0]["description"] == "will delete"

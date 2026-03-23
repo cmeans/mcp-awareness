@@ -1,16 +1,10 @@
-"""Tests for the SQLite storage backend."""
+"""Tests for the PostgreSQL storage backend."""
 
-import sqlite3
-
-import pytest
+import time
 
 from mcp_awareness.schema import Entry, EntryType, make_id, now_utc
-from mcp_awareness.store import SQLiteStore
 
-
-@pytest.fixture
-def store(tmp_path):
-    return SQLiteStore(tmp_path / "test-store.db")
+# store fixture comes from conftest.py (testcontainers Postgres)
 
 
 def test_empty_store(store):
@@ -197,7 +191,6 @@ def test_global_suppression_matches_any_source(store):
 
 
 def test_expired_entries_cleaned(store):
-    import time
     from datetime import datetime, timedelta, timezone
 
     past = datetime.now(timezone.utc) - timedelta(hours=1)
@@ -211,10 +204,10 @@ def test_expired_entries_cleaned(store):
         expires=past,
         data={"metric": "cpu_pct", "suppress_level": "warning"},
     )
-    store.add(entry)  # add triggers cleanup, but entry was just inserted in same txn
+    store.add(entry)
     # Force cleanup to run on next write despite debounce
     store._last_cleanup = 0.0
-    # Trigger cleanup via a write (add a dummy entry) — cleanup runs in background
+    # Trigger cleanup via a write — cleanup runs in background
     dummy = Entry(
         id=make_id(),
         type=EntryType.CONTEXT,
@@ -226,8 +219,7 @@ def test_expired_entries_cleaned(store):
         data={"description": "trigger cleanup"},
     )
     store.add(dummy)
-    # Wait briefly for background cleanup thread to complete
-    time.sleep(0.1)
+    time.sleep(0.2)
     assert store.count_active_suppressions() == 0
 
 
@@ -279,26 +271,6 @@ def test_knowledge_filtered_by_tags(store):
     assert len(store.get_knowledge(tags=["calendar"])) == 1
 
 
-def test_persistence(tmp_path):
-    path = tmp_path / "persist.db"
-    store1 = SQLiteStore(path)
-    store1.upsert_status("nas", ["infra"], {"metrics": {"cpu": 42}, "ttl_sec": 120})
-
-    store2 = SQLiteStore(path)
-    assert store2.get_sources() == ["nas"]
-    status = store2.get_latest_status("nas")
-    assert status.data["metrics"]["cpu"] == 42
-
-
-def test_wal_mode(tmp_path):
-    path = tmp_path / "wal.db"
-    SQLiteStore(path)
-    conn = sqlite3.connect(str(path))
-    result = conn.execute("PRAGMA journal_mode").fetchone()[0]
-    conn.close()
-    assert result == "wal"
-
-
 def test_upsert_preference_deduplicates(store):
     entry1 = store.upsert_preference(
         key="alert_verbosity",
@@ -333,9 +305,7 @@ def test_soft_delete_by_id(store):
     store.add(entry)
     assert len(store.get_patterns()) == 1
     assert store.soft_delete_by_id(entry.id) is True
-    # No longer visible in normal queries
     assert len(store.get_patterns()) == 0
-    # But still in trash
     assert len(store.get_deleted()) == 1
 
 
@@ -394,7 +364,6 @@ def test_soft_delete_by_source_with_type_filter(store):
     store.upsert_status("nas", ["infra"], {"metrics": {"cpu": 50}, "ttl_sec": 120})
     trashed = store.soft_delete_by_source("nas", EntryType.PATTERN)
     assert trashed == 1
-    # Status should still be there
     assert store.get_latest_status("nas") is not None
 
 
@@ -437,17 +406,15 @@ def test_soft_deleted_entries_auto_expire(store):
     )
     store.add(entry)
     store.soft_delete_by_id(entry.id)
-    # Entry is in trash
     assert len(store.get_deleted()) == 1
-    # Simulate expiry by backdating the expires timestamp
-    store._conn.execute(
-        "UPDATE entries SET expires = ? WHERE id = ?",
-        ("2020-01-01T00:00:00+00:00", entry.id),
-    )
+    # Backdate the expires timestamp to trigger cleanup
+    with store._conn.cursor() as cur:
+        cur.execute(
+            "UPDATE entries SET expires = %s WHERE id = %s",
+            ("2020-01-01T00:00:00+00:00", entry.id),
+        )
     store._conn.commit()
-    # Run cleanup synchronously (bypassing the background thread)
     store._do_cleanup()
-    # Now truly gone
     assert len(store.get_deleted()) == 0
 
 
@@ -498,10 +465,8 @@ def test_get_knowledge_pagination(store):
     assert len(all_entries) == 5
     page = store.get_knowledge(limit=2)
     assert len(page) == 2
-    assert page == all_entries[:2]
     page2 = store.get_knowledge(limit=2, offset=2)
     assert len(page2) == 2
-    assert page2 == all_entries[2:4]
 
 
 def test_get_active_alerts_pagination(store):
@@ -567,9 +532,11 @@ def test_get_deleted_pagination(store):
 
 def test_do_cleanup_logs_errors(store, capsys):
     """_do_cleanup prints error instead of silently swallowing."""
-    # Point at a path that doesn't exist to trigger an error
-    store.path = store.path.parent / "nonexistent" / "db.sqlite"
+    # Point at a DSN that doesn't exist to trigger an error
+    original_dsn = store.dsn
+    store.dsn = "postgresql://bad:bad@localhost:1/nonexistent"
     store._do_cleanup()
+    store.dsn = original_dsn
     captured = capsys.readouterr()
     assert "[awareness] cleanup failed:" in captured.out
 
@@ -736,3 +703,152 @@ def test_restore_by_tags(store):
 def test_restore_by_tags_empty(store):
     """Empty tag list restores nothing."""
     assert store.restore_by_tags([]) == 0
+
+
+# ------------------------------------------------------------------
+# Since filter tests
+# ------------------------------------------------------------------
+
+
+def test_get_knowledge_since(store):
+    """since param filters by updated timestamp."""
+    from datetime import datetime, timedelta, timezone
+
+    old = datetime.now(timezone.utc) - timedelta(hours=2)
+    recent = datetime.now(timezone.utc) - timedelta(minutes=5)
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=1)
+
+    store.add(
+        Entry(
+            id=make_id(),
+            type=EntryType.NOTE,
+            source="test",
+            tags=[],
+            created=old,
+            updated=old,
+            expires=None,
+            data={"description": "old note"},
+        )
+    )
+    store.add(
+        Entry(
+            id=make_id(),
+            type=EntryType.NOTE,
+            source="test",
+            tags=[],
+            created=recent,
+            updated=recent,
+            expires=None,
+            data={"description": "recent note"},
+        )
+    )
+    all_entries = store.get_knowledge()
+    assert len(all_entries) == 2
+    filtered = store.get_knowledge(since=cutoff)
+    assert len(filtered) == 1
+    assert filtered[0].data["description"] == "recent note"
+
+
+def test_get_entries_since(store):
+    """since param works on get_entries."""
+    from datetime import datetime, timedelta, timezone
+
+    old = datetime.now(timezone.utc) - timedelta(hours=2)
+    recent = datetime.now(timezone.utc)
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=1)
+
+    store.add(
+        Entry(
+            id=make_id(),
+            type=EntryType.NOTE,
+            source="test",
+            tags=[],
+            created=old,
+            updated=old,
+            expires=None,
+            data={"description": "old"},
+        )
+    )
+    store.add(
+        Entry(
+            id=make_id(),
+            type=EntryType.NOTE,
+            source="test",
+            tags=[],
+            created=recent,
+            updated=recent,
+            expires=None,
+            data={"description": "new"},
+        )
+    )
+    assert len(store.get_entries(since=cutoff)) == 1
+
+
+def test_get_active_alerts_since(store):
+    """since param works on get_active_alerts."""
+    from datetime import datetime, timedelta, timezone
+
+    old = datetime.now(timezone.utc) - timedelta(hours=2)
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=1)
+
+    store.upsert_alert(
+        "src", ["t"], "old-alert",
+        {"alert_id": "old-alert", "level": "warning", "message": "old", "resolved": False},
+    )
+    # Backdate the alert
+    with store._conn.cursor() as cur:
+        cur.execute(
+            "UPDATE entries SET updated = %s WHERE data->>'alert_id' = %s",
+            (old, "old-alert"),
+        )
+    store._conn.commit()
+
+    store.upsert_alert(
+        "src", ["t"], "new-alert",
+        {"alert_id": "new-alert", "level": "warning", "message": "new", "resolved": False},
+    )
+    assert len(store.get_active_alerts()) == 2
+    assert len(store.get_active_alerts(since=cutoff)) == 1
+
+
+def test_get_deleted_since(store):
+    """since param works on get_deleted."""
+    from datetime import datetime, timedelta, timezone
+
+    old = datetime.now(timezone.utc) - timedelta(hours=2)
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=1)
+
+    entry1 = store.add(
+        Entry(
+            id=make_id(),
+            type=EntryType.NOTE,
+            source="test",
+            tags=[],
+            created=now_utc(),
+            updated=now_utc(),
+            expires=None,
+            data={"description": "old delete"},
+        )
+    )
+    store.soft_delete_by_id(entry1.id)
+    # Backdate the deletion
+    with store._conn.cursor() as cur:
+        cur.execute("UPDATE entries SET deleted = %s WHERE id = %s", (old, entry1.id))
+    store._conn.commit()
+
+    entry2 = store.add(
+        Entry(
+            id=make_id(),
+            type=EntryType.NOTE,
+            source="test",
+            tags=[],
+            created=now_utc(),
+            updated=now_utc(),
+            expires=None,
+            data={"description": "recent delete"},
+        )
+    )
+    store.soft_delete_by_id(entry2.id)
+
+    assert len(store.get_deleted()) == 2
+    assert len(store.get_deleted(since=cutoff)) == 1

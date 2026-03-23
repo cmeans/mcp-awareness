@@ -18,12 +18,11 @@ COPY alembic/ alembic/
 COPY docker-entrypoint.sh ./
 COPY seed-demo.sql seed_demo.py ./
 
-RUN pip install --no-cache-dir ".[postgres]" \
+RUN pip install --no-cache-dir . \
     && useradd --system --no-create-home awareness \
     && mkdir -p /app/data \
     && chown -R awareness:awareness /app
 
-ENV AWARENESS_DATA_DIR=/app/data
 ENV AWARENESS_TRANSPORT=streamable-http
 ENV AWARENESS_HOST=0.0.0.0
 ENV AWARENESS_PORT=8420

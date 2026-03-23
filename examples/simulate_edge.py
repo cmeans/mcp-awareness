@@ -23,11 +23,11 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from mcp_awareness.collator import generate_briefing
 from mcp_awareness.schema import Entry, EntryType, make_id, now_iso
-from mcp_awareness.store import SQLiteStore
+from mcp_awareness.postgres_store import PostgresStore
 
 
-def simulate(data_dir: str = "./data") -> None:
-    store = SQLiteStore(Path(data_dir) / "awareness.db")
+def simulate(dsn: str = "postgresql://awareness:awareness-dev@localhost:5432/awareness") -> None:
+    store = PostgresStore(dsn)
 
     # -----------------------------------------------------------------------
     # 1. System awareness — edge process reporting status and alerts

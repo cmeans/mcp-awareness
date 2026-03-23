@@ -96,6 +96,21 @@ class Entry:
             d["logical_key"] = self.logical_key
         return d
 
+    def to_list_dict(self) -> dict[str, Any]:
+        """Lightweight metadata-only representation — no content or changelog."""
+        d: dict[str, Any] = {
+            "id": self.id,
+            "type": self.type.value if isinstance(self.type, EntryType) else self.type,
+            "source": self.source,
+            "tags": self.tags,
+            "description": self.data.get("description", ""),
+            "created": to_iso(self.created),
+            "updated": to_iso(self.updated),
+        }
+        if self.logical_key is not None:
+            d["logical_key"] = self.logical_key
+        return d
+
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> Entry:
         return cls(
