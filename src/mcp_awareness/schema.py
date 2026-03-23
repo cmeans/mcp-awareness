@@ -21,7 +21,7 @@ class EntryType(str, Enum):
 
 
 # Valid states for the INTENTION lifecycle
-INTENTION_STATES = {"pending", "fired", "completed", "snoozed", "cancelled"}
+INTENTION_STATES = {"pending", "fired", "active", "completed", "snoozed", "cancelled"}
 
 
 SEVERITY_RANK = {
