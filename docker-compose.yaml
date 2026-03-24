@@ -3,7 +3,7 @@ name: mcp-awareness
 
 services:
   mcp-awareness:
-    image: ghcr.io/cmeans/mcp-awareness:0.9.0
+    image: ghcr.io/cmeans/mcp-awareness:0.10.0
     # For local development, comment out 'image' and uncomment 'build':
     # build: .
     container_name: mcp-awareness
@@ -87,11 +87,24 @@ services:
 
   # Ollama — local embedding model for semantic search
   # Usage: docker compose --profile embeddings up -d
-  # Then: docker exec awareness-ollama ollama pull nomic-embed-text
+  # Model is pulled automatically on first start (cached in volume for restarts).
   ollama:
     image: ollama/ollama:latest
     container_name: awareness-ollama
     restart: unless-stopped
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        # Start Ollama server in background
+        ollama serve &
+        # Wait for server to be ready
+        until ollama list > /dev/null 2>&1; do sleep 1; done
+        # Pull model if not already cached
+        ollama pull ${AWARENESS_EMBEDDING_MODEL:-nomic-embed-text}
+        # Keep container alive (wait on background server)
+        wait
+    environment:
+      - AWARENESS_EMBEDDING_MODEL=${AWARENESS_EMBEDDING_MODEL:-nomic-embed-text}
     volumes:
       - ${AWARENESS_OLLAMA_DATA:-~/awareness-ollama}:/root/.ollama
     deploy:
@@ -100,11 +113,11 @@ services:
           cpus: '1.0'
           memory: 2G
     healthcheck:
-      test: ["CMD", "curl", "-sf", "http://localhost:11434/api/tags"]
+      test: ["CMD-SHELL", "ollama list | grep -q ${AWARENESS_EMBEDDING_MODEL:-nomic-embed-text}"]
       interval: 30s
       timeout: 10s
-      retries: 3
-      start_period: 30s
+      retries: 10
+      start_period: 60s
     profiles:
       - embeddings
 
