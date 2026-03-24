@@ -302,6 +302,78 @@ class TestLearnPatternTool:
         assert patterns[0].data["effect"] == ""
 
 
+class TestInputValidation:
+    @pytest.mark.anyio
+    async def test_report_alert_invalid_level(self) -> None:
+        result = json.loads(
+            await server_mod.report_alert(
+                source="nas", tags=["infra"], alert_id="x",
+                level="bogus", alert_type="threshold", message="test",
+            )
+        )
+        assert "error" in result
+        assert "invalid level" in result["error"]
+
+    @pytest.mark.anyio
+    async def test_report_alert_invalid_type(self) -> None:
+        result = json.loads(
+            await server_mod.report_alert(
+                source="nas", tags=["infra"], alert_id="x",
+                level="warning", alert_type="bogus", message="test",
+            )
+        )
+        assert "error" in result
+        assert "invalid alert_type" in result["error"]
+
+    @pytest.mark.anyio
+    async def test_suppress_alert_invalid_level(self) -> None:
+        result = json.loads(
+            await server_mod.suppress_alert(source="nas", level="bogus")
+        )
+        assert "error" in result
+        assert "invalid level" in result["error"]
+
+    @pytest.mark.anyio
+    async def test_suppress_alert_zero_duration(self) -> None:
+        result = json.loads(
+            await server_mod.suppress_alert(source="nas", duration_minutes=0)
+        )
+        assert "error" in result
+        assert "duration_minutes" in result["error"]
+
+    @pytest.mark.anyio
+    async def test_remind_invalid_urgency(self) -> None:
+        result = json.loads(
+            await server_mod.remind(
+                goal="test", source="test", tags=[], urgency="bogus",
+            )
+        )
+        assert "error" in result
+        assert "invalid urgency" in result["error"]
+
+    @pytest.mark.anyio
+    async def test_add_context_zero_expires_days(self) -> None:
+        result = json.loads(
+            await server_mod.add_context(
+                source="test", tags=[], description="test", expires_days=0,
+            )
+        )
+        assert "error" in result
+        assert "expires_days" in result["error"]
+
+    @pytest.mark.anyio
+    async def test_get_knowledge_negative_offset(self) -> None:
+        result = json.loads(await server_mod.get_knowledge(offset=-1))
+        assert "error" in result
+        assert "offset" in result["error"]
+
+    @pytest.mark.anyio
+    async def test_get_knowledge_negative_limit(self) -> None:
+        result = json.loads(await server_mod.get_knowledge(limit=-1))
+        assert "error" in result
+        assert "limit" in result["error"]
+
+
 class TestSuppressAlertTool:
     @pytest.mark.anyio
     async def test_suppress_alert(self) -> None:

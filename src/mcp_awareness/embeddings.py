@@ -125,6 +125,7 @@ def compose_embedding_text(entry: Entry) -> str:
     string that captures the semantic meaning of the entry.
     """
     parts: list[str] = []
+    parts.append(f"type: {entry.type.value}")
     parts.append(f"source: {entry.source}")
     if entry.tags:
         parts.append(f"tags: {', '.join(entry.tags)}")

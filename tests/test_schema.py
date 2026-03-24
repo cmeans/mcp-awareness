@@ -7,9 +7,36 @@ from mcp_awareness.schema import (
     EntryType,
     make_id,
     now_utc,
+    parse_iso,
     severity_rank,
     validate_entry_data,
 )
+
+
+def test_parse_iso_with_z_suffix():
+    dt = parse_iso("2026-03-24T12:00:00Z")
+    assert dt.tzinfo is not None
+    assert dt.utcoffset().total_seconds() == 0
+
+
+def test_parse_iso_with_offset():
+    dt = parse_iso("2026-03-24T12:00:00-05:00")
+    assert dt.tzinfo is not None
+    assert dt.utcoffset().total_seconds() == -5 * 3600
+
+
+def test_parse_iso_naive_gets_utc():
+    """Naive datetime (no timezone) should be treated as UTC."""
+    dt = parse_iso("2026-03-24T12:00:00")
+    assert dt.tzinfo is not None
+    assert dt.utcoffset().total_seconds() == 0
+
+
+def test_parse_iso_invalid_raises():
+    import pytest
+
+    with pytest.raises(ValueError):
+        parse_iso("not-a-date")
 
 
 def test_entry_roundtrip():
