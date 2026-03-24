@@ -58,9 +58,12 @@ class PostgresStore:
             if self.__conn.closed:
                 self.__conn = self._new_conn()
             else:
+                # Rollback first in case a previous transaction left the connection
+                # in INERROR state (e.g., a failed query that wasn't rolled back).
+                self.__conn.rollback()
                 self.__conn.execute("SELECT 1")
                 self.__conn.rollback()
-        except (psycopg.OperationalError, psycopg.InterfaceError):
+        except (psycopg.OperationalError, psycopg.InterfaceError, psycopg.DatabaseError):
             with contextlib.suppress(Exception):
                 self.__conn.close()
             self.__conn = self._new_conn()
