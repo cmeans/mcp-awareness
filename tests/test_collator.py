@@ -525,13 +525,12 @@ class TestGenerateBriefing:
     def test_stale_source_detection(self, store):
         old = datetime.now(timezone.utc) - timedelta(seconds=300)
         store.upsert_status("nas", ["infra"], {"metrics": {}, "ttl_sec": 120})
-        with store._conn.cursor() as cur:
+        with store._pool.connection() as conn, conn.cursor() as cur:
             cur.execute(
                 "UPDATE entries SET updated = %s, created = %s"
                 " WHERE type = 'status' AND source = 'nas'",
                 (old, old),
             )
-        store._conn.commit()
         briefing = generate_briefing(store)
         assert briefing["attention_needed"] is True
         assert briefing["sources"]["nas"]["status"] == "stale"
@@ -750,13 +749,12 @@ class TestGenerateBriefing:
         )
         # Backdate to make source stale
         old = datetime.now(timezone.utc) - timedelta(seconds=300)
-        with store._conn.cursor() as cur:
+        with store._pool.connection() as conn, conn.cursor() as cur:
             cur.execute(
                 "UPDATE entries SET updated = %s, created = %s"
                 " WHERE type = 'status' AND source = 'nas'",
                 (old, old),
             )
-        store._conn.commit()
         briefing = generate_briefing(store)
         ev = briefing["evaluation"]
         assert ev["stale_sources"] == 1
@@ -771,13 +769,12 @@ class TestGenerateBriefing:
         store.upsert_status("nas", ["infra"], {"metrics": {}, "ttl_sec": 120})
         # Backdate to make it stale
         old = datetime.now(timezone.utc) - timedelta(seconds=300)
-        with store._conn.cursor() as cur:
+        with store._pool.connection() as conn, conn.cursor() as cur:
             cur.execute(
                 "UPDATE entries SET updated = %s, created = %s"
                 " WHERE type = 'status' AND source = 'nas'",
                 (old, old),
             )
-        store._conn.commit()
         briefing = generate_briefing(store)
         ev = briefing["evaluation"]
         assert ev["stale_sources"] == 1

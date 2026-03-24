@@ -40,9 +40,10 @@ Every PR that changes functionality must include:
 
 1. Feature PRs add changelog entries under `[Unreleased]`
 2. When ready to release, rename `[Unreleased]` → `[x.y.z] - YYYY-MM-DD` in the same PR (or a final commit on the branch), update comparison links, and update README
-3. QA the PR, add `QA Approved` label, merge
-4. **Tag only after merge** — `git tag -a vx.y.z -m "vx.y.z — summary"` then `git push origin vx.y.z`
-5. No separate release PRs — everything in one PR
+3. **Bump version in two places**: `pyproject.toml` version, `CHANGELOG.md` header + comparison links. (`docker-compose.yaml` uses `:latest` — no update needed.)
+4. QA the PR, add `QA Approved` label, merge
+5. **Tag only after merge** — `git tag -a vx.y.z -m "vx.y.z — summary"` then `git push origin vx.y.z`
+6. No separate release PRs — everything in one PR
 
 ## Build & Test
 
@@ -77,7 +78,7 @@ src/mcp_awareness/
 
 **Embedding pipeline**: `embeddings.py` defines the `EmbeddingProvider` protocol with `OllamaEmbedding` and `NullEmbedding` implementations. Write tools submit embedding generation to a background `ThreadPoolExecutor` (2 workers). `compose_embedding_text()` builds composite text from entry fields; `text_hash()` detects stale embeddings. Separate `embeddings` table with HNSW index, `ON DELETE CASCADE` from entries.
 
-**Connection resilience**: `PostgresStore._conn` is a property that health-checks every 30s. Dead connections reconnect transparently — no permanent connection failures after Postgres restarts.
+**Connection pooling**: `PostgresStore` uses `psycopg_pool.ConnectionPool` (min 2, max 5 connections). The pool handles health checks, reconnection, and connection recycling automatically. Background threads (embedding, cleanup) draw from the pool.
 
 **Key design decisions**:
 - Briefing is computed on-demand per read (not background task)

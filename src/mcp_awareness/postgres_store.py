@@ -1,15 +1,14 @@
 """PostgreSQL storage backend for the awareness store.
 
 Implements the Store protocol using psycopg (sync driver) with JSONB
-for tags and data, GIN indexes for fast tag queries, and native
-concurrency (no application-level locking).
+for tags and data, GIN indexes for fast tag queries, and connection
+pooling via psycopg_pool for concurrent request handling.
 
-Requires: pip install psycopg[binary]
+Requires: pip install psycopg[binary] psycopg_pool
 """
 
 from __future__ import annotations
 
-import contextlib
 import json
 import threading
 import time
@@ -18,6 +17,7 @@ from typing import Any
 
 import psycopg
 from psycopg.rows import dict_row
+from psycopg_pool import ConnectionPool
 
 from .schema import Entry, EntryType, ensure_dt, ensure_dt_optional, make_id, now_utc, to_iso
 
@@ -26,51 +26,22 @@ TRASH_RETENTION_DAYS = 30
 
 
 class PostgresStore:
-    # How often to check connection health (seconds)
-    _HEALTH_CHECK_INTERVAL = 30.0
-
-    def __init__(self, dsn: str) -> None:
+    def __init__(self, dsn: str, min_pool: int = 2, max_pool: int = 5) -> None:
         self.dsn = dsn
-        self.__conn: psycopg.Connection[dict[str, Any]] = self._new_conn()
-        self._last_health_check: float = time.monotonic()
+        self._pool: ConnectionPool[psycopg.Connection[dict[str, Any]]] = ConnectionPool(
+            dsn,
+            min_size=min_pool,
+            max_size=max_pool,
+            kwargs={"row_factory": dict_row},
+            open=True,
+        )
         self._last_cleanup: float = 0.0
         self._cleanup_interval: float = 10.0
         self._cleanup_thread: threading.Thread | None = None
         self._create_tables()
 
-    def _new_conn(self) -> psycopg.Connection[dict[str, Any]]:
-        """Create a new database connection."""
-        return psycopg.connect(self.dsn, row_factory=dict_row, autocommit=False)
-
-    @property
-    def _conn(self) -> psycopg.Connection[dict[str, Any]]:
-        """Auto-healing connection property.
-
-        Checks connection health at most every _HEALTH_CHECK_INTERVAL seconds.
-        If the connection is closed or broken, reconnects transparently.
-        All existing code using self._conn benefits automatically.
-        """
-        now = time.monotonic()
-        if now - self._last_health_check < self._HEALTH_CHECK_INTERVAL:
-            return self.__conn
-        self._last_health_check = now
-        try:
-            if self.__conn.closed:
-                self.__conn = self._new_conn()
-            else:
-                # Rollback first in case a previous transaction left the connection
-                # in INERROR state (e.g., a failed query that wasn't rolled back).
-                self.__conn.rollback()
-                self.__conn.execute("SELECT 1")
-                self.__conn.rollback()
-        except (psycopg.OperationalError, psycopg.InterfaceError, psycopg.DatabaseError):
-            with contextlib.suppress(Exception):
-                self.__conn.close()
-            self.__conn = self._new_conn()
-        return self.__conn
-
     def _create_tables(self) -> None:
-        with self._conn.cursor() as cur:
+        with self._pool.connection() as conn, conn.cursor() as cur:
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS entries (
                     id       TEXT PRIMARY KEY,
@@ -130,7 +101,6 @@ class PostgresStore:
                     ON embeddings USING hnsw (embedding vector_cosine_ops)
                     WITH (m = 16, ef_construction = 64);
             """)
-        self._conn.commit()
         # Note: schema migrations are managed by Alembic (see alembic/ directory).
         # Run `alembic upgrade head` before starting the server on a new database.
 
@@ -195,15 +165,14 @@ class PostgresStore:
         self._cleanup_thread.start()
 
     def _do_cleanup(self) -> None:
-        """Run the actual DELETE on a dedicated connection (background thread)."""
+        """Run the actual DELETE using a pool connection (background thread)."""
         try:
-            with psycopg.connect(self.dsn) as conn:
+            with self._pool.connection() as conn, conn.cursor() as cur:
                 now = datetime.now(timezone.utc)
-                conn.execute(
+                cur.execute(
                     "DELETE FROM entries WHERE expires IS NOT NULL AND expires <= %s",
                     (now,),
                 )
-                conn.commit()
         except Exception as exc:
             print(f"[awareness] cleanup failed: {type(exc).__name__}: {exc}")
 
@@ -225,7 +194,7 @@ class PostgresStore:
         if offset is not None:
             sql += " OFFSET %s"
             query_params.append(offset)
-        with self._conn.cursor() as cur:
+        with self._pool.connection() as conn, conn.cursor() as cur:
             cur.execute(sql, tuple(query_params))
             return [self._row_to_entry(r) for r in cur.fetchall()]
 
@@ -235,16 +204,15 @@ class PostgresStore:
 
     def add(self, entry: Entry) -> Entry:
         self._cleanup_expired()
-        with self._conn.cursor() as cur:
+        with self._pool.connection() as conn, conn.cursor() as cur:
             self._insert_entry(cur, entry)
-        self._conn.commit()
         return entry
 
     def upsert_status(self, source: str, tags: list[str], data: dict[str, Any]) -> Entry:
         """Upsert a status entry for a source (one active status per source)."""
         self._cleanup_expired()
         now = now_utc()
-        with self._conn.cursor() as cur:
+        with self._pool.connection() as conn, conn.cursor() as cur:
             cur.execute(
                 f"DELETE FROM entries WHERE type = %s AND source = %s AND {self._ACTIVE}",
                 (EntryType.STATUS.value, source),
@@ -260,7 +228,6 @@ class PostgresStore:
                 data=data,
             )
             self._insert_entry(cur, entry)
-        self._conn.commit()
         return entry
 
     def upsert_alert(
@@ -278,13 +245,12 @@ class PostgresStore:
             e.updated = now
             e.tags = tags
             e.data.update(data)
-            with self._conn.cursor() as cur:
+            with self._pool.connection() as conn, conn.cursor() as cur:
                 cur.execute(
                     "UPDATE entries SET updated = %s, tags = %s::jsonb, "
                     "data = %s::jsonb WHERE id = %s",
                     (now, json.dumps(e.tags), json.dumps(e.data), e.id),
                 )
-            self._conn.commit()
             return e
         entry = Entry(
             id=make_id(),
@@ -296,9 +262,8 @@ class PostgresStore:
             expires=None,
             data=data,
         )
-        with self._conn.cursor() as cur:
+        with self._pool.connection() as conn, conn.cursor() as cur:
             self._insert_entry(cur, entry)
-        self._conn.commit()
         return entry
 
     def upsert_preference(
@@ -316,13 +281,12 @@ class PostgresStore:
             e.updated = now
             e.tags = tags
             e.data.update(data)
-            with self._conn.cursor() as cur:
+            with self._pool.connection() as conn, conn.cursor() as cur:
                 cur.execute(
                     "UPDATE entries SET updated = %s, tags = %s::jsonb, "
                     "data = %s::jsonb WHERE id = %s",
                     (now, json.dumps(e.tags), json.dumps(e.data), e.id),
                 )
-            self._conn.commit()
             return e
         entry = Entry(
             id=make_id(),
@@ -334,9 +298,8 @@ class PostgresStore:
             expires=None,
             data=data,
         )
-        with self._conn.cursor() as cur:
+        with self._pool.connection() as conn, conn.cursor() as cur:
             self._insert_entry(cur, entry)
-        self._conn.commit()
         return entry
 
     def get_entries(
@@ -369,7 +332,7 @@ class PostgresStore:
 
     def get_sources(self) -> list[str]:
         """Get all unique sources that have reported status."""
-        with self._conn.cursor() as cur:
+        with self._pool.connection() as conn, conn.cursor() as cur:
             cur.execute(
                 f"SELECT DISTINCT source FROM entries WHERE type = %s AND {self._ACTIVE}",
                 (EntryType.STATUS.value,),
@@ -377,7 +340,7 @@ class PostgresStore:
             return [row["source"] for row in cur.fetchall()]
 
     def get_latest_status(self, source: str) -> Entry | None:
-        with self._conn.cursor() as cur:
+        with self._pool.connection() as conn, conn.cursor() as cur:
             cur.execute(
                 f"SELECT * FROM entries WHERE type = %s AND source = %s AND {self._ACTIVE}"
                 " ORDER BY created DESC LIMIT 1",
@@ -425,7 +388,7 @@ class PostgresStore:
         return self._query_entries("type = %s", (EntryType.PATTERN.value,))
 
     def count_active_suppressions(self) -> int:
-        with self._conn.cursor() as cur:
+        with self._pool.connection() as conn, conn.cursor() as cur:
             cur.execute(
                 f"SELECT COUNT(*) AS cnt FROM entries WHERE type = %s AND {self._ACTIVE}",
                 (EntryType.SUPPRESSION.value,),
@@ -529,13 +492,12 @@ class PostgresStore:
         changelog.append({"updated": to_iso(now), "changed": changed})
         entry.updated = now
 
-        with self._conn.cursor() as cur:
+        with self._pool.connection() as conn, conn.cursor() as cur:
             cur.execute(
                 "UPDATE entries SET updated = %s, source = %s, "
                 "tags = %s::jsonb, data = %s::jsonb WHERE id = %s",
                 (now, entry.source, json.dumps(entry.tags), json.dumps(entry.data), entry.id),
             )
-        self._conn.commit()
         return entry
 
     def upsert_by_logical_key(
@@ -558,14 +520,13 @@ class PostgresStore:
                 return (result or old, False)
             return (old, False)
         self._cleanup_expired()
-        with self._conn.cursor() as cur:
+        with self._pool.connection() as conn, conn.cursor() as cur:
             self._insert_entry(cur, entry)
-        self._conn.commit()
         return (entry, True)
 
     def get_stats(self) -> dict[str, Any]:
         """Get entry counts by type, list of sources, and total count."""
-        with self._conn.cursor() as cur:
+        with self._pool.connection() as conn, conn.cursor() as cur:
             cur.execute(
                 f"SELECT type, COUNT(*) AS cnt FROM entries WHERE {self._ACTIVE} GROUP BY type"
             )
@@ -580,7 +541,7 @@ class PostgresStore:
 
     def get_tags(self) -> list[dict[str, Any]]:
         """Get all tags in use with usage counts."""
-        with self._conn.cursor() as cur:
+        with self._pool.connection() as conn, conn.cursor() as cur:
             cur.execute(
                 f"SELECT value, COUNT(*) AS cnt FROM entries, "
                 f"jsonb_array_elements_text(tags) AS value "
@@ -596,13 +557,12 @@ class PostgresStore:
         """Soft-delete a single entry. Returns True if an entry was trashed."""
         now = datetime.now(timezone.utc)
         expires = now + timedelta(days=TRASH_RETENTION_DAYS)
-        with self._conn.cursor() as cur:
+        with self._pool.connection() as conn, conn.cursor() as cur:
             cur.execute(
                 f"UPDATE entries SET deleted = %s, expires = %s WHERE id = %s AND {self._ACTIVE}",
                 (now, expires, entry_id),
             )
             affected = cur.rowcount
-        self._conn.commit()
         return affected > 0
 
     def soft_delete_by_tags(self, tags: list[str]) -> int:
@@ -618,14 +578,13 @@ class PostgresStore:
         tag_clauses = " AND ".join("tags @> %s::jsonb" for _ in tags)
         params: list[Any] = [now, expires]
         params.extend(json.dumps([t]) for t in tags)
-        with self._conn.cursor() as cur:
+        with self._pool.connection() as conn, conn.cursor() as cur:
             cur.execute(
                 f"UPDATE entries SET deleted = %s, expires = %s "
                 f"WHERE {self._ACTIVE} AND {tag_clauses}",
                 tuple(params),
             )
             affected = cur.rowcount
-        self._conn.commit()
         return affected
 
     def soft_delete_by_source(
@@ -642,13 +601,12 @@ class PostgresStore:
             clauses.append("type = %s")
             params.append(entry_type.value)
         where = " AND ".join(clauses)
-        with self._conn.cursor() as cur:
+        with self._pool.connection() as conn, conn.cursor() as cur:
             cur.execute(
                 f"UPDATE entries SET deleted = %s, expires = %s WHERE {where}",
                 (now, expires, *params),
             )
             affected = cur.rowcount
-        self._conn.commit()
         return affected
 
     def get_deleted(
@@ -668,20 +626,19 @@ class PostgresStore:
         if offset is not None:
             sql += " OFFSET %s"
             params.append(offset)
-        with self._conn.cursor() as cur:
+        with self._pool.connection() as conn, conn.cursor() as cur:
             cur.execute(sql, tuple(params))
             return [self._row_to_entry(r) for r in cur.fetchall()]
 
     def restore_by_id(self, entry_id: str) -> bool:
         """Restore a soft-deleted entry. Returns True if restored."""
-        with self._conn.cursor() as cur:
+        with self._pool.connection() as conn, conn.cursor() as cur:
             cur.execute(
                 "UPDATE entries SET deleted = NULL, expires = NULL"
                 " WHERE id = %s AND deleted IS NOT NULL",
                 (entry_id,),
             )
             affected = cur.rowcount
-        self._conn.commit()
         return affected > 0
 
     def restore_by_tags(self, tags: list[str]) -> int:
@@ -693,14 +650,13 @@ class PostgresStore:
             return 0
         tag_clauses = " AND ".join("tags @> %s::jsonb" for _ in tags)
         params = [json.dumps([t]) for t in tags]
-        with self._conn.cursor() as cur:
+        with self._pool.connection() as conn, conn.cursor() as cur:
             cur.execute(
                 "UPDATE entries SET deleted = NULL, expires = NULL "
                 f"WHERE deleted IS NOT NULL AND {tag_clauses}",
                 tuple(params),
             )
             affected = cur.rowcount
-        self._conn.commit()
         return affected
 
     # ------------------------------------------------------------------
@@ -712,19 +668,14 @@ class PostgresStore:
         if not entry_ids:
             return
         try:
-            with self._conn.cursor() as cur:
+            with self._pool.connection() as conn, conn.cursor() as cur:
                 for eid in entry_ids:
                     cur.execute(
                         "INSERT INTO reads (entry_id, platform, tool_used) VALUES (%s, %s, %s)",
                         (eid, platform, tool_used),
                     )
-            self._conn.commit()
         except Exception:
-            # Fire-and-forget: read logging never blocks a response
-            import contextlib
-
-            with contextlib.suppress(Exception):
-                self._conn.rollback()
+            pass  # Fire-and-forget
 
     def log_action(
         self,
@@ -745,14 +696,13 @@ class PostgresStore:
         if tags is None:
             tags = entry.tags
         now = now_utc()
-        with self._conn.cursor() as cur:
+        with self._pool.connection() as conn, conn.cursor() as cur:
             cur.execute(
                 "INSERT INTO actions (entry_id, timestamp, platform, action, detail, tags) "
                 "VALUES (%s, %s, %s, %s, %s, %s::jsonb) RETURNING id",
                 (entry_id, now, platform, action, detail, json.dumps(tags)),
             )
             row = cur.fetchone()
-        self._conn.commit()
         return {
             "id": row["id"] if row else None,
             "entry_id": entry_id,
@@ -786,7 +736,7 @@ class PostgresStore:
         sql = f"SELECT * FROM reads WHERE {where} ORDER BY timestamp DESC"
         if limit:
             sql += f" LIMIT {int(limit)}"
-        with self._conn.cursor() as cur:
+        with self._pool.connection() as conn, conn.cursor() as cur:
             cur.execute(sql, tuple(params))
             rows = cur.fetchall()
         return [
@@ -828,7 +778,7 @@ class PostgresStore:
         sql = f"SELECT * FROM actions WHERE {where} ORDER BY timestamp DESC"
         if limit:
             sql += f" LIMIT {int(limit)}"
-        with self._conn.cursor() as cur:
+        with self._pool.connection() as conn, conn.cursor() as cur:
             cur.execute(sql, tuple(params))
             rows = cur.fetchall()
         return [
@@ -851,7 +801,7 @@ class PostgresStore:
         if since:
             since_clause = "AND r.timestamp >= %s"
             params = (since,)
-        with self._conn.cursor() as cur:
+        with self._pool.connection() as conn, conn.cursor() as cur:
             cur.execute(
                 f"SELECT e.* FROM entries e "
                 f"LEFT JOIN reads r ON e.id = r.entry_id {since_clause} "
@@ -893,7 +843,7 @@ class PostgresStore:
             f"detail, action, tags FROM actions WHERE {where_a} "
             f"ORDER BY timestamp DESC {limit_clause}"
         )
-        with self._conn.cursor() as cur:
+        with self._pool.connection() as conn, conn.cursor() as cur:
             cur.execute(sql, tuple(params_r + params_a))
             rows = cur.fetchall()
         return [
@@ -914,7 +864,7 @@ class PostgresStore:
         if not entry_ids:
             return {}
         placeholders = ",".join("%s" for _ in entry_ids)
-        with self._conn.cursor() as cur:
+        with self._pool.connection() as conn, conn.cursor() as cur:
             cur.execute(
                 f"SELECT entry_id, COUNT(*) AS cnt, MAX(timestamp) AS last "
                 f"FROM reads WHERE entry_id IN ({placeholders}) GROUP BY entry_id",
@@ -977,12 +927,11 @@ class PostgresStore:
             changed["state_reason"] = old_reason
         changelog.append({"updated": to_iso(now), "changed": changed})
         entry.updated = now
-        with self._conn.cursor() as cur:
+        with self._pool.connection() as conn, conn.cursor() as cur:
             cur.execute(
                 "UPDATE entries SET updated = %s, data = %s::jsonb WHERE id = %s",
                 (now, json.dumps(entry.data), entry.id),
             )
-        self._conn.commit()
         return entry
 
     def get_fired_intentions(self) -> list[Entry]:
@@ -1016,7 +965,7 @@ class PostgresStore:
     ) -> None:
         """Store or update an embedding for an entry + model pair."""
         vector_literal = "[" + ",".join(str(v) for v in embedding) + "]"
-        with self._conn.cursor() as cur:
+        with self._pool.connection() as conn, conn.cursor() as cur:
             cur.execute(
                 "INSERT INTO embeddings (entry_id, model, dimensions, text_hash, embedding) "
                 "VALUES (%s, %s, %s, %s, %s::vector) "
@@ -1025,7 +974,6 @@ class PostgresStore:
                 "dimensions = EXCLUDED.dimensions, created = now()",
                 (entry_id, model, dimensions, text_hash, vector_literal),
             )
-        self._conn.commit()
 
     def get_entries_without_embeddings(
         self,
@@ -1036,7 +984,7 @@ class PostgresStore:
 
         Excludes suppression entries (short-lived, not worth embedding).
         """
-        with self._conn.cursor() as cur:
+        with self._pool.connection() as conn, conn.cursor() as cur:
             cur.execute(
                 "SELECT e.* FROM entries e "
                 "LEFT JOIN embeddings emb ON e.id = emb.entry_id AND emb.model = %s "
@@ -1060,7 +1008,7 @@ class PostgresStore:
         from .embeddings import compose_embedding_text as _compose
         from .embeddings import text_hash as _hash
 
-        with self._conn.cursor() as cur:
+        with self._pool.connection() as conn, conn.cursor() as cur:
             cur.execute(
                 "SELECT e.*, emb.text_hash AS emb_text_hash FROM entries e "
                 "JOIN embeddings emb ON e.id = emb.entry_id AND emb.model = %s "
@@ -1124,7 +1072,7 @@ class PostgresStore:
         )
         # query_vector (similarity), model, ...filters, query_vector (ORDER BY), limit
         ordered_params = [vector_literal, model, *params[2:-1], vector_literal, limit]
-        with self._conn.cursor() as cur:
+        with self._pool.connection() as conn, conn.cursor() as cur:
             cur.execute(sql, tuple(ordered_params))
             rows = cur.fetchall()
         return [(self._row_to_entry(r), float(r["similarity"])) for r in rows]
@@ -1137,9 +1085,8 @@ class PostgresStore:
         )
 
     def clear(self) -> None:
-        with self._conn.cursor() as cur:
+        with self._pool.connection() as conn, conn.cursor() as cur:
             cur.execute("DELETE FROM reads")
             cur.execute("DELETE FROM actions")
             cur.execute("DELETE FROM embeddings")
             cur.execute("DELETE FROM entries")
-        self._conn.commit()

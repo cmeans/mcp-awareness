@@ -1311,12 +1311,11 @@ class TestListModeAndSince:
             {"alert_id": "old-alert", "level": "warning", "message": "old", "resolved": False},
         )
         # Backdate the alert
-        with s._conn.cursor() as cur:
+        with s._pool.connection() as conn, conn.cursor() as cur:
             cur.execute(
                 "UPDATE entries SET updated = %s WHERE data->>'alert_id' = 'old-alert'",
                 (old,),
             )
-            s._conn.commit()
         s.upsert_alert(
             "nas",
             ["infra"],
@@ -1550,6 +1549,37 @@ class TestReadActionTracking:
         item = next(i for i in listing if i["description"] == "popular entry")
         assert item["read_count"] == 3  # 2 manual + 1 from this get_knowledge call
         assert item["last_read"] is not None
+
+
+class TestLogReadsSilencesErrors:
+    @pytest.mark.anyio
+    async def test_log_reads_failure_does_not_break_tool(self, monkeypatch) -> None:
+        """_log_reads swallows exceptions so read-logging never breaks a tool response."""
+        from unittest.mock import patch
+
+        from mcp_awareness.schema import Entry, EntryType, make_id, now_utc
+
+        s = _store()
+        now = now_utc()
+        s.add(
+            Entry(
+                id=make_id(),
+                type=EntryType.NOTE,
+                source="test",
+                tags=["silence-test"],
+                created=now,
+                updated=now,
+                expires=None,
+                data={"description": "should still be returned"},
+            )
+        )
+
+        with patch.object(s, "log_read", side_effect=RuntimeError("pool exploded")):
+            result = json.loads(await server_mod.get_knowledge(tags=["silence-test"]))
+
+        # Tool must succeed despite log_read blowing up
+        assert len(result) >= 1
+        assert result[0]["data"]["description"] == "should still be returned"
 
 
 # ---------------------------------------------------------------------------

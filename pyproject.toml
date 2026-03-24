@@ -8,6 +8,7 @@ requires-python = ">=3.10"
 dependencies = [
     "mcp[cli]>=1.0.0",
     "psycopg[binary]>=3.1",
+    "psycopg_pool>=3.2",
     "alembic>=1.13",
     "sqlalchemy>=2.0",
 ]
@@ -74,7 +75,7 @@ module = ["mcp.*"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
-module = ["psycopg.*"]
+module = ["psycopg.*", "psycopg_pool.*"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]

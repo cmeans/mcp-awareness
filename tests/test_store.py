@@ -408,12 +408,11 @@ def test_soft_deleted_entries_auto_expire(store):
     store.soft_delete_by_id(entry.id)
     assert len(store.get_deleted()) == 1
     # Backdate the expires timestamp to trigger cleanup
-    with store._conn.cursor() as cur:
+    with store._pool.connection() as conn, conn.cursor() as cur:
         cur.execute(
             "UPDATE entries SET expires = %s WHERE id = %s",
             ("2020-01-01T00:00:00+00:00", entry.id),
         )
-    store._conn.commit()
     store._do_cleanup()
     assert len(store.get_deleted()) == 0
 
@@ -532,11 +531,11 @@ def test_get_deleted_pagination(store):
 
 def test_do_cleanup_logs_errors(store, capsys):
     """_do_cleanup prints error instead of silently swallowing."""
-    # Point at a DSN that doesn't exist to trigger an error
-    original_dsn = store.dsn
-    store.dsn = "postgresql://bad:bad@localhost:1/nonexistent"
-    store._do_cleanup()
-    store.dsn = original_dsn
+    from unittest.mock import patch
+
+    # Mock pool.connection to raise an error
+    with patch.object(store._pool, "connection", side_effect=Exception("test error")):
+        store._do_cleanup()
     captured = capsys.readouterr()
     assert "[awareness] cleanup failed:" in captured.out
 
@@ -798,12 +797,11 @@ def test_get_active_alerts_since(store):
         {"alert_id": "old-alert", "level": "warning", "message": "old", "resolved": False},
     )
     # Backdate the alert
-    with store._conn.cursor() as cur:
+    with store._pool.connection() as conn, conn.cursor() as cur:
         cur.execute(
             "UPDATE entries SET updated = %s WHERE data->>'alert_id' = %s",
             (old, "old-alert"),
         )
-    store._conn.commit()
 
     store.upsert_alert(
         "src",
@@ -836,9 +834,8 @@ def test_get_deleted_since(store):
     )
     store.soft_delete_by_id(entry1.id)
     # Backdate the deletion
-    with store._conn.cursor() as cur:
+    with store._pool.connection() as conn, conn.cursor() as cur:
         cur.execute("UPDATE entries SET deleted = %s WHERE id = %s", (old, entry1.id))
-    store._conn.commit()
 
     entry2 = store.add(
         Entry(
@@ -943,6 +940,56 @@ def test_log_action_invalid_entry_id(store):
     result = store.log_action(entry_id="nonexistent-id", action="test")
     assert result["status"] == "error"
     assert "not found" in result["message"].lower()
+
+
+def test_log_read_records_reads(store):
+    """log_read inserts read records retrievable via get_reads."""
+    now = now_utc()
+    entry = store.add(
+        Entry(
+            id=make_id(),
+            type=EntryType.NOTE,
+            source="test",
+            tags=["read-test"],
+            created=now,
+            updated=now,
+            expires=None,
+            data={"description": "read tracking test"},
+        )
+    )
+    store.log_read([entry.id], tool_used="get_knowledge", platform="claude-code")
+    reads = store.get_reads(entry_id=entry.id)
+    assert len(reads) >= 1
+    assert reads[0]["entry_id"] == entry.id
+    assert reads[0]["tool_used"] == "get_knowledge"
+    assert reads[0]["platform"] == "claude-code"
+
+
+def test_log_read_empty_list_is_noop(store):
+    """log_read with empty list returns immediately without touching the DB."""
+    store.log_read([], tool_used="get_knowledge")  # should not raise
+
+
+def test_log_read_silences_pool_errors(store):
+    """log_read swallows exceptions when the pool is broken (fire-and-forget)."""
+    from unittest.mock import patch
+
+    now = now_utc()
+    entry = store.add(
+        Entry(
+            id=make_id(),
+            type=EntryType.NOTE,
+            source="test",
+            tags=["read-test"],
+            created=now,
+            updated=now,
+            expires=None,
+            data={"description": "pool failure test"},
+        )
+    )
+    with patch.object(store._pool, "connection", side_effect=RuntimeError("pool closed")):
+        # Should not raise despite the pool being broken
+        store.log_read([entry.id], tool_used="get_knowledge")
 
 
 def test_get_actions_filter_by_tags(store):
@@ -1556,64 +1603,30 @@ def test_get_knowledge_created_before(store):
 
 
 # ---------------------------------------------------------------------------
-# Connection resilience
+# Connection pooling
 # ---------------------------------------------------------------------------
 
 
-def test_reconnect_after_closed_connection(store):
-    """Store reconnects transparently when connection is closed."""
-    # Force the connection closed
-    store._PostgresStore__conn.close()
-    # Reset health check timer so _conn property actually checks
-    store._last_health_check = 0.0
-    # Should reconnect and work
-    store.upsert_status("test", ["t"], {"metrics": {}, "ttl_sec": 120})
-    assert store.get_sources() == ["test"]
+def test_pool_serves_concurrent_requests(store):
+    """Pool handles multiple sequential operations without connection issues."""
+    # Rapid-fire operations that would serialize on a single connection
+    for i in range(10):
+        store.upsert_status(f"src-{i}", ["t"], {"metrics": {}, "ttl_sec": 120})
+    sources = store.get_sources()
+    assert len(sources) == 10
 
 
-def test_health_check_debounced(store):
-    """Health check doesn't run on every access (debounced)."""
-    import time
-
-    # After init, health check was just run
-    store._last_health_check = time.monotonic()
-    # Access _conn — should NOT run health check (too soon)
-    # If it did, we'd see a SELECT 1 + rollback, but we can't easily observe that.
-    # Instead, verify the debounce timer works by checking that a closed connection
-    # is NOT healed when the timer hasn't elapsed.
-    store._PostgresStore__conn.close()
-    # Timer hasn't elapsed — _conn returns the closed connection
-    # (This would fail on next use, but the point is the health check is debounced)
-    # Force the timer to expire for the next access
-    store._last_health_check = 0.0
-    # Now it heals
-    entries = store.get_entries()
-    assert isinstance(entries, list)
-
-
-def test_reconnect_on_operational_error(store):
-    """Store reconnects when SELECT 1 health check raises OperationalError."""
-    import psycopg
-
-    store._last_health_check = 0.0
-    # Patch execute to raise OperationalError (simulates broken connection)
-    original_execute = store._PostgresStore__conn.execute
-    call_count = 0
-
-    def failing_execute(*args, **kwargs):
-        nonlocal call_count
-        call_count += 1
-        if call_count == 1:
-            raise psycopg.OperationalError("connection lost")
-        return original_execute(*args, **kwargs)
-
-    store._PostgresStore__conn.execute = failing_execute
-    # Access _conn — should trigger reconnect via OperationalError path
-    _ = store._conn
-    # After reconnect, store should work
-    store._last_health_check = 0.0
-    store.upsert_status("test-reconnect", ["t"], {"metrics": {}, "ttl_sec": 120})
-    assert "test-reconnect" in store.get_sources()
+def test_pool_recovers_from_errors(store):
+    """Pool provides working connections even after query errors."""
+    # Force an error with invalid SQL via a raw pool connection
+    try:
+        with store._pool.connection() as conn, conn.cursor() as cur:
+            cur.execute("SELECT * FROM nonexistent_table_xyz")
+    except Exception:
+        pass  # Expected — table doesn't exist
+    # Pool should still work — next connection is clean
+    store.upsert_status("after-error", ["t"], {"metrics": {}, "ttl_sec": 120})
+    assert "after-error" in store.get_sources()
 
 
 # ---------------------------------------------------------------------------
