@@ -167,6 +167,8 @@ The server is running on port 8420. Point any MCP client at `http://localhost:84
 
 ### Configuration
 
+#### Server
+
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `AWARENESS_TRANSPORT` | `stdio` | Transport: `stdio` or `streamable-http` |
@@ -174,9 +176,25 @@ The server is running on port 8420. Point any MCP client at `http://localhost:84
 | `AWARENESS_PORT` | `8420` | Port (HTTP mode) |
 | `AWARENESS_DATABASE_URL` | _(required)_ | PostgreSQL connection string. Example: `postgresql://user:pass@localhost:5432/awareness` |
 | `AWARENESS_MOUNT_PATH` | _(none)_ | Secret path prefix for access control (e.g., `/my-secret`). When set, only `/<secret>/mcp` is served; all other paths return 404. Use with a Cloudflare WAF rule. |
+
+#### Embedding (optional)
+
+| Variable | Default | Description |
+|----------|---------|-------------|
 | `AWARENESS_EMBEDDING_PROVIDER` | _(none)_ | Set to `ollama` to enable semantic search. Without it, all features work except `semantic_search` and `backfill_embeddings`. |
 | `AWARENESS_EMBEDDING_MODEL` | `nomic-embed-text` | Ollama model name for embeddings. Must match the model pulled in the Ollama container. |
 | `AWARENESS_OLLAMA_URL` | `http://ollama:11434` | Ollama API endpoint. Default works with Docker Compose; change for external Ollama instances. |
+| `AWARENESS_EMBEDDING_DIMENSIONS` | `768` | Vector dimensions. Must match the model output. Only change if using a non-default model. |
+
+#### Docker Compose
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `POSTGRES_PASSWORD` | `awareness-dev` | Postgres password. Change for any non-demo deployment. |
+| `AWARENESS_PG_DATA` | `~/awareness-pg` | Host path for Postgres data volume. |
+| `AWARENESS_OLLAMA_DATA` | `~/awareness-ollama` | Host path for Ollama model cache volume. |
+| `CLOUDFLARED_CONFIG` | `~/.cloudflared` | Path to cloudflared config directory (named tunnel). |
+| `CLOUDFLARED_CREDS` | _(required for named tunnel)_ | Path to tunnel credentials JSON file. |
 
 ### Development
 
