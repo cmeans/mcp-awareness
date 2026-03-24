@@ -40,8 +40,9 @@ Every PR that changes functionality must include:
 
 1. Feature PRs add changelog entries under `[Unreleased]`
 2. When ready to release, rename `[Unreleased]` → `[x.y.z] - YYYY-MM-DD` in the same PR (or a final commit on the branch), update comparison links, and update README
-3. QA the PR, add `QA Approved` label, merge
-4. **Tag only after merge** — `git tag -a vx.y.z -m "vx.y.z — summary"` then `git push origin vx.y.z`
+3. **Bump version in two places**: `pyproject.toml` version, `CHANGELOG.md` header + comparison links. (`docker-compose.yaml` uses `:latest` — no update needed.)
+4. QA the PR, add `QA Approved` label, merge
+5. **Tag only after merge** — `git tag -a vx.y.z -m "vx.y.z — summary"` then `git push origin vx.y.z`
 5. No separate release PRs — everything in one PR
 
 ## Build & Test

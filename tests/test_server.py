@@ -1311,12 +1311,11 @@ class TestListModeAndSince:
             {"alert_id": "old-alert", "level": "warning", "message": "old", "resolved": False},
         )
         # Backdate the alert
-        with s._conn.cursor() as cur:
+        with s._pool.connection() as conn, conn.cursor() as cur:
             cur.execute(
                 "UPDATE entries SET updated = %s WHERE data->>'alert_id' = 'old-alert'",
                 (old,),
             )
-            s._conn.commit()
         s.upsert_alert(
             "nas",
             ["infra"],

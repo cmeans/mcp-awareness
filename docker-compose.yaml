@@ -3,7 +3,7 @@ name: mcp-awareness
 
 services:
   mcp-awareness:
-    image: ghcr.io/cmeans/mcp-awareness:0.10.0
+    image: ghcr.io/cmeans/mcp-awareness:latest
     # For local development, comment out 'image' and uncomment 'build':
     # build: .
     container_name: mcp-awareness
