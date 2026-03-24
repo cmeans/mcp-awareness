@@ -256,7 +256,7 @@ See [Security considerations](docs/deployment-guide.md#security-considerations) 
 - Suppression system with time-based expiry and escalation overrides
 
 ### MCP interface
-- Full MCP API: 6 resources + 27 tools + 5 prompts
+- Full MCP API: 6 resources + 28 tools + 5 prompts
 - Read tool mirrors for tools-only clients
 - User-defined custom prompts from store entries with `{{var}}` templates
 - Streamable HTTP + stdio transports
@@ -269,7 +269,7 @@ See [Security considerations](docs/deployment-guide.md#security-considerations) 
 - Secret path auth + Cloudflare WAF for edge-level access control
 - Docker Compose with Postgres, named Cloudflare Tunnel, or ephemeral quick tunnel
 - Request timing instrumentation and `/health` endpoint
-- 298 tests (all against real Postgres + Ollama in CI), strict type checking, CI pipeline with coverage, QA gate
+- 304 tests (all against real Postgres + Ollama in CI), strict type checking, CI pipeline with coverage, QA gate
 
 ### Not yet implemented
 - Layer 2 (baseline) detection — rolling averages and deviation calculation

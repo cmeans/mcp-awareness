@@ -1956,3 +1956,52 @@ class TestEmbeddings:
         results = store.semantic_search(vec, "m", until=cutoff)
         assert len(results) == 1
         assert results[0][0].data["description"] == "old"
+
+    def test_get_stale_embeddings(self, store):
+        """Entries whose text changed after embedding are detected as stale."""
+        now = now_utc()
+        entry = Entry(
+            id=make_id(),
+            type=EntryType.NOTE,
+            source="test",
+            tags=[],
+            created=now,
+            updated=now,
+            expires=None,
+            data={"description": "original text"},
+        )
+        store.add(entry)
+        vec = self._vec(768, 0)
+        # Embed with hash of original text
+        from mcp_awareness.embeddings import compose_embedding_text, text_hash
+
+        original_hash = text_hash(compose_embedding_text(entry))
+        store.upsert_embedding(entry.id, "m", 768, original_hash, vec)
+        # No stale entries yet
+        assert store.get_stale_embeddings("m") == []
+        # Update the entry text
+        store.update_entry(entry.id, {"description": "changed text"})
+        # Now it should be stale
+        stale = store.get_stale_embeddings("m")
+        assert len(stale) == 1
+        assert stale[0].id == entry.id
+
+    def test_get_stale_embeddings_not_stale(self, store):
+        """Entries with matching hash are not stale."""
+        now = now_utc()
+        entry = Entry(
+            id=make_id(),
+            type=EntryType.NOTE,
+            source="test",
+            tags=[],
+            created=now,
+            updated=now,
+            expires=None,
+            data={"description": "stable text"},
+        )
+        store.add(entry)
+        from mcp_awareness.embeddings import compose_embedding_text, text_hash
+
+        h = text_hash(compose_embedding_text(entry))
+        store.upsert_embedding(entry.id, "m", 768, h, self._vec(768, 0))
+        assert store.get_stale_embeddings("m") == []

@@ -1990,6 +1990,150 @@ class TestGenerateEmbedding:
 
 
 # ---------------------------------------------------------------------------
+# Backfill embeddings tool
+# ---------------------------------------------------------------------------
+
+
+class TestBackfillEmbeddings:
+    @pytest.mark.anyio
+    async def test_no_provider_returns_error(self, monkeypatch) -> None:
+        from mcp_awareness.embeddings import NullEmbedding
+
+        monkeypatch.setattr(server_mod, "_embedding_provider", NullEmbedding())
+        result = json.loads(await server_mod.backfill_embeddings())
+        assert result["status"] == "error"
+
+    @pytest.mark.anyio
+    async def test_backfill_creates_embeddings(self, monkeypatch) -> None:
+        class MockProvider:
+            model_name = "mock"
+            dimensions = 768
+
+            def embed(self, texts: list[str]) -> list[list[float]]:
+                return [[0.0] * 768 for _ in texts]
+
+            def is_available(self) -> bool:
+                return True
+
+        monkeypatch.setattr(server_mod, "_embedding_provider", MockProvider())
+
+        # Create entries without embeddings
+        s = _store()
+        from mcp_awareness.schema import Entry, EntryType, make_id, now_utc
+
+        now = now_utc()
+        for i in range(3):
+            s.add(
+                Entry(
+                    id=make_id(),
+                    type=EntryType.NOTE,
+                    source="test",
+                    tags=[],
+                    created=now,
+                    updated=now,
+                    expires=None,
+                    data={"description": f"note-{i}"},
+                )
+            )
+
+        result = json.loads(await server_mod.backfill_embeddings(limit=10))
+        assert result["status"] == "ok"
+        assert result["new_embeddings"] == 3
+        assert result["remaining"] == 0
+
+
+# ---------------------------------------------------------------------------
+# hint parameter on get_knowledge
+# ---------------------------------------------------------------------------
+
+
+class TestGetKnowledgeHint:
+    @pytest.mark.anyio
+    async def test_hint_reranks_results(self, monkeypatch) -> None:
+        """hint param re-orders results by semantic similarity."""
+
+        call_count = 0
+
+        class MockProvider:
+            model_name = "mock"
+            dimensions = 768
+
+            def embed(self, texts: list[str]) -> list[list[float]]:
+                nonlocal call_count
+                call_count += 1
+                v = [0.0] * 768
+                v[0] = 1.0
+                return [v for _ in texts]
+
+            def is_available(self) -> bool:
+                return True
+
+        monkeypatch.setattr(server_mod, "_embedding_provider", MockProvider())
+
+        s = _store()
+        from mcp_awareness.schema import Entry, EntryType, make_id, now_utc
+
+        now = now_utc()
+        e1 = Entry(
+            id=make_id(),
+            type=EntryType.NOTE,
+            source="test",
+            tags=["finance"],
+            created=now,
+            updated=now,
+            expires=None,
+            data={"description": "NAS disk health"},
+        )
+        e2 = Entry(
+            id=make_id(),
+            type=EntryType.NOTE,
+            source="test",
+            tags=["finance"],
+            created=now,
+            updated=now,
+            expires=None,
+            data={"description": "401k retirement"},
+        )
+        s.add(e1)
+        s.add(e2)
+        vec = [0.0] * 768
+        vec[0] = 1.0
+        s.upsert_embedding(e1.id, "mock", 768, "h1", vec)
+        s.upsert_embedding(e2.id, "mock", 768, "h2", vec)
+
+        result = json.loads(
+            await server_mod.get_knowledge(tags=["finance"], hint="retirement savings")
+        )
+        assert len(result) == 2
+        # With hint, results should include similarity scores
+        assert "similarity" in result[0]
+
+    @pytest.mark.anyio
+    async def test_hint_without_provider_falls_back(self) -> None:
+        """hint is silently ignored when no embedding provider is available."""
+        s = _store()
+        from mcp_awareness.schema import Entry, EntryType, make_id, now_utc
+
+        now = now_utc()
+        s.add(
+            Entry(
+                id=make_id(),
+                type=EntryType.NOTE,
+                source="test",
+                tags=["test"],
+                created=now,
+                updated=now,
+                expires=None,
+                data={"description": "test note"},
+            )
+        )
+        # Default NullEmbedding — hint should be ignored, not error
+        result = json.loads(await server_mod.get_knowledge(tags=["test"], hint="something"))
+        assert len(result) == 1
+        assert "similarity" not in result[0]
+
+
+# ---------------------------------------------------------------------------
 # Semantic search integration tests (require Ollama)
 # ---------------------------------------------------------------------------
 
@@ -2058,6 +2202,16 @@ class TestSemanticSearchIntegration:
             )
         )
         entry_id = result["id"]
+
+        # Wait for background embedding thread pool to drain
+        import time
+
+        for _ in range(20):
+            s = _store()
+            missing = s.get_entries_without_embeddings("nomic-embed-text")
+            if entry_id not in [e.id for e in missing]:
+                break
+            time.sleep(0.5)
 
         # Verify embedding was created in the store
         s = _store()

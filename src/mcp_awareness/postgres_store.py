@@ -1044,6 +1044,36 @@ class PostgresStore:
             )
             return [self._row_to_entry(r) for r in cur.fetchall()]
 
+    def get_stale_embeddings(
+        self,
+        model: str,
+        limit: int = 100,
+    ) -> list[Entry]:
+        """Find entries whose embedding text_hash differs from their current content.
+
+        Returns entries that have an embedding but whose text has changed since
+        it was generated. The caller should re-embed these entries.
+        """
+        from .embeddings import compose_embedding_text as _compose
+        from .embeddings import text_hash as _hash
+
+        with self._conn.cursor() as cur:
+            cur.execute(
+                "SELECT e.*, emb.text_hash AS emb_text_hash FROM entries e "
+                "JOIN embeddings emb ON e.id = emb.entry_id AND emb.model = %s "
+                "WHERE e.deleted IS NULL "
+                "ORDER BY e.updated DESC LIMIT %s",
+                (model, limit),
+            )
+            rows = cur.fetchall()
+        stale: list[Entry] = []
+        for r in rows:
+            entry = self._row_to_entry(r)
+            current_hash = _hash(_compose(entry))
+            if current_hash != r["emb_text_hash"]:
+                stale.append(entry)
+        return stale
+
     def semantic_search(
         self,
         embedding: list[float],

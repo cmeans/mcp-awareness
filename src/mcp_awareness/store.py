@@ -175,6 +175,14 @@ class Store(Protocol):
         limit: int = 100,
     ) -> list[Entry]: ...
 
+    def get_stale_embeddings(
+        self,
+        model: str,
+        limit: int = 100,
+    ) -> list[Entry]:
+        """Find entries whose text has changed since their embedding was generated."""
+        ...
+
     def semantic_search(
         self,
         embedding: list[float],
