@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-03-24
+
 ### Added
 - **Background embedding generation**: Write tools now submit embedding generation to a thread pool (max 2 workers) instead of blocking the response. ~100-200ms latency removed from writes.
 - **`backfill_embeddings` tool**: Embeds entries created before the provider was configured, and re-embeds entries whose content changed since their last embedding (stale detection via `text_hash`).
@@ -254,7 +256,8 @@ Initial implementation.
 - **Dockerfile** for container deployment
 - Design docs: core spec and collation layer
 
-[Unreleased]: https://github.com/cmeans/mcp-awareness/compare/v0.10.0...HEAD
+[Unreleased]: https://github.com/cmeans/mcp-awareness/compare/v0.11.0...HEAD
+[0.11.0]: https://github.com/cmeans/mcp-awareness/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/cmeans/mcp-awareness/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/cmeans/mcp-awareness/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/cmeans/mcp-awareness/compare/v0.7.0...v0.8.0
