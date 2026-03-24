@@ -319,8 +319,21 @@ See [Security considerations](docs/deployment-guide.md#security-considerations) 
 
 ### Not yet implemented
 - Layer 2 (baseline) detection — rolling averages and deviation calculation
-- Edge processes — no automated producers yet ([example script](examples/simulate_edge.py) demonstrates the write path)
 - OAuth / API key authentication — current auth is secret-path-based
+
+### Planned edge providers
+
+Edge providers are lightweight processes that monitor external systems and write knowledge into awareness. Each is simple alone; the server correlates them into well-timed, actionable intelligence. No automated producers yet ([example script](examples/simulate_edge.py) demonstrates the write path).
+
+| Provider | Source | What it writes |
+|----------|--------|----------------|
+| **Google Calendar** | GCal API (polling) | Today's events as `add_context` entries. Any agent knows your schedule without direct calendar access. |
+| **GPS / Location** | Phone (Tasker/Shortcuts) | Current coordinates. Triggers location-based intentions, corroborates meeting attendance, auto-completes travel intentions. |
+| **NAS / Infrastructure** | Synology, Proxmox | Disk health, container status, backup state. The original monitoring use case. |
+| **Health / Wearable** | Garmin, Apple Health | Sleep, HRV, activity. Cross-domain correlations (sleep quality vs. productivity). |
+| **Home Assistant / Vision** | HA + cameras (RPi, GoPro) | Household state detection — trash accumulation, packages at door, laundry pile. Paired with calendar: "trash building up + leaving by car → take it down, leave 5 min early." |
+
+**Multi-edge correlation** is where the real value lives. No single edge makes decisions alone — calendar provides the *expectation*, GPS provides the *evidence*, vision provides the *trigger*, and the server reconciles them into intentions that self-resolve through the lifecycle: pending → active → completed, with minimal user intervention.
 
 ## Vision
 
