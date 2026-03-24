@@ -307,8 +307,12 @@ class TestInputValidation:
     async def test_report_alert_invalid_level(self) -> None:
         result = json.loads(
             await server_mod.report_alert(
-                source="nas", tags=["infra"], alert_id="x",
-                level="bogus", alert_type="threshold", message="test",
+                source="nas",
+                tags=["infra"],
+                alert_id="x",
+                level="bogus",
+                alert_type="threshold",
+                message="test",
             )
         )
         assert "error" in result
@@ -318,8 +322,12 @@ class TestInputValidation:
     async def test_report_alert_invalid_type(self) -> None:
         result = json.loads(
             await server_mod.report_alert(
-                source="nas", tags=["infra"], alert_id="x",
-                level="warning", alert_type="bogus", message="test",
+                source="nas",
+                tags=["infra"],
+                alert_id="x",
+                level="warning",
+                alert_type="bogus",
+                message="test",
             )
         )
         assert "error" in result
@@ -327,17 +335,13 @@ class TestInputValidation:
 
     @pytest.mark.anyio
     async def test_suppress_alert_invalid_level(self) -> None:
-        result = json.loads(
-            await server_mod.suppress_alert(source="nas", level="bogus")
-        )
+        result = json.loads(await server_mod.suppress_alert(source="nas", level="bogus"))
         assert "error" in result
         assert "invalid level" in result["error"]
 
     @pytest.mark.anyio
     async def test_suppress_alert_zero_duration(self) -> None:
-        result = json.loads(
-            await server_mod.suppress_alert(source="nas", duration_minutes=0)
-        )
+        result = json.loads(await server_mod.suppress_alert(source="nas", duration_minutes=0))
         assert "error" in result
         assert "duration_minutes" in result["error"]
 
@@ -345,7 +349,10 @@ class TestInputValidation:
     async def test_remind_invalid_urgency(self) -> None:
         result = json.loads(
             await server_mod.remind(
-                goal="test", source="test", tags=[], urgency="bogus",
+                goal="test",
+                source="test",
+                tags=[],
+                urgency="bogus",
             )
         )
         assert "error" in result
@@ -355,7 +362,10 @@ class TestInputValidation:
     async def test_add_context_zero_expires_days(self) -> None:
         result = json.loads(
             await server_mod.add_context(
-                source="test", tags=[], description="test", expires_days=0,
+                source="test",
+                tags=[],
+                description="test",
+                expires_days=0,
             )
         )
         assert "error" in result
@@ -661,6 +671,34 @@ class TestDeleteEntryTool:
         assert data["trashed"] == 2
         assert len(_store().get_patterns("nas")) == 0
         assert len(_store().get_patterns("ci")) == 1
+
+    @pytest.mark.anyio
+    async def test_dry_run_by_tags_uses_and_logic(self) -> None:
+        """Dry-run with tags uses AND logic, matching soft_delete_by_tags."""
+        await server_mod.learn_pattern(
+            source="nas", tags=["infra", "disk"], description="both tags"
+        )
+        await server_mod.learn_pattern(source="nas", tags=["infra"], description="one tag only")
+        # Dry-run with both tags should only match the first entry (AND logic)
+        result = await server_mod.delete_entry(tags=["infra", "disk"])
+        data = json.loads(result)
+        assert data["status"] == "dry_run"
+        assert data["would_trash"] == 1
+
+    @pytest.mark.anyio
+    async def test_delete_by_tags_with_confirm(self) -> None:
+        await server_mod.learn_pattern(
+            source="nas", tags=["infra", "disk"], description="both tags"
+        )
+        await server_mod.learn_pattern(source="nas", tags=["infra"], description="one tag only")
+        result = await server_mod.delete_entry(tags=["infra", "disk"], confirm=True)
+        data = json.loads(result)
+        assert data["status"] == "ok"
+        assert data["trashed"] == 1
+        # The entry with only ["infra"] should survive
+        remaining = _store().get_patterns("nas")
+        assert len(remaining) == 1
+        assert remaining[0].data["description"] == "one tag only"
 
     @pytest.mark.anyio
     async def test_delete_requires_source_or_id(self) -> None:

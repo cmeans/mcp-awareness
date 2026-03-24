@@ -111,9 +111,7 @@ class TestComposeEmbeddingText:
     def test_entry_type_included(self):
         """Entry type should be included to disambiguate note vs context."""
         note = _make_entry(data={"description": "same text"})
-        context = _make_entry(
-            entry_type=EntryType.CONTEXT, data={"description": "same text"}
-        )
+        context = _make_entry(entry_type=EntryType.CONTEXT, data={"description": "same text"})
         note_text = compose_embedding_text(note)
         context_text = compose_embedding_text(context)
         assert "type: note" in note_text
