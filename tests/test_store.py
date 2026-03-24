@@ -219,7 +219,12 @@ def test_expired_entries_cleaned(store):
         data={"description": "trigger cleanup"},
     )
     store.add(dummy)
-    time.sleep(0.2)
+    # Cleanup runs in a background thread — poll instead of fixed sleep
+    # to avoid flaky failures on slow CI runners
+    for _ in range(20):
+        time.sleep(0.2)
+        if store.count_active_suppressions() == 0:
+            break
     assert store.count_active_suppressions() == 0
 
 
