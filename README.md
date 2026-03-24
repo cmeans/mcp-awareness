@@ -270,7 +270,8 @@ See [Security considerations](docs/deployment-guide.md#security-considerations) 
 
 ### Getting started
 - **One-line demo install** — `curl | bash` sets up Awareness + Postgres + Cloudflare quick tunnel with pre-loaded demo data and a `getting-started` prompt that personalizes your instance
-- **Published Docker image** — `ghcr.io/cmeans/mcp-awareness`, auto-built on release tags
+- **Published Docker images** — `ghcr.io/cmeans/mcp-awareness` (GHCR) and Docker Hub, auto-built on release tags
+- **Optional semantic search** — add `AWARENESS_EMBEDDING_PROVIDER=ollama` and `docker compose --profile embeddings up -d` for vector similarity search
 
 ### Knowledge store
 - `remember`, `learn_pattern`, `add_context`, `set_preference` with filtered retrieval
