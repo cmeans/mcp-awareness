@@ -1,6 +1,6 @@
 # From Metrics to Mental Models: Ambient System Awareness via MCP
 
-> **Note:** This document was written during initial design (March 2026) and describes the architectural thinking behind the project. Some details have evolved — notably, the storage backend is now PostgreSQL-only (SQLite was dropped in v0.6.0), and most P0–P2 items in the priority table have been implemented. See the [CHANGELOG](../CHANGELOG.md) for current state and the [vision document](vision.md) for where the project is heading.
+> **Note:** This document was written during initial design (March 2026) and describes the architectural thinking behind the project. Many details have evolved — the storage backend is PostgreSQL-only (v0.6.0+), semantic search via pgvector + Ollama is implemented (v0.10.0+), intentions have a full lifecycle (v0.8.0+), and most P0–P2 items in the priority table have shipped. See the [CHANGELOG](../CHANGELOG.md) for current state and the [vision document](vision.md) for where the project is heading.
 
 ## What This Is
 

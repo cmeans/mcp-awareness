@@ -96,15 +96,25 @@ Each step requires trust boundaries — ownership, audit history, edit/view perm
 
 ## Current state
 
-Awareness today is a working personal context service with 18 tools, 5 built-in prompts, custom prompt support, ambient alerting with suppression and pattern matching, and a one-line demo install. It runs on PostgreSQL with pgvector ready for semantic search.
+Awareness today is a working personal context service with 29 tools, 5 built-in prompts, custom prompt support, ambient alerting with suppression and pattern matching, semantic search via pgvector + Ollama, intentions with time-based triggers, read/action tracking, entry relationships, and a one-line demo install. It runs on PostgreSQL 17 with auto-healing connections and background embedding generation.
 
-What's described above is the direction — some of it is months away, some further. The architecture is designed to support it: the Store protocol, the collator, the edge provider model, and the evaluation framework are all built with this progression in mind.
+What's described above is the direction — some of it is months away, some further. The architecture is designed to support it: the Store protocol, the collator, the edge provider model, the embedding pipeline, and the evaluation framework are all built with this progression in mind.
 
-See the [README](../README.md) for what's working today, or try it yourself:
+## Awareness Canvas
+
+[awareness-canvas](https://github.com/cmeans/awareness-canvas) is a companion project exploring what happens when you give Awareness a visual surface. Instead of building a traditional dashboard, the AI builds it for you — a spatial canvas where you chat with your data, and the agent generates React widgets on demand from awareness queries.
+
+The core idea: your briefing, knowledge explorer, intention tracker, and activity timeline aren't pre-built pages — they're components the AI creates and arranges based on what you ask for. "Show me my infrastructure health" produces a widget. "Add my financial overview next to it" produces another. The canvas remembers your layout.
+
+This is early-stage — planning docs and architecture are in the repo. The data pipeline (Browser → Claude API → self-hosted Awareness + Postgres) is designed so your data never leaves your infrastructure.
+
+## Try it
 
 ```bash
 curl -sSL https://raw.githubusercontent.com/cmeans/mcp-awareness/main/install-demo.sh | bash
 ```
+
+See the [README](../README.md) for what's working today.
 
 ---
 

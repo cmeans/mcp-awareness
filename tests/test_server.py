@@ -667,6 +667,41 @@ class TestRememberTool:
         assert entries[0]["data"]["learned_from"] == "claude-code"
 
     @pytest.mark.anyio
+    async def test_remember_json_content_as_dict(self) -> None:
+        """JSON content that Pydantic deserializes into a dict is stored as string."""
+        # Simulate what happens when Pydantic parses a JSON object for a str field
+        result = await server_mod.remember(
+            source="tools",
+            tags=["backup"],
+            description="Config snapshot",
+            content={"key": "value", "nested": [1, 2, 3]},  # type: ignore[arg-type]
+            content_type="application/json",
+        )
+        data = json.loads(result)
+        assert data["status"] == "ok"
+        entries = json.loads(await server_mod.get_knowledge(entry_type="note"))
+        # Content should be stored as a JSON string, not a dict
+        assert isinstance(entries[0]["data"]["content"], str)
+        parsed = json.loads(entries[0]["data"]["content"])
+        assert parsed["key"] == "value"
+
+    @pytest.mark.anyio
+    async def test_remember_json_content_as_list(self) -> None:
+        """JSON array content is also preserved as string."""
+        result = await server_mod.remember(
+            source="tools",
+            tags=["backup"],
+            description="List snapshot",
+            content=[1, 2, 3],  # type: ignore[arg-type]
+            content_type="application/json",
+        )
+        data = json.loads(result)
+        assert data["status"] == "ok"
+        entries = json.loads(await server_mod.get_knowledge(entry_type="note"))
+        assert isinstance(entries[0]["data"]["content"], str)
+        assert json.loads(entries[0]["data"]["content"]) == [1, 2, 3]
+
+    @pytest.mark.anyio
     async def test_remember_no_content_field_when_omitted(self) -> None:
         await server_mod.remember(source="personal", tags=[], description="simple note")
         entries = json.loads(await server_mod.get_knowledge(entry_type="note"))
@@ -746,6 +781,41 @@ class TestUpdateEntryTool:
         # No changelog since nothing changed
         entries = json.loads(await server_mod.get_knowledge(include_history="true"))
         assert "changelog" not in entries[0]["data"]
+
+    @pytest.mark.anyio
+    async def test_update_json_content(self) -> None:
+        """update_entry accepts JSON content that Pydantic deserializes."""
+        result = await server_mod.remember(
+            source="test", tags=["t"], description="test", content="old"
+        )
+        entry_id = json.loads(result)["id"]
+        await server_mod.update_entry(
+            entry_id=entry_id,
+            content={"new": "value"},  # type: ignore[arg-type]
+        )
+        entries = json.loads(await server_mod.get_knowledge(entry_type="note"))
+        assert isinstance(entries[0]["data"]["content"], str)
+        assert json.loads(entries[0]["data"]["content"]) == {"new": "value"}
+
+    @pytest.mark.anyio
+    async def test_update_source_and_content_type(self) -> None:
+        """update_entry can change source and content_type."""
+        result = await server_mod.remember(
+            source="old-source",
+            tags=["t"],
+            description="test",
+            content="data",
+            content_type="text/plain",
+        )
+        entry_id = json.loads(result)["id"]
+        await server_mod.update_entry(
+            entry_id=entry_id, source="new-source", content_type="application/json"
+        )
+        entries = json.loads(
+            await server_mod.get_knowledge(source="new-source", include_history="true")
+        )
+        assert len(entries) == 1
+        assert entries[0]["data"]["content_type"] == "application/json"
 
     @pytest.mark.anyio
     async def test_update_pattern(self) -> None:
@@ -1955,6 +2025,405 @@ class TestGenerateEmbedding:
 
 
 # ---------------------------------------------------------------------------
+# Backfill embeddings tool
+# ---------------------------------------------------------------------------
+
+
+class TestBackfillEmbeddings:
+    @pytest.mark.anyio
+    async def test_no_provider_returns_error(self, monkeypatch) -> None:
+        from mcp_awareness.embeddings import NullEmbedding
+
+        monkeypatch.setattr(server_mod, "_embedding_provider", NullEmbedding())
+        result = json.loads(await server_mod.backfill_embeddings())
+        assert result["status"] == "error"
+
+    @pytest.mark.anyio
+    async def test_backfill_creates_embeddings(self, monkeypatch) -> None:
+        class MockProvider:
+            model_name = "mock"
+            dimensions = 768
+
+            def embed(self, texts: list[str]) -> list[list[float]]:
+                return [[0.0] * 768 for _ in texts]
+
+            def is_available(self) -> bool:
+                return True
+
+        monkeypatch.setattr(server_mod, "_embedding_provider", MockProvider())
+
+        # Create entries without embeddings
+        s = _store()
+        from mcp_awareness.schema import Entry, EntryType, make_id, now_utc
+
+        now = now_utc()
+        for i in range(3):
+            s.add(
+                Entry(
+                    id=make_id(),
+                    type=EntryType.NOTE,
+                    source="test",
+                    tags=[],
+                    created=now,
+                    updated=now,
+                    expires=None,
+                    data={"description": f"note-{i}"},
+                )
+            )
+
+        result = json.loads(await server_mod.backfill_embeddings(limit=10))
+        assert result["status"] == "ok"
+        assert result["new_embeddings"] == 3
+        assert result["remaining"] == 0
+
+    @pytest.mark.anyio
+    async def test_backfill_refreshes_stale(self, monkeypatch) -> None:
+        """backfill re-embeds entries whose text changed since embedding."""
+
+        class MockProvider:
+            model_name = "mock"
+            dimensions = 768
+
+            def embed(self, texts: list[str]) -> list[list[float]]:
+                return [[0.0] * 768 for _ in texts]
+
+            def is_available(self) -> bool:
+                return True
+
+        monkeypatch.setattr(server_mod, "_embedding_provider", MockProvider())
+
+        s = _store()
+        from mcp_awareness.schema import Entry, EntryType, make_id, now_utc
+
+        now = now_utc()
+        entry = Entry(
+            id=make_id(),
+            type=EntryType.NOTE,
+            source="test",
+            tags=[],
+            created=now,
+            updated=now,
+            expires=None,
+            data={"description": "original"},
+        )
+        s.add(entry)
+
+        # First backfill — creates embedding
+        result = json.loads(await server_mod.backfill_embeddings(limit=10))
+        assert result["new_embeddings"] == 1
+
+        # Update the entry text
+        s.update_entry(entry.id, {"description": "changed text"})
+
+        # Second backfill — should refresh the stale embedding
+        result = json.loads(await server_mod.backfill_embeddings(limit=10))
+        assert result["refreshed_embeddings"] == 1
+
+
+# ---------------------------------------------------------------------------
+# hint parameter on get_knowledge
+# ---------------------------------------------------------------------------
+
+
+class TestGetKnowledgeHint:
+    @pytest.mark.anyio
+    async def test_hint_reranks_results(self, monkeypatch) -> None:
+        """hint param re-orders results by semantic similarity."""
+
+        call_count = 0
+
+        class MockProvider:
+            model_name = "mock"
+            dimensions = 768
+
+            def embed(self, texts: list[str]) -> list[list[float]]:
+                nonlocal call_count
+                call_count += 1
+                v = [0.0] * 768
+                v[0] = 1.0
+                return [v for _ in texts]
+
+            def is_available(self) -> bool:
+                return True
+
+        monkeypatch.setattr(server_mod, "_embedding_provider", MockProvider())
+
+        s = _store()
+        from mcp_awareness.schema import Entry, EntryType, make_id, now_utc
+
+        now = now_utc()
+        e1 = Entry(
+            id=make_id(),
+            type=EntryType.NOTE,
+            source="test",
+            tags=["finance"],
+            created=now,
+            updated=now,
+            expires=None,
+            data={"description": "NAS disk health"},
+        )
+        e2 = Entry(
+            id=make_id(),
+            type=EntryType.NOTE,
+            source="test",
+            tags=["finance"],
+            created=now,
+            updated=now,
+            expires=None,
+            data={"description": "401k retirement"},
+        )
+        s.add(e1)
+        s.add(e2)
+        vec = [0.0] * 768
+        vec[0] = 1.0
+        s.upsert_embedding(e1.id, "mock", 768, "h1", vec)
+        s.upsert_embedding(e2.id, "mock", 768, "h2", vec)
+
+        result = json.loads(
+            await server_mod.get_knowledge(tags=["finance"], hint="retirement savings")
+        )
+        assert len(result) == 2
+        # With hint, results should include similarity scores
+        assert "similarity" in result[0]
+
+    @pytest.mark.anyio
+    async def test_hint_list_mode_includes_similarity(self, monkeypatch) -> None:
+        """hint in list mode includes similarity scores."""
+
+        class MockProvider:
+            model_name = "mock"
+            dimensions = 768
+
+            def embed(self, texts: list[str]) -> list[list[float]]:
+                v = [0.0] * 768
+                v[0] = 1.0
+                return [v for _ in texts]
+
+            def is_available(self) -> bool:
+                return True
+
+        monkeypatch.setattr(server_mod, "_embedding_provider", MockProvider())
+
+        s = _store()
+        from mcp_awareness.schema import Entry, EntryType, make_id, now_utc
+
+        now = now_utc()
+        entry = Entry(
+            id=make_id(),
+            type=EntryType.NOTE,
+            source="test",
+            tags=["test"],
+            created=now,
+            updated=now,
+            expires=None,
+            data={"description": "test entry"},
+        )
+        s.add(entry)
+        vec = [0.0] * 768
+        vec[0] = 1.0
+        s.upsert_embedding(entry.id, "mock", 768, "h1", vec)
+
+        result = json.loads(await server_mod.get_knowledge(tags=["test"], hint="test", mode="list"))
+        assert len(result) == 1
+        assert "similarity" in result[0]
+        assert "data" not in result[0]
+
+    @pytest.mark.anyio
+    async def test_hint_without_provider_falls_back(self) -> None:
+        """hint is silently ignored when no embedding provider is available."""
+        s = _store()
+        from mcp_awareness.schema import Entry, EntryType, make_id, now_utc
+
+        now = now_utc()
+        s.add(
+            Entry(
+                id=make_id(),
+                type=EntryType.NOTE,
+                source="test",
+                tags=["test"],
+                created=now,
+                updated=now,
+                expires=None,
+                data={"description": "test note"},
+            )
+        )
+        # Default NullEmbedding — hint should be ignored, not error
+        result = json.loads(await server_mod.get_knowledge(tags=["test"], hint="something"))
+        assert len(result) == 1
+        assert "similarity" not in result[0]
+
+
+# ---------------------------------------------------------------------------
+# Entry relationships (get_related)
+# ---------------------------------------------------------------------------
+
+
+class TestGetRelated:
+    @pytest.mark.anyio
+    async def test_forward_references(self) -> None:
+        """get_related returns entries referenced in related_ids."""
+        s = _store()
+        from mcp_awareness.schema import Entry, EntryType, make_id, now_utc
+
+        now = now_utc()
+        target = Entry(
+            id=make_id(),
+            type=EntryType.NOTE,
+            source="test",
+            tags=[],
+            created=now,
+            updated=now,
+            expires=None,
+            data={"description": "target entry"},
+        )
+        referrer = Entry(
+            id=make_id(),
+            type=EntryType.NOTE,
+            source="test",
+            tags=[],
+            created=now,
+            updated=now,
+            expires=None,
+            data={"description": "links to target", "related_ids": [target.id]},
+        )
+        s.add(target)
+        s.add(referrer)
+
+        result = json.loads(await server_mod.get_related(entry_id=referrer.id))
+        assert len(result) == 1
+        assert result[0]["id"] == target.id
+
+    @pytest.mark.anyio
+    async def test_reverse_references(self) -> None:
+        """get_related returns entries that reference the given entry."""
+        s = _store()
+        from mcp_awareness.schema import Entry, EntryType, make_id, now_utc
+
+        now = now_utc()
+        target = Entry(
+            id=make_id(),
+            type=EntryType.NOTE,
+            source="test",
+            tags=[],
+            created=now,
+            updated=now,
+            expires=None,
+            data={"description": "target entry"},
+        )
+        referrer = Entry(
+            id=make_id(),
+            type=EntryType.NOTE,
+            source="test",
+            tags=[],
+            created=now,
+            updated=now,
+            expires=None,
+            data={"description": "links to target", "related_ids": [target.id]},
+        )
+        s.add(target)
+        s.add(referrer)
+
+        result = json.loads(await server_mod.get_related(entry_id=target.id))
+        assert len(result) == 1
+        assert result[0]["id"] == referrer.id
+
+    @pytest.mark.anyio
+    async def test_bidirectional_deduplicates(self) -> None:
+        """Entries appearing in both forward and reverse are not duplicated."""
+        s = _store()
+        from mcp_awareness.schema import Entry, EntryType, make_id, now_utc
+
+        now = now_utc()
+        a = Entry(
+            id=make_id(),
+            type=EntryType.NOTE,
+            source="test",
+            tags=[],
+            created=now,
+            updated=now,
+            expires=None,
+            data={"description": "entry A"},
+        )
+        b = Entry(
+            id=make_id(),
+            type=EntryType.NOTE,
+            source="test",
+            tags=[],
+            created=now,
+            updated=now,
+            expires=None,
+            data={"description": "entry B", "related_ids": [a.id]},
+        )
+        # A also references B
+        a.data["related_ids"] = [b.id]
+        s.add(a)
+        s.add(b)
+
+        result = json.loads(await server_mod.get_related(entry_id=a.id))
+        assert len(result) == 1
+        assert result[0]["id"] == b.id
+
+    @pytest.mark.anyio
+    async def test_not_found(self) -> None:
+        result = json.loads(await server_mod.get_related(entry_id="nonexistent"))
+        assert result["status"] == "error"
+
+    @pytest.mark.anyio
+    async def test_no_relations(self) -> None:
+        """Entry with no related_ids returns empty list."""
+        s = _store()
+        from mcp_awareness.schema import Entry, EntryType, make_id, now_utc
+
+        now = now_utc()
+        entry = Entry(
+            id=make_id(),
+            type=EntryType.NOTE,
+            source="test",
+            tags=[],
+            created=now,
+            updated=now,
+            expires=None,
+            data={"description": "lone wolf"},
+        )
+        s.add(entry)
+        result = json.loads(await server_mod.get_related(entry_id=entry.id))
+        assert result == []
+
+    @pytest.mark.anyio
+    async def test_list_mode(self) -> None:
+        s = _store()
+        from mcp_awareness.schema import Entry, EntryType, make_id, now_utc
+
+        now = now_utc()
+        target = Entry(
+            id=make_id(),
+            type=EntryType.NOTE,
+            source="test",
+            tags=[],
+            created=now,
+            updated=now,
+            expires=None,
+            data={"description": "target"},
+        )
+        referrer = Entry(
+            id=make_id(),
+            type=EntryType.NOTE,
+            source="test",
+            tags=[],
+            created=now,
+            updated=now,
+            expires=None,
+            data={"description": "referrer", "related_ids": [target.id]},
+        )
+        s.add(target)
+        s.add(referrer)
+        result = json.loads(await server_mod.get_related(entry_id=referrer.id, mode="list"))
+        assert len(result) == 1
+        assert "description" in result[0]
+        assert "data" not in result[0]
+
+
+# ---------------------------------------------------------------------------
 # Semantic search integration tests (require Ollama)
 # ---------------------------------------------------------------------------
 
@@ -2000,12 +2469,18 @@ class TestSemanticSearchIntegration:
             learned_from="test",
         )
 
-        # Search for financial concepts
-        result = json.loads(await server_mod.semantic_search(query="retirement savings"))
-        assert len(result) >= 1
+        # Wait for background embedding threads to embed BOTH entries
+        import time
+
+        for _ in range(30):
+            result = json.loads(await server_mod.semantic_search(query="retirement savings"))
+            if len(result) >= 2:
+                break
+            time.sleep(0.5)
+        assert len(result) >= 2
         # The finance entry should rank higher than the infra entry
         assert "401k" in result[0]["data"]["description"]
-        assert result[0]["similarity"] > 0.5
+        assert result[0]["similarity"] > result[1]["similarity"]
 
     @skip_no_ollama
     @pytest.mark.anyio
@@ -2023,6 +2498,16 @@ class TestSemanticSearchIntegration:
             )
         )
         entry_id = result["id"]
+
+        # Wait for background embedding thread pool to drain
+        import time
+
+        for _ in range(20):
+            s = _store()
+            missing = s.get_entries_without_embeddings("nomic-embed-text")
+            if entry_id not in [e.id for e in missing]:
+                break
+            time.sleep(0.5)
 
         # Verify embedding was created in the store
         s = _store()

@@ -75,15 +75,20 @@ src/mcp_awareness/
 
 **Storage abstraction**: `Store` protocol defines the interface; `PostgresStore` is the sole implementation. The collator depends on the protocol, not the concrete class. PostgresStore uses JSONB with GIN indexes for tags, psycopg sync driver, and pgvector for semantic search (HNSW-indexed embeddings table). `wal_level=logical` configured for Debezium CDC readiness.
 
+**Embedding pipeline**: `embeddings.py` defines the `EmbeddingProvider` protocol with `OllamaEmbedding` and `NullEmbedding` implementations. Write tools submit embedding generation to a background `ThreadPoolExecutor` (2 workers). `compose_embedding_text()` builds composite text from entry fields; `text_hash()` detects stale embeddings. Separate `embeddings` table with HNSW index, `ON DELETE CASCADE` from entries.
+
+**Connection resilience**: `PostgresStore._conn` is a property that health-checks every 30s. Dead connections reconnect transparently — no permanent connection failures after Postgres restarts.
+
 **Key design decisions**:
 - Briefing is computed on-demand per read (not background task)
 - Eight entry types: status, alert, pattern, suppression, context, preference, note, intention
 - One status entry per source (upsert), alerts keyed by source + alert_id, preferences upsert by key + scope
-- Notes support optional content payload with MIME content_type
+- Notes support optional content payload with MIME content_type; JSON content auto-serialized if Pydantic deserializes before str validator
 - update_entry works on knowledge types only (note/pattern/context/preference); status/alert/suppression are immutable. Changes tracked in changelog array
 - Suppressions use expiry timestamps + escalation override (critical breaks through warning-level suppression)
 - Pattern matching uses word-overlap between effect string and alert fields (hyphens/dashes normalized); hour ranges handle overnight wraparound
 - Soft delete: `delete_entry` moves to trash (30-day retention), `restore_entry` recovers, `get_deleted` lists trash. Bulk deletes require `confirm=True` (dry-run by default). Auto-purged by existing `_cleanup_expired`.
+- Entry relationships: optional `related_ids` list in data field, traversed by `get_related` (bidirectional via JSONB containment)
 - Resource descriptions carry behavioral hints — duplicate guidance in both server instructions and docstrings
 - _cleanup_expired spawns a background daemon thread (never blocks the caller), debounced (10s interval), with alive-check guard to prevent thread accumulation
 - Transport: stdio (default) or streamable-http via AWARENESS_TRANSPORT env var; HTTP on AWARENESS_HOST:AWARENESS_PORT/mcp
@@ -91,9 +96,10 @@ src/mcp_awareness/
 
 ## Deployment
 
-Docker Compose runs both the server and a Cloudflare named tunnel. See `docker-compose.yaml`.
+Docker Compose runs the server, Postgres, and a Cloudflare named tunnel. See `docker-compose.yaml`.
 - Named tunnel: `docker compose up -d` (requires `~/.cloudflared/` credentials)
 - Quick tunnel: `docker compose --profile quick up -d mcp-awareness tunnel-quick` (ephemeral URL, no account needed)
+- Embeddings: `docker compose --profile embeddings up -d` (adds Ollama with auto-model-pull)
 - Postgres data stored in Docker volume (configurable via `AWARENESS_PG_DATA` in `.env`)
 
 ## Key Documents

@@ -7,6 +7,7 @@ Transport is selected via the AWARENESS_TRANSPORT environment variable:
 
 from __future__ import annotations
 
+import concurrent.futures
 import functools
 import json
 import os
@@ -96,23 +97,68 @@ def _get_embedding_provider() -> EmbeddingProvider:
     return _embedding_provider
 
 
-def _generate_embedding(entry: Entry) -> None:
-    """Fire-and-forget embedding generation. Never blocks the response."""
+# Thread pool for background embedding generation — max 2 workers to avoid
+# overwhelming Ollama while keeping writes non-blocking.
+_embedding_pool = concurrent.futures.ThreadPoolExecutor(max_workers=2, thread_name_prefix="embed")
+
+
+def _do_embed(
+    entry_id: str,
+    entry_source: str,
+    entry_tags: list[str],
+    entry_data: dict[str, Any],
+    entry_type_val: str,
+) -> None:
+    """Actual embedding work — runs in thread pool with its own DB connection.
+
+    Uses a dedicated connection to avoid racing with the main thread's
+    shared connection (same pattern as _do_cleanup in PostgresStore).
+    """
     try:
         provider = _get_embedding_provider()
         if not provider.is_available():
             return
-        if not should_embed(entry):
-            return
+        entry = Entry(
+            id=entry_id,
+            type=EntryType(entry_type_val),
+            source=entry_source,
+            tags=entry_tags,
+            created=now_utc(),
+            updated=now_utc(),
+            expires=None,
+            data=entry_data,
+        )
         text = compose_embedding_text(entry)
         h = text_hash(text)
         vectors = provider.embed([text])
         if vectors:
-            store.upsert_embedding(
-                entry.id, provider.model_name, provider.dimensions, h, vectors[0]
-            )
+            # Use a dedicated connection for the background write to avoid
+            # racing with the main thread's shared connection.
+            import psycopg
+
+            with psycopg.connect(store.dsn) as conn:
+                vector_literal = "[" + ",".join(str(v) for v in vectors[0]) + "]"
+                conn.execute(
+                    "INSERT INTO embeddings (entry_id, model, dimensions, text_hash, embedding) "
+                    "VALUES (%s, %s, %s, %s, %s::vector) "
+                    "ON CONFLICT (entry_id, model) DO UPDATE SET "
+                    "embedding = EXCLUDED.embedding, text_hash = EXCLUDED.text_hash, "
+                    "dimensions = EXCLUDED.dimensions, created = now()",
+                    (entry_id, provider.model_name, provider.dimensions, h, vector_literal),
+                )
+                conn.commit()
     except Exception:
-        pass  # Background catch-up will handle failures
+        pass  # Backfill will catch failures
+
+
+def _generate_embedding(entry: Entry) -> None:
+    """Submit embedding generation to background thread pool. Never blocks."""
+    if not should_embed(entry):
+        return
+    entry_type_val = entry.type.value if isinstance(entry.type, EntryType) else entry.type
+    _embedding_pool.submit(
+        _do_embed, entry.id, entry.source, list(entry.tags), dict(entry.data), entry_type_val
+    )
 
 
 def _log_reads(entries: list[Any], tool_name: str) -> None:
@@ -304,6 +350,7 @@ async def get_knowledge(
     learned_from: str | None = None,
     created_after: str | None = None,
     created_before: str | None = None,
+    hint: str | None = None,
     mode: str | None = None,
     limit: int | None = None,
     offset: int | None = None,
@@ -325,11 +372,16 @@ async def get_knowledge(
     created_before: ISO 8601 timestamp — filter by creation time (not last update).
     Use created_after/created_before when you care about when knowledge was first
     recorded, not when it was last modified.
+    hint: natural language phrase to re-rank results by semantic similarity.
+    Requires an embedding provider. Tag/source filters still apply — hint just
+    reorders the results so the most relevant appear first. Example:
+    get_knowledge(tags=["finance"], hint="retirement savings") returns all
+    finance entries but with retirement-related ones ranked first.
     mode: omit for full entries, 'list' for metadata only (id, type, source,
     description, tags, created, updated — no content or changelog). Use 'list'
     to orient before pulling full entries.
     Use limit/offset for pagination (e.g., limit=10, offset=0 for first page).
-    Results are sorted by most recently updated first.
+    Results are sorted by most recently updated first (or by relevance if hint is set).
     This tool always returns JSON with a status field or an entry list.
     If you receive an unstructured error, the failure is in the transport
     or platform layer, not in awareness."""
@@ -363,6 +415,34 @@ async def get_knowledge(
             offset=offset,
         )
     _log_reads(entries, "get_knowledge")
+
+    # Semantic re-ranking: if hint is provided and embeddings are available,
+    # re-order results by cosine similarity to the hint text.
+    similarity_map: dict[str, float] = {}
+    if hint and entries:
+        provider = _get_embedding_provider()
+        if provider.is_available():
+            try:
+                hint_vec = provider.embed([hint])
+                if hint_vec:
+                    hint_et = EntryType(entry_type) if entry_type else None
+                    scored = store.semantic_search(
+                        embedding=hint_vec[0],
+                        model=provider.model_name,
+                        source=source,
+                        tags=tags,
+                        entry_type=hint_et,
+                        since=since_dt,
+                        until=until_dt,
+                        limit=len(entries) + 10,
+                    )
+                    similarity_map = {e.id: s for e, s in scored}
+                    # Re-sort: entries with embeddings by similarity (desc),
+                    # entries without embeddings at the end
+                    entries.sort(key=lambda e: similarity_map.get(e.id, -1.0), reverse=True)
+            except Exception:  # pragma: no cover
+                pass  # Fall back to default ordering
+
     if mode == "list":
         read_counts = store.get_read_counts([e.id for e in entries])
         result = []
@@ -371,9 +451,17 @@ async def get_knowledge(
             counts = read_counts.get(e.id, {})
             d["read_count"] = counts.get("read_count", 0)
             d["last_read"] = counts.get("last_read")
+            if e.id in similarity_map:
+                d["similarity"] = round(similarity_map[e.id], 4)
             result.append(d)
         return json.dumps(result, indent=2)
-    return json.dumps([e.to_dict() for e in entries], indent=2)
+    items = []
+    for e in entries:
+        d = e.to_dict()
+        if e.id in similarity_map:
+            d["similarity"] = round(similarity_map[e.id], 4)
+        items.append(d)
+    return json.dumps(items, indent=2)
 
 
 @mcp.tool()
@@ -511,6 +599,10 @@ async def remember(
         "learned_from": learned_from,
     }
     if content is not None:
+        # Pydantic may deserialize JSON strings into dicts/lists before our
+        # str type hint is checked. Serialize back to ensure content is always a string.
+        if not isinstance(content, str):
+            content = json.dumps(content)
         data["content"] = content
         data["content_type"] = content_type
     entry = Entry(
@@ -562,6 +654,8 @@ async def update_entry(
     if source is not None:
         updates["source"] = source
     if content is not None:
+        if not isinstance(content, str):
+            content = json.dumps(content)
         updates["content"] = content
     if content_type is not None:
         updates["content_type"] = content_type
@@ -1075,6 +1169,111 @@ async def semantic_search(
         d["similarity"] = round(score, 4)
         items.append(d)
     return json.dumps(items, indent=2)
+
+
+@mcp.tool()
+@_timed
+async def backfill_embeddings(
+    limit: int = 50,
+) -> str:
+    """Generate embeddings for entries that don't have one yet.
+    Also re-embeds entries whose content changed since their last embedding.
+    Call this after enabling an embedding provider to index existing knowledge,
+    or periodically to catch up on stale embeddings.
+    Returns counts of new and refreshed embeddings.
+    Requires an embedding provider (AWARENESS_EMBEDDING_PROVIDER env var)."""
+    provider = _get_embedding_provider()
+    if not provider.is_available():
+        return json.dumps(
+            {
+                "status": "error",
+                "message": (
+                    "Backfill requires an embedding provider. "
+                    "Set AWARENESS_EMBEDDING_PROVIDER=ollama."
+                ),
+            }
+        )
+
+    # Phase 1: entries without embeddings
+    missing = store.get_entries_without_embeddings(provider.model_name, limit=limit)
+    new_count = 0
+    for entry in missing:
+        try:
+            text = compose_embedding_text(entry)
+            h = text_hash(text)
+            vectors = provider.embed([text])
+            if vectors:
+                store.upsert_embedding(
+                    entry.id, provider.model_name, provider.dimensions, h, vectors[0]
+                )
+                new_count += 1
+        except Exception:  # pragma: no cover
+            continue
+
+    # Phase 2: stale embeddings (text changed since embedding)
+    stale = store.get_stale_embeddings(provider.model_name, limit=limit)
+    refreshed_count = 0
+    for entry in stale:
+        try:
+            text = compose_embedding_text(entry)
+            h = text_hash(text)
+            vectors = provider.embed([text])
+            if vectors:
+                store.upsert_embedding(
+                    entry.id, provider.model_name, provider.dimensions, h, vectors[0]
+                )
+                refreshed_count += 1
+        except Exception:  # pragma: no cover
+            continue
+
+    remaining = len(store.get_entries_without_embeddings(provider.model_name, limit=1))
+    return json.dumps(
+        {
+            "status": "ok",
+            "new_embeddings": new_count,
+            "refreshed_embeddings": refreshed_count,
+            "remaining": remaining,
+        }
+    )
+
+
+@mcp.tool()
+@_timed
+async def get_related(
+    entry_id: str,
+    mode: str | None = None,
+) -> str:
+    """Get entries related to a given entry (bidirectional).
+    Returns entries that this entry references via related_ids in its data,
+    plus entries that reference this entry in their related_ids.
+    Use this to explore connections between decisions, context, patterns,
+    and intentions. Convention: store related_ids as a list of entry IDs
+    in the data field when using remember or learn_pattern.
+    mode: omit for full entries, 'list' for metadata only."""
+    entry = store.get_entry_by_id(entry_id)
+    if entry is None:
+        return json.dumps({"status": "error", "message": f"Entry not found: {entry_id}"})
+
+    # Forward: entries this entry references
+    forward_ids: list[str] = entry.data.get("related_ids", [])
+    forward = [store.get_entry_by_id(rid) for rid in forward_ids if rid != entry_id]
+    forward = [e for e in forward if e is not None]
+
+    # Reverse: entries that reference this entry via JSONB containment
+    reverse = store.get_referencing_entries(entry_id)
+
+    # Deduplicate (an entry could be in both directions)
+    seen = set()
+    related = []
+    for e in forward + reverse:
+        if e.id not in seen:
+            seen.add(e.id)
+            related.append(e)
+
+    _log_reads(related, "get_related")
+    if mode == "list":
+        return json.dumps([e.to_list_dict() for e in related], indent=2)
+    return json.dumps([e.to_dict() for e in related], indent=2)
 
 
 # ---------------------------------------------------------------------------

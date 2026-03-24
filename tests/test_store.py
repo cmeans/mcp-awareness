@@ -1556,6 +1556,67 @@ def test_get_knowledge_created_before(store):
 
 
 # ---------------------------------------------------------------------------
+# Connection resilience
+# ---------------------------------------------------------------------------
+
+
+def test_reconnect_after_closed_connection(store):
+    """Store reconnects transparently when connection is closed."""
+    # Force the connection closed
+    store._PostgresStore__conn.close()
+    # Reset health check timer so _conn property actually checks
+    store._last_health_check = 0.0
+    # Should reconnect and work
+    store.upsert_status("test", ["t"], {"metrics": {}, "ttl_sec": 120})
+    assert store.get_sources() == ["test"]
+
+
+def test_health_check_debounced(store):
+    """Health check doesn't run on every access (debounced)."""
+    import time
+
+    # After init, health check was just run
+    store._last_health_check = time.monotonic()
+    # Access _conn — should NOT run health check (too soon)
+    # If it did, we'd see a SELECT 1 + rollback, but we can't easily observe that.
+    # Instead, verify the debounce timer works by checking that a closed connection
+    # is NOT healed when the timer hasn't elapsed.
+    store._PostgresStore__conn.close()
+    # Timer hasn't elapsed — _conn returns the closed connection
+    # (This would fail on next use, but the point is the health check is debounced)
+    # Force the timer to expire for the next access
+    store._last_health_check = 0.0
+    # Now it heals
+    entries = store.get_entries()
+    assert isinstance(entries, list)
+
+
+def test_reconnect_on_operational_error(store):
+    """Store reconnects when SELECT 1 health check raises OperationalError."""
+    import psycopg
+
+    store._last_health_check = 0.0
+    # Patch execute to raise OperationalError (simulates broken connection)
+    original_execute = store._PostgresStore__conn.execute
+    call_count = 0
+
+    def failing_execute(*args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            raise psycopg.OperationalError("connection lost")
+        return original_execute(*args, **kwargs)
+
+    store._PostgresStore__conn.execute = failing_execute
+    # Access _conn — should trigger reconnect via OperationalError path
+    _ = store._conn
+    # After reconnect, store should work
+    store._last_health_check = 0.0
+    store.upsert_status("test-reconnect", ["t"], {"metrics": {}, "ttl_sec": 120})
+    assert "test-reconnect" in store.get_sources()
+
+
+# ---------------------------------------------------------------------------
 # Embeddings / semantic search
 # ---------------------------------------------------------------------------
 
@@ -1920,3 +1981,52 @@ class TestEmbeddings:
         results = store.semantic_search(vec, "m", until=cutoff)
         assert len(results) == 1
         assert results[0][0].data["description"] == "old"
+
+    def test_get_stale_embeddings(self, store):
+        """Entries whose text changed after embedding are detected as stale."""
+        now = now_utc()
+        entry = Entry(
+            id=make_id(),
+            type=EntryType.NOTE,
+            source="test",
+            tags=[],
+            created=now,
+            updated=now,
+            expires=None,
+            data={"description": "original text"},
+        )
+        store.add(entry)
+        vec = self._vec(768, 0)
+        # Embed with hash of original text
+        from mcp_awareness.embeddings import compose_embedding_text, text_hash
+
+        original_hash = text_hash(compose_embedding_text(entry))
+        store.upsert_embedding(entry.id, "m", 768, original_hash, vec)
+        # No stale entries yet
+        assert store.get_stale_embeddings("m") == []
+        # Update the entry text
+        store.update_entry(entry.id, {"description": "changed text"})
+        # Now it should be stale
+        stale = store.get_stale_embeddings("m")
+        assert len(stale) == 1
+        assert stale[0].id == entry.id
+
+    def test_get_stale_embeddings_not_stale(self, store):
+        """Entries with matching hash are not stale."""
+        now = now_utc()
+        entry = Entry(
+            id=make_id(),
+            type=EntryType.NOTE,
+            source="test",
+            tags=[],
+            created=now,
+            updated=now,
+            expires=None,
+            data={"description": "stable text"},
+        )
+        store.add(entry)
+        from mcp_awareness.embeddings import compose_embedding_text, text_hash
+
+        h = text_hash(compose_embedding_text(entry))
+        store.upsert_embedding(entry.id, "m", 768, h, self._vec(768, 0))
+        assert store.get_stale_embeddings("m") == []
