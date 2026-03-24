@@ -202,9 +202,11 @@ mcp = FastMCP(
         "referenced resources. Don't read anything else unless asked or unless "
         "the briefing indicates an issue. Group alerts by source if multiple "
         "systems have issues. One sentence for warnings, short paragraph for "
-        "critical. Don't re-check unless asked. When you learn something about "
-        "a system from conversation, use learn_pattern to record it. When the "
-        "user asks to suppress alerts, use suppress_alert — not a memory edit."
+        "critical. Don't re-check unless asked. When you learn something worth "
+        "keeping, use remember for permanent facts, add_context for temporal "
+        "events, and learn_pattern ONLY for if/then rules (when X, expect Y). "
+        "When the user asks to suppress alerts, use suppress_alert — not a "
+        "memory edit."
     ),
 )
 
@@ -543,11 +545,14 @@ async def learn_pattern(
     effect: str | None = None,
     learned_from: str = "conversation",
 ) -> str:
-    """Record an operational pattern learned from conversation.
+    """Record an if/then operational rule that the alert collator uses for matching.
+    Use ONLY when there is a clear condition → effect relationship:
+    e.g., 'When qBittorrent restarts on Fridays, expect high CPU for 10 minutes'.
+    The conditions and effect fields drive automatic alert suppression and pattern
+    matching — they are not just metadata.
+    NOT for general facts, project notes, or personal knowledge — use remember for those.
+    Quick test: does it have a "when X happens, expect Y"? → learn_pattern. Otherwise → remember.
     Any agent can write; any agent can read. Knowledge is portable across platforms.
-    Use this when you learn something about a system's normal behavior —
-    e.g., 'qBittorrent sometimes stopped for maintenance on Fridays'.
-    Do NOT use agent memory for this — use this tool so all agents benefit.
     Returns JSON with status and entry id. If you receive an unstructured
     error, the failure is in the transport or platform layer, not in awareness."""
     now = now_utc()
@@ -582,9 +587,12 @@ async def remember(
     learned_from: str = "conversation",
     logical_key: str | None = None,
 ) -> str:
-    """Store a general-purpose note. Use this for any knowledge that doesn't fit
-    operational patterns (learn_pattern) or time-limited context (add_context).
-    Examples: personal facts, project notes, skill backups, config snapshots.
+    """Store permanent knowledge — facts that will still be true in 30 days.
+    This is the default tool for recording what you learn. Use it for personal facts,
+    project notes, design decisions, config snapshots, preferences, or anything
+    worth knowing long-term.
+    Quick test: still true in 30 days? → remember. Happening now, will become stale?
+    → add_context. Has a "when X, expect Y" rule? → learn_pattern.
     description is a short summary; content is the optional payload (text, JSON, etc.).
     content_type is a MIME type (default text/plain). Set learned_from to your platform.
     logical_key is an optional identifier for upsert behavior — if a note with the
@@ -738,10 +746,13 @@ async def add_context(
     description: str,
     expires_days: int = 30,
 ) -> str:
-    """Record historical context that any agent should know about.
-    Auto-expires after specified duration. Use this for events like
-    'sdb was replaced, RAID rebuilt March 15' — context that's relevant
-    for a limited time. Any agent on any platform can read this."""
+    """Record something happening now that will become stale — auto-expires
+    after the specified duration (default 30 days).
+    Use for current events, milestones, temporary states, or anything with
+    a natural shelf life: 'sdb replaced, RAID rebuilding', 'PR #45 merged',
+    'Alice moving this week', 'construction on Ashland through April'.
+    Quick test: still true in 30 days? → remember instead. Happening now,
+    will become stale? → add_context. Any agent on any platform can read this."""
     now = now_utc()
     expires = now + timedelta(days=expires_days)
     entry = Entry(
@@ -1021,14 +1032,13 @@ async def remind(
     recurrence: str | None = None,
     learned_from: str = "conversation",
 ) -> str:
-    """Create an intention — a goal to be evaluated when conditions align.
-    Unlike remember (permanent knowledge) or add_context (time-limited facts),
-    intentions have a lifecycle: they start pending, fire when conditions are met,
-    and complete when you act on them.
-    goal: what outcome is desired (e.g., 'pick up milk', 'tell Mom about insurance').
-    deliver_at: ISO 8601 timestamp — when to surface this intention. Required for
-    time-based triggers. Omit for intentions that will be triggered by other
-    conditions (location, events) in the future.
+    """Create a todo, reminder, or planned action — anything the user intends to do.
+    Use this for tasks, errands, goals, follow-ups, and scheduled work. Intentions
+    have a lifecycle: pending → fired → active → completed/snoozed/cancelled.
+    goal: what needs to happen (e.g., 'pick up milk', 'review PR #47', 'call dentist').
+    deliver_at: ISO 8601 timestamp — when to surface this. Required for time-based
+    reminders. Omit for open-ended todos or intentions triggered by other conditions
+    (location, events) in the future.
     constraints: optional preferences or requirements (e.g., 'organic, budget-conscious').
     urgency: 'low', 'normal', or 'high'. High-urgency intentions surface more prominently.
     recurrence: reserved for future use. Currently only one-shot intentions are supported.

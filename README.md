@@ -49,9 +49,9 @@ The [original LinkedIn post](https://www.linkedin.com/posts/cmeans_mcp-modelcont
 
 Any AI can write knowledge. Any AI can read it. Knowledge accumulates through conversation, not configuration:
 
-- **`remember`** — store anything worth keeping: personal facts, project notes, skill backups, config snapshots
-- **`learn_pattern`** — record operational knowledge with conditions and effects for alert matching
-- **`add_context`** — store time-limited knowledge that auto-expires (events, temporary situations)
+- **`remember`** — store permanent knowledge (still true in 30 days?): personal facts, project notes, design decisions
+- **`add_context`** — store temporal knowledge that auto-expires (happening now, will become stale?)
+- **`learn_pattern`** — record if/then rules for alert matching (when X happens, expect Y)
 - **`update_entry`** — modify entries in place with automatic changelog tracking
 - **`get_knowledge`** — retrieve by source, tags, or entry type with optional change history
 
@@ -234,12 +234,12 @@ The server exposes 29 MCP tools. Clients that support MCP resources also get 6 r
 |------|-------------|
 | `report_status` | Report system status. Called periodically by edge processes. Upserts one entry per source; stale if TTL expires without refresh. |
 | `report_alert` | Report or resolve an alert. Captures diagnostics at detection time. Levels: `warning`, `critical`. Types: `threshold`, `structural`, `baseline`. |
-| `learn_pattern` | Record an operational pattern with conditions/effects for alert matching. Set `learned_from` to your platform. |
-| `remember` | Store a general-purpose note. Optional `content` payload with MIME `content_type`. For anything that isn't an operational pattern or time-limited context. |
-| `add_context` | Record time-limited knowledge (default 30 days). Use for events, temporary situations, or facts that lose relevance. |
+| `remember` | Store permanent knowledge — facts still true in 30 days. Optional `content` payload with MIME `content_type`. Default choice for personal facts, project notes, design decisions. |
+| `add_context` | Store temporal knowledge that auto-expires (default 30 days). Use for current events, milestones, or temporary states that will become stale. |
+| `learn_pattern` | Record an if/then operational rule with conditions/effects for alert matching. Use only when there's a clear "when X happens, expect Y" relationship. |
 | `set_preference` | Set a portable presentation preference (e.g., `alert_verbosity`, `check_frequency`). Upserts by key + scope. |
 | `suppress_alert` | Suppress alerts by source/tags/metric. Time-limited with escalation override — critical alerts can break through. |
-| `remind` | Create an intention with a goal and optional `deliver_at` timestamp. Surfaced in briefing when conditions align. |
+| `remind` | Create a todo, reminder, or planned action. Optional `deliver_at` timestamp for time-based surfacing. Intentions have a lifecycle: pending → fired → active → completed. |
 | `update_intention` | Transition an intention state: pending → fired → active → completed/snoozed/cancelled. |
 | `acted_on` | Log that you took action because of an entry. Tags inherited from the entry. |
 
