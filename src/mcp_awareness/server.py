@@ -414,34 +414,20 @@ async def get_knowledge(
     until_dt = ensure_dt(until) if until else None
     created_after_dt = ensure_dt(created_after) if created_after else None
     created_before_dt = ensure_dt(created_before) if created_before else None
-    if entry_type:
-        et = EntryType(entry_type)
-        entries = store.get_knowledge(
-            tags=tags,
-            include_history=include_history,
-            since=since_dt,
-            until=until_dt,
-            source=source,
-            entry_type=et,
-            learned_from=learned_from,
-            created_after=created_after_dt,
-            created_before=created_before_dt,
-            limit=limit,
-            offset=offset,
-        )
-    else:
-        entries = store.get_knowledge(
-            tags=tags,
-            include_history=include_history,
-            since=since_dt,
-            until=until_dt,
-            source=source,
-            learned_from=learned_from,
-            created_after=created_after_dt,
-            created_before=created_before_dt,
-            limit=limit,
-            offset=offset,
-        )
+    et = EntryType(entry_type) if entry_type else None
+    entries = store.get_knowledge(
+        tags=tags,
+        include_history=include_history,
+        since=since_dt,
+        until=until_dt,
+        source=source,
+        entry_type=et,
+        learned_from=learned_from,
+        created_after=created_after_dt,
+        created_before=created_before_dt,
+        limit=limit,
+        offset=offset,
+    )
     _log_reads(entries, "get_knowledge")
 
     # Semantic re-ranking: if hint is provided and embeddings are available,
