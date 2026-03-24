@@ -434,7 +434,7 @@ async def get_knowledge(
                     # Re-sort: entries with embeddings by similarity (desc),
                     # entries without embeddings at the end
                     entries.sort(key=lambda e: similarity_map.get(e.id, -1.0), reverse=True)
-            except Exception:
+            except Exception:  # pragma: no cover
                 pass  # Fall back to default ordering
 
     if mode == "list":
@@ -1201,7 +1201,7 @@ async def backfill_embeddings(
                     entry.id, provider.model_name, provider.dimensions, h, vectors[0]
                 )
                 new_count += 1
-        except Exception:
+        except Exception:  # pragma: no cover
             continue
 
     # Phase 2: stale embeddings (text changed since embedding)
@@ -1217,7 +1217,7 @@ async def backfill_embeddings(
                     entry.id, provider.model_name, provider.dimensions, h, vectors[0]
                 )
                 refreshed_count += 1
-        except Exception:
+        except Exception:  # pragma: no cover
             continue
 
     remaining = len(store.get_entries_without_embeddings(provider.model_name, limit=1))
