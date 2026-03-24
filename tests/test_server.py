@@ -667,6 +667,41 @@ class TestRememberTool:
         assert entries[0]["data"]["learned_from"] == "claude-code"
 
     @pytest.mark.anyio
+    async def test_remember_json_content_as_dict(self) -> None:
+        """JSON content that Pydantic deserializes into a dict is stored as string."""
+        # Simulate what happens when Pydantic parses a JSON object for a str field
+        result = await server_mod.remember(
+            source="tools",
+            tags=["backup"],
+            description="Config snapshot",
+            content={"key": "value", "nested": [1, 2, 3]},  # type: ignore[arg-type]
+            content_type="application/json",
+        )
+        data = json.loads(result)
+        assert data["status"] == "ok"
+        entries = json.loads(await server_mod.get_knowledge(entry_type="note"))
+        # Content should be stored as a JSON string, not a dict
+        assert isinstance(entries[0]["data"]["content"], str)
+        parsed = json.loads(entries[0]["data"]["content"])
+        assert parsed["key"] == "value"
+
+    @pytest.mark.anyio
+    async def test_remember_json_content_as_list(self) -> None:
+        """JSON array content is also preserved as string."""
+        result = await server_mod.remember(
+            source="tools",
+            tags=["backup"],
+            description="List snapshot",
+            content=[1, 2, 3],  # type: ignore[arg-type]
+            content_type="application/json",
+        )
+        data = json.loads(result)
+        assert data["status"] == "ok"
+        entries = json.loads(await server_mod.get_knowledge(entry_type="note"))
+        assert isinstance(entries[0]["data"]["content"], str)
+        assert json.loads(entries[0]["data"]["content"]) == [1, 2, 3]
+
+    @pytest.mark.anyio
     async def test_remember_no_content_field_when_omitted(self) -> None:
         await server_mod.remember(source="personal", tags=[], description="simple note")
         entries = json.loads(await server_mod.get_knowledge(entry_type="note"))

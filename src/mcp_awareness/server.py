@@ -511,6 +511,10 @@ async def remember(
         "learned_from": learned_from,
     }
     if content is not None:
+        # Pydantic may deserialize JSON strings into dicts/lists before our
+        # str type hint is checked. Serialize back to ensure content is always a string.
+        if not isinstance(content, str):
+            content = json.dumps(content)
         data["content"] = content
         data["content_type"] = content_type
     entry = Entry(
@@ -562,6 +566,8 @@ async def update_entry(
     if source is not None:
         updates["source"] = source
     if content is not None:
+        if not isinstance(content, str):
+            content = json.dumps(content)
         updates["content"] = content
     if content_type is not None:
         updates["content_type"] = content_type

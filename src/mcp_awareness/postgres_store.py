@@ -9,6 +9,7 @@ Requires: pip install psycopg[binary]
 
 from __future__ import annotations
 
+import contextlib
 import json
 import threading
 import time
@@ -25,13 +26,45 @@ TRASH_RETENTION_DAYS = 30
 
 
 class PostgresStore:
+    # How often to check connection health (seconds)
+    _HEALTH_CHECK_INTERVAL = 30.0
+
     def __init__(self, dsn: str) -> None:
         self.dsn = dsn
-        self._conn = psycopg.connect(dsn, row_factory=dict_row, autocommit=False)
+        self.__conn: psycopg.Connection[dict[str, Any]] = self._new_conn()
+        self._last_health_check: float = time.monotonic()
         self._last_cleanup: float = 0.0
         self._cleanup_interval: float = 10.0
         self._cleanup_thread: threading.Thread | None = None
         self._create_tables()
+
+    def _new_conn(self) -> psycopg.Connection[dict[str, Any]]:
+        """Create a new database connection."""
+        return psycopg.connect(self.dsn, row_factory=dict_row, autocommit=False)
+
+    @property
+    def _conn(self) -> psycopg.Connection[dict[str, Any]]:
+        """Auto-healing connection property.
+
+        Checks connection health at most every _HEALTH_CHECK_INTERVAL seconds.
+        If the connection is closed or broken, reconnects transparently.
+        All existing code using self._conn benefits automatically.
+        """
+        now = time.monotonic()
+        if now - self._last_health_check < self._HEALTH_CHECK_INTERVAL:
+            return self.__conn
+        self._last_health_check = now
+        try:
+            if self.__conn.closed:
+                self.__conn = self._new_conn()
+            else:
+                self.__conn.execute("SELECT 1")
+                self.__conn.rollback()
+        except (psycopg.OperationalError, psycopg.InterfaceError):
+            with contextlib.suppress(Exception):
+                self.__conn.close()
+            self.__conn = self._new_conn()
+        return self.__conn
 
     def _create_tables(self) -> None:
         with self._conn.cursor() as cur:
