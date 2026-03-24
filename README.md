@@ -308,14 +308,14 @@ See [Security considerations](docs/deployment-guide.md#security-considerations) 
 
 ### Infrastructure
 - PostgreSQL 17 with pgvector, GIN-indexed tag queries, HNSW-indexed embeddings, Debezium CDC-ready
-- Auto-healing database connections (30s health check, transparent reconnect)
+- Connection pooling (psycopg_pool, min 2 / max 5) with automatic health checks and reconnection
 - List mode and since/until/created_after/created_before filters for lightweight queries
 - Storage abstraction: `Store` protocol — backends are swappable without changing server or collator logic
 - Alembic migration framework (version-tracked, raw SQL, auto-runs on Docker startup)
 - Secret path auth + Cloudflare WAF for edge-level access control
 - Docker Compose with Postgres, optional Ollama, named Cloudflare Tunnel, or ephemeral quick tunnel
 - Request timing instrumentation and `/health` endpoint
-- 315 tests (all against real Postgres + Ollama in CI), strict type checking, CI pipeline with coverage, QA gate
+- 314 tests (all against real Postgres + Ollama in CI), strict type checking, CI pipeline with coverage, QA gate
 
 ### Not yet implemented
 - Layer 2 (baseline) detection — rolling averages and deviation calculation

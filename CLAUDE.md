@@ -78,7 +78,7 @@ src/mcp_awareness/
 
 **Embedding pipeline**: `embeddings.py` defines the `EmbeddingProvider` protocol with `OllamaEmbedding` and `NullEmbedding` implementations. Write tools submit embedding generation to a background `ThreadPoolExecutor` (2 workers). `compose_embedding_text()` builds composite text from entry fields; `text_hash()` detects stale embeddings. Separate `embeddings` table with HNSW index, `ON DELETE CASCADE` from entries.
 
-**Connection resilience**: `PostgresStore._conn` is a property that health-checks every 30s. Dead connections reconnect transparently — no permanent connection failures after Postgres restarts.
+**Connection pooling**: `PostgresStore` uses `psycopg_pool.ConnectionPool` (min 2, max 5 connections). The pool handles health checks, reconnection, and connection recycling automatically. Background threads (embedding, cleanup) draw from the pool.
 
 **Key design decisions**:
 - Briefing is computed on-demand per read (not background task)
