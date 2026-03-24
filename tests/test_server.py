@@ -2469,18 +2469,20 @@ class TestSemanticSearchIntegration:
             learned_from="test",
         )
 
-        # Wait for background embedding threads to complete
+        # Wait for background embedding threads to embed BOTH entries
         import time
 
-        for _ in range(20):
-            result = json.loads(await server_mod.semantic_search(query="retirement savings"))
-            if len(result) >= 1:
+        for _ in range(30):
+            result = json.loads(
+                await server_mod.semantic_search(query="retirement savings")
+            )
+            if len(result) >= 2:
                 break
             time.sleep(0.5)
-        assert len(result) >= 1
+        assert len(result) >= 2
         # The finance entry should rank higher than the infra entry
         assert "401k" in result[0]["data"]["description"]
-        assert result[0]["similarity"] > 0.5
+        assert result[0]["similarity"] > result[1]["similarity"]
 
     @skip_no_ollama
     @pytest.mark.anyio
