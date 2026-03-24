@@ -783,6 +783,41 @@ class TestUpdateEntryTool:
         assert "changelog" not in entries[0]["data"]
 
     @pytest.mark.anyio
+    async def test_update_json_content(self) -> None:
+        """update_entry accepts JSON content that Pydantic deserializes."""
+        result = await server_mod.remember(
+            source="test", tags=["t"], description="test", content="old"
+        )
+        entry_id = json.loads(result)["id"]
+        await server_mod.update_entry(
+            entry_id=entry_id,
+            content={"new": "value"},  # type: ignore[arg-type]
+        )
+        entries = json.loads(await server_mod.get_knowledge(entry_type="note"))
+        assert isinstance(entries[0]["data"]["content"], str)
+        assert json.loads(entries[0]["data"]["content"]) == {"new": "value"}
+
+    @pytest.mark.anyio
+    async def test_update_source_and_content_type(self) -> None:
+        """update_entry can change source and content_type."""
+        result = await server_mod.remember(
+            source="old-source",
+            tags=["t"],
+            description="test",
+            content="data",
+            content_type="text/plain",
+        )
+        entry_id = json.loads(result)["id"]
+        await server_mod.update_entry(
+            entry_id=entry_id, source="new-source", content_type="application/json"
+        )
+        entries = json.loads(
+            await server_mod.get_knowledge(source="new-source", include_history="true")
+        )
+        assert len(entries) == 1
+        assert entries[0]["data"]["content_type"] == "application/json"
+
+    @pytest.mark.anyio
     async def test_update_pattern(self) -> None:
         result = await server_mod.learn_pattern(
             source="nas", tags=["infra"], description="original pattern"
@@ -2041,6 +2076,49 @@ class TestBackfillEmbeddings:
         assert result["new_embeddings"] == 3
         assert result["remaining"] == 0
 
+    @pytest.mark.anyio
+    async def test_backfill_refreshes_stale(self, monkeypatch) -> None:
+        """backfill re-embeds entries whose text changed since embedding."""
+
+        class MockProvider:
+            model_name = "mock"
+            dimensions = 768
+
+            def embed(self, texts: list[str]) -> list[list[float]]:
+                return [[0.0] * 768 for _ in texts]
+
+            def is_available(self) -> bool:
+                return True
+
+        monkeypatch.setattr(server_mod, "_embedding_provider", MockProvider())
+
+        s = _store()
+        from mcp_awareness.schema import Entry, EntryType, make_id, now_utc
+
+        now = now_utc()
+        entry = Entry(
+            id=make_id(),
+            type=EntryType.NOTE,
+            source="test",
+            tags=[],
+            created=now,
+            updated=now,
+            expires=None,
+            data={"description": "original"},
+        )
+        s.add(entry)
+
+        # First backfill — creates embedding
+        result = json.loads(await server_mod.backfill_embeddings(limit=10))
+        assert result["new_embeddings"] == 1
+
+        # Update the entry text
+        s.update_entry(entry.id, {"description": "changed text"})
+
+        # Second backfill — should refresh the stale embedding
+        result = json.loads(await server_mod.backfill_embeddings(limit=10))
+        assert result["refreshed_embeddings"] == 1
+
 
 # ---------------------------------------------------------------------------
 # hint parameter on get_knowledge
@@ -2107,6 +2185,48 @@ class TestGetKnowledgeHint:
         assert len(result) == 2
         # With hint, results should include similarity scores
         assert "similarity" in result[0]
+
+    @pytest.mark.anyio
+    async def test_hint_list_mode_includes_similarity(self, monkeypatch) -> None:
+        """hint in list mode includes similarity scores."""
+
+        class MockProvider:
+            model_name = "mock"
+            dimensions = 768
+
+            def embed(self, texts: list[str]) -> list[list[float]]:
+                v = [0.0] * 768
+                v[0] = 1.0
+                return [v for _ in texts]
+
+            def is_available(self) -> bool:
+                return True
+
+        monkeypatch.setattr(server_mod, "_embedding_provider", MockProvider())
+
+        s = _store()
+        from mcp_awareness.schema import Entry, EntryType, make_id, now_utc
+
+        now = now_utc()
+        entry = Entry(
+            id=make_id(),
+            type=EntryType.NOTE,
+            source="test",
+            tags=["test"],
+            created=now,
+            updated=now,
+            expires=None,
+            data={"description": "test entry"},
+        )
+        s.add(entry)
+        vec = [0.0] * 768
+        vec[0] = 1.0
+        s.upsert_embedding(entry.id, "mock", 768, "h1", vec)
+
+        result = json.loads(await server_mod.get_knowledge(tags=["test"], hint="test", mode="list"))
+        assert len(result) == 1
+        assert "similarity" in result[0]
+        assert "data" not in result[0]
 
     @pytest.mark.anyio
     async def test_hint_without_provider_falls_back(self) -> None:
@@ -2349,8 +2469,14 @@ class TestSemanticSearchIntegration:
             learned_from="test",
         )
 
-        # Search for financial concepts
-        result = json.loads(await server_mod.semantic_search(query="retirement savings"))
+        # Wait for background embedding threads to complete
+        import time
+
+        for _ in range(20):
+            result = json.loads(await server_mod.semantic_search(query="retirement savings"))
+            if len(result) >= 1:
+                break
+            time.sleep(0.5)
         assert len(result) >= 1
         # The finance entry should rank higher than the infra entry
         assert "401k" in result[0]["data"]["description"]

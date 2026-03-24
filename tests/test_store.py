@@ -1591,6 +1591,31 @@ def test_health_check_debounced(store):
     assert isinstance(entries, list)
 
 
+def test_reconnect_on_operational_error(store):
+    """Store reconnects when SELECT 1 health check raises OperationalError."""
+    import psycopg
+
+    store._last_health_check = 0.0
+    # Patch execute to raise OperationalError (simulates broken connection)
+    original_execute = store._PostgresStore__conn.execute
+    call_count = 0
+
+    def failing_execute(*args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            raise psycopg.OperationalError("connection lost")
+        return original_execute(*args, **kwargs)
+
+    store._PostgresStore__conn.execute = failing_execute
+    # Access _conn — should trigger reconnect via OperationalError path
+    _ = store._conn
+    # After reconnect, store should work
+    store._last_health_check = 0.0
+    store.upsert_status("test-reconnect", ["t"], {"metrics": {}, "ttl_sec": 120})
+    assert "test-reconnect" in store.get_sources()
+
+
 # ---------------------------------------------------------------------------
 # Embeddings / semantic search
 # ---------------------------------------------------------------------------
