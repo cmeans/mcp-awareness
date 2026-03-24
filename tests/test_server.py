@@ -2473,9 +2473,7 @@ class TestSemanticSearchIntegration:
         import time
 
         for _ in range(30):
-            result = json.loads(
-                await server_mod.semantic_search(query="retirement savings")
-            )
+            result = json.loads(await server_mod.semantic_search(query="retirement savings"))
             if len(result) >= 2:
                 break
             time.sleep(0.5)
