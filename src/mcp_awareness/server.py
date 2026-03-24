@@ -425,13 +425,13 @@ async def get_knowledge(
             try:
                 hint_vec = provider.embed([hint])
                 if hint_vec:
-                    et = EntryType(entry_type) if entry_type else None
+                    hint_et = EntryType(entry_type) if entry_type else None
                     scored = store.semantic_search(
                         embedding=hint_vec[0],
                         model=provider.model_name,
                         source=source,
                         tags=tags,
-                        entry_type=et,
+                        entry_type=hint_et,
                         since=since_dt,
                         until=until_dt,
                         limit=len(entries) + 10,
