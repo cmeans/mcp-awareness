@@ -1216,6 +1216,45 @@ async def backfill_embeddings(
     )
 
 
+@mcp.tool()
+@_timed
+async def get_related(
+    entry_id: str,
+    mode: str | None = None,
+) -> str:
+    """Get entries related to a given entry (bidirectional).
+    Returns entries that this entry references via related_ids in its data,
+    plus entries that reference this entry in their related_ids.
+    Use this to explore connections between decisions, context, patterns,
+    and intentions. Convention: store related_ids as a list of entry IDs
+    in the data field when using remember or learn_pattern.
+    mode: omit for full entries, 'list' for metadata only."""
+    entry = store.get_entry_by_id(entry_id)
+    if entry is None:
+        return json.dumps({"status": "error", "message": f"Entry not found: {entry_id}"})
+
+    # Forward: entries this entry references
+    forward_ids: list[str] = entry.data.get("related_ids", [])
+    forward = [store.get_entry_by_id(rid) for rid in forward_ids if rid != entry_id]
+    forward = [e for e in forward if e is not None]
+
+    # Reverse: entries that reference this entry via JSONB containment
+    reverse = store.get_referencing_entries(entry_id)
+
+    # Deduplicate (an entry could be in both directions)
+    seen = set()
+    related = []
+    for e in forward + reverse:
+        if e.id not in seen:
+            seen.add(e.id)
+            related.append(e)
+
+    _log_reads(related, "get_related")
+    if mode == "list":
+        return json.dumps([e.to_list_dict() for e in related], indent=2)
+    return json.dumps([e.to_dict() for e in related], indent=2)
+
+
 # ---------------------------------------------------------------------------
 # Prompts (discoverable agent instructions, built from store data)
 # ---------------------------------------------------------------------------

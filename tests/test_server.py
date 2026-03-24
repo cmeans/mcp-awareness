@@ -2134,6 +2134,176 @@ class TestGetKnowledgeHint:
 
 
 # ---------------------------------------------------------------------------
+# Entry relationships (get_related)
+# ---------------------------------------------------------------------------
+
+
+class TestGetRelated:
+    @pytest.mark.anyio
+    async def test_forward_references(self) -> None:
+        """get_related returns entries referenced in related_ids."""
+        s = _store()
+        from mcp_awareness.schema import Entry, EntryType, make_id, now_utc
+
+        now = now_utc()
+        target = Entry(
+            id=make_id(),
+            type=EntryType.NOTE,
+            source="test",
+            tags=[],
+            created=now,
+            updated=now,
+            expires=None,
+            data={"description": "target entry"},
+        )
+        referrer = Entry(
+            id=make_id(),
+            type=EntryType.NOTE,
+            source="test",
+            tags=[],
+            created=now,
+            updated=now,
+            expires=None,
+            data={"description": "links to target", "related_ids": [target.id]},
+        )
+        s.add(target)
+        s.add(referrer)
+
+        result = json.loads(await server_mod.get_related(entry_id=referrer.id))
+        assert len(result) == 1
+        assert result[0]["id"] == target.id
+
+    @pytest.mark.anyio
+    async def test_reverse_references(self) -> None:
+        """get_related returns entries that reference the given entry."""
+        s = _store()
+        from mcp_awareness.schema import Entry, EntryType, make_id, now_utc
+
+        now = now_utc()
+        target = Entry(
+            id=make_id(),
+            type=EntryType.NOTE,
+            source="test",
+            tags=[],
+            created=now,
+            updated=now,
+            expires=None,
+            data={"description": "target entry"},
+        )
+        referrer = Entry(
+            id=make_id(),
+            type=EntryType.NOTE,
+            source="test",
+            tags=[],
+            created=now,
+            updated=now,
+            expires=None,
+            data={"description": "links to target", "related_ids": [target.id]},
+        )
+        s.add(target)
+        s.add(referrer)
+
+        result = json.loads(await server_mod.get_related(entry_id=target.id))
+        assert len(result) == 1
+        assert result[0]["id"] == referrer.id
+
+    @pytest.mark.anyio
+    async def test_bidirectional_deduplicates(self) -> None:
+        """Entries appearing in both forward and reverse are not duplicated."""
+        s = _store()
+        from mcp_awareness.schema import Entry, EntryType, make_id, now_utc
+
+        now = now_utc()
+        a = Entry(
+            id=make_id(),
+            type=EntryType.NOTE,
+            source="test",
+            tags=[],
+            created=now,
+            updated=now,
+            expires=None,
+            data={"description": "entry A"},
+        )
+        b = Entry(
+            id=make_id(),
+            type=EntryType.NOTE,
+            source="test",
+            tags=[],
+            created=now,
+            updated=now,
+            expires=None,
+            data={"description": "entry B", "related_ids": [a.id]},
+        )
+        # A also references B
+        a.data["related_ids"] = [b.id]
+        s.add(a)
+        s.add(b)
+
+        result = json.loads(await server_mod.get_related(entry_id=a.id))
+        assert len(result) == 1
+        assert result[0]["id"] == b.id
+
+    @pytest.mark.anyio
+    async def test_not_found(self) -> None:
+        result = json.loads(await server_mod.get_related(entry_id="nonexistent"))
+        assert result["status"] == "error"
+
+    @pytest.mark.anyio
+    async def test_no_relations(self) -> None:
+        """Entry with no related_ids returns empty list."""
+        s = _store()
+        from mcp_awareness.schema import Entry, EntryType, make_id, now_utc
+
+        now = now_utc()
+        entry = Entry(
+            id=make_id(),
+            type=EntryType.NOTE,
+            source="test",
+            tags=[],
+            created=now,
+            updated=now,
+            expires=None,
+            data={"description": "lone wolf"},
+        )
+        s.add(entry)
+        result = json.loads(await server_mod.get_related(entry_id=entry.id))
+        assert result == []
+
+    @pytest.mark.anyio
+    async def test_list_mode(self) -> None:
+        s = _store()
+        from mcp_awareness.schema import Entry, EntryType, make_id, now_utc
+
+        now = now_utc()
+        target = Entry(
+            id=make_id(),
+            type=EntryType.NOTE,
+            source="test",
+            tags=[],
+            created=now,
+            updated=now,
+            expires=None,
+            data={"description": "target"},
+        )
+        referrer = Entry(
+            id=make_id(),
+            type=EntryType.NOTE,
+            source="test",
+            tags=[],
+            created=now,
+            updated=now,
+            expires=None,
+            data={"description": "referrer", "related_ids": [target.id]},
+        )
+        s.add(target)
+        s.add(referrer)
+        result = json.loads(await server_mod.get_related(entry_id=referrer.id, mode="list"))
+        assert len(result) == 1
+        assert "description" in result[0]
+        assert "data" not in result[0]
+
+
+# ---------------------------------------------------------------------------
 # Semantic search integration tests (require Ollama)
 # ---------------------------------------------------------------------------
 

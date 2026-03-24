@@ -1126,6 +1126,13 @@ class PostgresStore:
             rows = cur.fetchall()
         return [(self._row_to_entry(r), float(r["similarity"])) for r in rows]
 
+    def get_referencing_entries(self, entry_id: str) -> list[Entry]:
+        """Find active entries whose data.related_ids contains the given entry_id."""
+        return self._query_entries(
+            "data->'related_ids' @> %s::jsonb",
+            (json.dumps([entry_id]),),
+        )
+
     def clear(self) -> None:
         with self._conn.cursor() as cur:
             cur.execute("DELETE FROM reads")
