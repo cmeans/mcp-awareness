@@ -119,8 +119,32 @@ docker compose up -d
 
 This starts:
 - **mcp-awareness** — the Awareness server (HTTP transport, secret path mounted)
-- **postgres** — PostgreSQL with pgvector
+- **postgres** — PostgreSQL 17 with pgvector
 - **awareness-tunnel** — named Cloudflare Tunnel to your domain
+
+#### Optional: Enable semantic search
+
+To add vector similarity search powered by a local Ollama instance:
+
+```bash
+# Add to .env:
+echo "AWARENESS_EMBEDDING_PROVIDER=ollama" >> .env
+
+# Start with the embeddings profile:
+docker compose --profile embeddings up -d
+```
+
+This adds an **ollama** container that auto-pulls the `nomic-embed-text` embedding model on first start. The model is cached in a volume — subsequent restarts are instant.
+
+Once running, the `semantic_search` tool finds entries by meaning (not just tags), and write tools automatically generate embeddings in the background. Use `backfill_embeddings` to embed entries created before the provider was configured.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `AWARENESS_EMBEDDING_PROVIDER` | `""` (disabled) | Set to `ollama` to enable |
+| `AWARENESS_EMBEDDING_MODEL` | `nomic-embed-text` | Ollama model name |
+| `AWARENESS_OLLAMA_URL` | `http://ollama:11434` | Ollama API endpoint |
+
+Without the embeddings profile, everything works as before — tag-based search only.
 
 Verify:
 ```bash
@@ -348,9 +372,9 @@ The current approach uses two layers:
 ## Notes
 
 - **The store persists** in the data directory. Restart the server and your data is still there.
-- **Not all clients support all MCP features** — the MCP spec defines [resources](https://modelcontextprotocol.io/docs/concepts/resources), [tools](https://modelcontextprotocol.io/docs/concepts/tools), and [prompts](https://modelcontextprotocol.io/docs/concepts/prompts). Client support varies: some only surface tools (e.g., Claude.ai), some don't support prompts. All 26 tools work everywhere. Read tools mirror the resources so tools-only clients get full functionality. Prompts (including user-defined custom prompts) are available in clients that support them — VS Code, Claude Desktop, Cursor.
+- **Not all clients support all MCP features** — the MCP spec defines [resources](https://modelcontextprotocol.io/docs/concepts/resources), [tools](https://modelcontextprotocol.io/docs/concepts/tools), and [prompts](https://modelcontextprotocol.io/docs/concepts/prompts). Client support varies: some only surface tools (e.g., Claude.ai), some don't support prompts. All 29 tools work everywhere. Read tools mirror the resources so tools-only clients get full functionality. Prompts (including user-defined custom prompts) are available in clients that support them — VS Code, Claude Desktop, Cursor.
 
-- **26 tools, 5 prompts, user-defined prompts** — tools include `remember` (general notes), `learn_pattern` (operational knowledge), `add_context` (time-limited), `update_entry` (in-place updates with changelog), `get_stats` (store summary), `get_tags` (tag discovery), plus alerting and data management. Built-in prompts: `agent_instructions`, `project_context`, `system_status`, `write_guide`, `catchup`. Store entries with `source="custom-prompt"` to create your own. See the [README](../README.md#tools) for the full list.
+- **29 tools, 5 prompts, user-defined prompts** — tools include `remember` (general notes), `learn_pattern` (operational knowledge), `add_context` (time-limited), `update_entry` (in-place updates with changelog), `semantic_search` (vector similarity), `backfill_embeddings` (embed existing entries), `get_related` (entry relationships), `get_stats` (store summary), `get_tags` (tag discovery), plus alerting, intentions, and data management. Built-in prompts: `agent_instructions`, `project_context`, `system_status`, `write_guide`, `catchup`. Store entries with `source="custom-prompt"` to create your own. See the [README](../README.md#tools) for the full list.
 - **Model matters** — best experience with Claude Sonnet 4.6 or Opus 4.6. Smaller models (Haiku, GPT-4o-mini) may not follow MCP prompts or call tools proactively.
 - **Suppression matching is content-aware** — a suppression tagged `["qbittorrent"]` will match alerts whose alert_id or message contains "qbittorrent", even if the alert's structural tags differ.
 - **Soft delete is safe** — `delete_entry` moves entries to trash (30-day retention). Bulk deletes show a dry-run count first and require `confirm=True`. Delete and restore by tags with AND logic (e.g., `delete_entry(tags=["demo"], confirm=True)` deletes entries matching all given tags). Use `get_deleted` and `restore_entry` to recover — restore also supports tags (e.g., `restore_entry(tags=["demo"])`).

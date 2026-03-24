@@ -174,6 +174,9 @@ The server is running on port 8420. Point any MCP client at `http://localhost:84
 | `AWARENESS_PORT` | `8420` | Port (HTTP mode) |
 | `AWARENESS_DATABASE_URL` | _(required)_ | PostgreSQL connection string. Example: `postgresql://user:pass@localhost:5432/awareness` |
 | `AWARENESS_MOUNT_PATH` | _(none)_ | Secret path prefix for access control (e.g., `/my-secret`). When set, only `/<secret>/mcp` is served; all other paths return 404. Use with a Cloudflare WAF rule. |
+| `AWARENESS_EMBEDDING_PROVIDER` | _(none)_ | Set to `ollama` to enable semantic search. Without it, all features work except `semantic_search` and `backfill_embeddings`. |
+| `AWARENESS_EMBEDDING_MODEL` | `nomic-embed-text` | Ollama model name for embeddings. Must match the model pulled in the Ollama container. |
+| `AWARENESS_OLLAMA_URL` | `http://ollama:11434` | Ollama API endpoint. Default works with Docker Compose; change for external Ollama instances. |
 
 ### Development
 
@@ -186,7 +189,7 @@ mypy src/mcp_awareness/    # type check
 
 ## Tools
 
-The server exposes 18 MCP tools. Clients that support MCP resources also get 6 read-only resources, but since not all clients surface resources, every resource has a tool mirror.
+The server exposes 29 MCP tools. Clients that support MCP resources also get 6 read-only resources, but since not all clients surface resources, every resource has a tool mirror.
 
 ### Read tools
 
@@ -195,10 +198,17 @@ The server exposes 18 MCP tools. Clients that support MCP resources also get 6 r
 | `get_briefing` | Compact awareness summary (~200 tokens all-clear, ~500 with issues). Call at conversation start. Pre-filtered through patterns and suppressions. |
 | `get_alerts` | Active alerts, optionally filtered by source. Drill-down from briefing. |
 | `get_status` | Full status for a specific source including metrics and inventory. |
-| `get_knowledge` | Knowledge entries (patterns, context, preferences, notes). Filter by source, tags, entry_type. `include_history` controls changelog visibility. |
+| `get_knowledge` | Knowledge entries (patterns, context, preferences, notes). Filter by source, tags, entry_type, since/until, created_after/created_before, learned_from. `hint` param re-ranks results by semantic similarity. |
 | `get_suppressions` | Active alert suppressions with expiry times and escalation settings. |
 | `get_stats` | Entry counts by type, list of sources, total count. Call before `get_knowledge` to decide whether to filter. |
 | `get_tags` | All tags in use with usage counts. Use to discover existing tags and prevent drift. |
+| `get_intentions` | Pending/active intentions, optionally filtered by state, source, or tags. |
+| `get_reads` | Read history for entries — who read what, when, from which platform. |
+| `get_actions` | Action history — what was done because of an entry. |
+| `get_unread` | Entries with zero reads. Cleanup candidates or missed knowledge. |
+| `get_activity` | Combined read + action feed, chronological. |
+| `get_related` | Bidirectional entry relationships — entries referenced via `related_ids` and entries that reference the given entry. |
+| `semantic_search` | Find entries by meaning using vector similarity (pgvector + Ollama). Combines with tag/source/type/date filters. Requires embedding provider. |
 
 ### Write tools
 
@@ -211,6 +221,9 @@ The server exposes 18 MCP tools. Clients that support MCP resources also get 6 r
 | `add_context` | Record time-limited knowledge (default 30 days). Use for events, temporary situations, or facts that lose relevance. |
 | `set_preference` | Set a portable presentation preference (e.g., `alert_verbosity`, `check_frequency`). Upserts by key + scope. |
 | `suppress_alert` | Suppress alerts by source/tags/metric. Time-limited with escalation override — critical alerts can break through. |
+| `remind` | Create an intention with a goal and optional `deliver_at` timestamp. Surfaced in briefing when conditions align. |
+| `update_intention` | Transition an intention state: pending → fired → active → completed/snoozed/cancelled. |
+| `acted_on` | Log that you took action because of an entry. Tags inherited from the entry. |
 
 ### Data management tools
 
@@ -220,6 +233,7 @@ The server exposes 18 MCP tools. Clients that support MCP resources also get 6 r
 | `delete_entry` | Soft-delete entries (30-day trash). By ID, by source + type, or by source. Bulk deletes require `confirm=True` (dry-run by default). |
 | `restore_entry` | Restore a soft-deleted entry from trash. |
 | `get_deleted` | List all entries in trash with IDs for restore. |
+| `backfill_embeddings` | Generate embeddings for entries that don't have one yet, and re-embed stale entries whose content changed. Requires embedding provider. |
 
 See the [Data Dictionary](docs/data-dictionary.md) for full schema documentation.
 
@@ -249,11 +263,23 @@ See [Security considerations](docs/deployment-guide.md#security-considerations) 
 - Soft delete with 30-day trash, dry-run confirmation for bulk operations
 - Delete and restore by tags with AND logic
 - Pagination (`limit`/`offset`) on all list queries
+- Entry relationships via `related_ids` convention + `get_related` bidirectional traversal
+
+### Semantic search
+- `semantic_search` tool — find entries by meaning using pgvector cosine similarity
+- `backfill_embeddings` tool — embed pre-existing entries and re-embed stale ones
+- `hint` parameter on `get_knowledge` — re-rank tag-filtered results by semantic similarity
+- Background embedding generation via thread pool (non-blocking writes)
+- Stale embedding detection via `text_hash` comparison
+- Powered by Ollama (`nomic-embed-text`, 768 dimensions) — optional, self-hosted, zero cost
+- Graceful degradation: everything works without an embedding provider
 
 ### Awareness engine
 - Ambient awareness: status reporting, alert detection, suppression, briefing generation
 - Three-layer detection model (threshold + knowledge implemented; baseline planned)
 - Suppression system with time-based expiry and escalation overrides
+- Intentions with time-based triggers and lifecycle (pending → fired → active → completed/snoozed/cancelled)
+- Read/action tracking for audit and activity feeds
 
 ### MCP interface
 - Full MCP API: 6 resources + 29 tools + 5 prompts
@@ -262,19 +288,19 @@ See [Security considerations](docs/deployment-guide.md#security-considerations) 
 - Streamable HTTP + stdio transports
 
 ### Infrastructure
-- PostgreSQL backend with pgvector (production default), GIN-indexed tag queries, Debezium CDC-ready
-- List mode and since filter for lightweight queries
+- PostgreSQL 17 with pgvector, GIN-indexed tag queries, HNSW-indexed embeddings, Debezium CDC-ready
+- Auto-healing database connections (30s health check, transparent reconnect)
+- List mode and since/until/created_after/created_before filters for lightweight queries
 - Storage abstraction: `Store` protocol — backends are swappable without changing server or collator logic
 - Alembic migration framework (version-tracked, raw SQL, auto-runs on Docker startup)
 - Secret path auth + Cloudflare WAF for edge-level access control
-- Docker Compose with Postgres, named Cloudflare Tunnel, or ephemeral quick tunnel
+- Docker Compose with Postgres, optional Ollama, named Cloudflare Tunnel, or ephemeral quick tunnel
 - Request timing instrumentation and `/health` endpoint
 - 310 tests (all against real Postgres + Ollama in CI), strict type checking, CI pipeline with coverage, QA gate
 
 ### Not yet implemented
 - Layer 2 (baseline) detection — rolling averages and deviation calculation
 - Edge processes — no automated producers yet ([example script](examples/simulate_edge.py) demonstrates the write path)
-- Semantic search — `semantic_search` tool uses pgvector + Ollama for vector similarity (optional, self-hosted)
 - OAuth / API key authentication — current auth is secret-path-based
 
 ## Vision

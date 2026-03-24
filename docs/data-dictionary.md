@@ -220,10 +220,29 @@ Stores vector embeddings for semantic search. One embedding per entry per model.
 - Requires `AWARENESS_EMBEDDING_PROVIDER=ollama` to activate (optional)
 - **Dimension constraint**: `VECTOR(768)` is hardcoded in both inline DDL and Alembic migration, matching `nomic-embed-text`. To use a model with different dimensions, both the DDL and migration must be updated. `AWARENESS_EMBEDDING_DIMENSIONS` configures the provider but does not alter the column type.
 
+## Conventions
+
+### Entry relationships (`related_ids`)
+
+Entries can cross-reference each other via an optional `related_ids` field in the `data` JSONB column:
+
+```json
+{
+  "description": "Decided to go Postgres-only",
+  "related_ids": ["abc-123", "def-456"]
+}
+```
+
+This is a convention, not a schema constraint — no migration needed. The `get_related` tool traverses relationships bidirectionally:
+- **Forward**: entries this entry references (IDs in `related_ids`)
+- **Reverse**: entries that reference this entry (via `data->'related_ids' @> '["entry-id"]'::jsonb`)
+
+Use cases: decision → context, intention → action, note → note ("see also").
+
 ## Backend details
 
 - **Version:** PostgreSQL 17 recommended (matches RDS support, pgvector 0.8.1)
-- **Driver:** psycopg (sync) — matches the synchronous Store protocol
+- **Driver:** psycopg (sync) — matches the synchronous Store protocol. Auto-healing connection property with 30s health check debounce — dead connections reconnect transparently after Postgres restarts.
 - **Tags/data stored as:** JSONB columns, queried via `jsonb_array_elements_text()` and GIN-indexed `@>` containment
 - **GIN index** on `tags` column for fast tag containment queries
 - **pgvector extension:** Installed via `pgvector/pgvector:pg17` Docker image. Used by the `embeddings` table for HNSW vector similarity search.
