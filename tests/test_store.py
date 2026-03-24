@@ -942,6 +942,56 @@ def test_log_action_invalid_entry_id(store):
     assert "not found" in result["message"].lower()
 
 
+def test_log_read_records_reads(store):
+    """log_read inserts read records retrievable via get_reads."""
+    now = now_utc()
+    entry = store.add(
+        Entry(
+            id=make_id(),
+            type=EntryType.NOTE,
+            source="test",
+            tags=["read-test"],
+            created=now,
+            updated=now,
+            expires=None,
+            data={"description": "read tracking test"},
+        )
+    )
+    store.log_read([entry.id], tool_used="get_knowledge", platform="claude-code")
+    reads = store.get_reads(entry_id=entry.id)
+    assert len(reads) >= 1
+    assert reads[0]["entry_id"] == entry.id
+    assert reads[0]["tool_used"] == "get_knowledge"
+    assert reads[0]["platform"] == "claude-code"
+
+
+def test_log_read_empty_list_is_noop(store):
+    """log_read with empty list returns immediately without touching the DB."""
+    store.log_read([], tool_used="get_knowledge")  # should not raise
+
+
+def test_log_read_silences_pool_errors(store):
+    """log_read swallows exceptions when the pool is broken (fire-and-forget)."""
+    from unittest.mock import patch
+
+    now = now_utc()
+    entry = store.add(
+        Entry(
+            id=make_id(),
+            type=EntryType.NOTE,
+            source="test",
+            tags=["read-test"],
+            created=now,
+            updated=now,
+            expires=None,
+            data={"description": "pool failure test"},
+        )
+    )
+    with patch.object(store._pool, "connection", side_effect=RuntimeError("pool closed")):
+        # Should not raise despite the pool being broken
+        store.log_read([entry.id], tool_used="get_knowledge")
+
+
 def test_get_actions_filter_by_tags(store):
     """get_actions can filter by tags."""
     entry = store.add(

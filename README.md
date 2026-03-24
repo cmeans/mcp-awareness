@@ -315,7 +315,7 @@ See [Security considerations](docs/deployment-guide.md#security-considerations) 
 - Secret path auth + Cloudflare WAF for edge-level access control
 - Docker Compose with Postgres, optional Ollama, named Cloudflare Tunnel, or ephemeral quick tunnel
 - Request timing instrumentation and `/health` endpoint
-- 314 tests (all against real Postgres + Ollama in CI), strict type checking, CI pipeline with coverage, QA gate
+- 317 tests (all against real Postgres + Ollama in CI), strict type checking, CI pipeline with coverage, QA gate
 
 ### Not yet implemented
 - Layer 2 (baseline) detection — rolling averages and deviation calculation
