@@ -425,10 +425,16 @@ async def get_knowledge(
             try:
                 hint_vec = provider.embed([hint])
                 if hint_vec:
+                    et = EntryType(entry_type) if entry_type else None
                     scored = store.semantic_search(
                         embedding=hint_vec[0],
                         model=provider.model_name,
-                        limit=len(entries) + 10,  # over-fetch to cover all
+                        source=source,
+                        tags=tags,
+                        entry_type=et,
+                        since=since_dt,
+                        until=until_dt,
+                        limit=len(entries) + 10,
                     )
                     similarity_map = {e.id: s for e, s in scored}
                     # Re-sort: entries with embeddings by similarity (desc),
