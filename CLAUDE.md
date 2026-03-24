@@ -38,12 +38,22 @@ Every PR that changes functionality must include:
 
 ## Release process
 
-1. Feature PRs add changelog entries under `[Unreleased]`
-2. When ready to release, rename `[Unreleased]` → `[x.y.z] - YYYY-MM-DD` in the same PR (or a final commit on the branch), update comparison links, and update README
-3. **Bump version in two places**: `pyproject.toml` version, `CHANGELOG.md` header + comparison links. (`docker-compose.yaml` uses `:latest` — no update needed.)
-4. QA the PR, add `QA Approved` label, merge
-5. **Tag only after merge** — `git tag -a vx.y.z -m "vx.y.z — summary"` then `git push origin vx.y.z`
-6. No separate release PRs — everything in one PR
+**Principle**: Every PR merges independently with its own QA. Releases are a separate version-stamp step, not bundled into feature PRs.
+
+### Feature/fix PRs
+1. One concern per PR — don't mix unrelated changes
+2. Add changelog entries under `[Unreleased]`
+3. QA the PR, add `QA Approved` label, merge
+
+### Release PRs (version stamp only — no code changes)
+4. Create a release PR that: renames `[Unreleased]` → `[x.y.z] - YYYY-MM-DD`, updates comparison links, bumps `pyproject.toml` version, and updates README if needed. (`docker-compose.yaml` uses `:latest` — no update needed.)
+5. QA pass is lightweight — no manual tests needed since all code was already tested in feature PRs
+6. Merge, then **tag after merge** — `git tag -a vx.y.z -m "vx.y.z — summary"` then `git push origin vx.y.z`
+
+### When to release
+- After any user-facing change lands (feature, bug fix, behavior change)
+- Multiple PRs can accumulate under `[Unreleased]` and ship together — release when it makes sense, not on every merge
+- Don't release for docs-only or CI-only changes
 
 ## Build & Test
 
