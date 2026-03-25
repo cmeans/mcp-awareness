@@ -4,13 +4,11 @@ name: mcp-awareness
 services:
   mcp-awareness:
     image: ghcr.io/cmeans/mcp-awareness:latest
-    # For local development, comment out 'image' and uncomment 'build':
-    # build: .
+    pull_policy: always
     container_name: mcp-awareness
     restart: unless-stopped
-    # Uncomment to access the server directly (without the tunnel)
-    # ports:
-    #   - "8420:8420"
+    ports:
+      - "127.0.0.1:8420:8420"
     environment:
       - AWARENESS_MOUNT_PATH=${AWARENESS_MOUNT_PATH:-}
       - AWARENESS_DATABASE_URL=${AWARENESS_DATABASE_URL:-}
