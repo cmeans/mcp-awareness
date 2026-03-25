@@ -413,4 +413,4 @@ Apache 2.0 — see [LICENSE](LICENSE) for details.
 
 ---
 
-Part of the [Awareness](https://mcpawareness.com) ecosystem. Copyright (c) 2026 Chris Means.
+*Part of the [Awareness](https://mcpawareness.com) ecosystem. Copyright (c) 2026 Chris Means.*
