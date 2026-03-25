@@ -21,11 +21,13 @@
 
 ### What this looks like in practice
 
-<img src="docs/images/android-briefing-demo.png" alt="Claude on Android surfacing an infrastructure alert during an unrelated conversation" width="220" align="right">
+<img src="docs/images/android-briefing-demo.png" alt="Claude on Android surfacing an awareness briefing" width="220" align="right">
 
-This morning, a plan was drafted on Claude Android during a commute. Claude Desktop picked it up and gave engineering feedback that shaped the project roadmap. Claude Code implemented the changes, tested them, and deployed — updating the shared project status so every platform knows what happened. No copy-paste. No "remember what we discussed." The knowledge just flows.
+You tell Claude Desktop about a doctor appointment at 2pm. Claude Code creates a calendar event, adds transit directions, and reminds you to grab your ID and transit card. On the way, Claude on your phone checks the weather and suggests a jacket for the walk home. When you get home, every AI already knows the appointment is done — no one asks "how did it go?" because the knowledge flowed automatically.
 
-The store also provides ambient system awareness: edge processes report status and alerts, a collation engine applies suppressions and learned patterns, and your AI receives a compact briefing (~200 tokens) at the start of each conversation. If something needs attention, it says so. If not, silence.
+This morning, a plan was drafted on Claude Android during a commute. Claude Desktop picked it up and gave engineering feedback. Claude Code implemented and deployed the changes — updating shared project status so every platform knows what happened. No copy-paste. No "remember what we discussed." The knowledge just flows.
+
+The store also provides ambient awareness: a collation engine applies learned patterns and suppressions, and your AI receives a compact briefing (~200 tokens) at the start of each conversation. If something needs attention, it says so. If not, silence — and that silence is the product.
 
 <br clear="both">
 
@@ -41,7 +43,7 @@ But it had obvious limits. Diagnostics weren't captured at detection time. There
 
 The [original LinkedIn post](https://www.linkedin.com/posts/cmeans_mcp-modelcontextprotocol-platformengineering-activity-7440439710315098112-Fstj) tells the full story.
 
-`mcp-awareness` is the generalization of that experiment — and it turned out to be bigger than monitoring.
+`mcp-awareness` is the generalization of that experiment — and it turned out to be much bigger than monitoring. Today it's a portable knowledge store that tracks personal facts, project history, design decisions, family schedules, health data, and intentions alongside infrastructure. The monitoring origin story is one use case of many.
 
 ## Core capabilities
 
@@ -61,11 +63,15 @@ This is the key differentiator from platform-specific memory: the knowledge belo
 
 Every AI you use shares the same knowledge base. Plan on your phone, implement on your laptop, review from your desktop — context follows automatically. Your AIs can also maintain shared project status, so any platform knows what's been done and what's next.
 
-### Ambient system awareness
+### Intentions — todos that manage themselves
 
-Edge processes report system status and alerts. The collation engine applies learned patterns and active suppressions, then generates a compact briefing. Your AI checks once at conversation start — if something needs attention, it mentions it; otherwise, silence.
+Create a todo, reminder, or planned action from any platform. Intentions have a lifecycle — pending → fired → active → completed — and agents advance them automatically based on context. "Assemble the scooter at The Hallmark" becomes active when you arrive and completes when you leave, without you touching it.
 
-Three layers of detection:
+### Ambient awareness
+
+Your AI receives a compact briefing (~200 tokens) at the start of each conversation. The collation engine applies learned patterns and active suppressions, then decides what to surface. If something needs attention, it mentions it. Otherwise, silence — and that silence is the product, confirming that everything was checked and nothing needs you.
+
+For infrastructure monitoring, three layers of detection apply:
 
 | Layer | Question | Catches |
 |-------|----------|---------|
@@ -91,7 +97,7 @@ flowchart TB
         A1["Claude.ai"]
         A2["Claude Code"]
         A3["Claude Desktop"]
-        A4["ChatGPT / Cursor / ..."]
+        A4["Cursor / VS Code / ..."]
     end
 
     subgraph Security["Cloudflare Edge"]
@@ -99,23 +105,26 @@ flowchart TB
         TLS["TLS + Tunnel"]
     end
 
-    subgraph Edge["Edge Processes"]
-        E1["NAS Health Daemon"]
-        E2["Calendar Processor"]
-        E3["CI/CD Watcher"]
+    subgraph Signals["Signal Sources (planned)"]
+        direction TB
+        S1["📅 Calendar"]
+        S2["📍 GPS / Location"]
+        S3["💬 SMS / Messaging"]
+        S4["🏠 Home Assistant"]
+        S5["🖥️ NAS / Docker / CI"]
     end
 
     subgraph Server["mcp-awareness"]
         direction LR
-        Store["Store\n(Postgres)"]
-        Collator["Collator\n• suppressions\n• patterns\n• escalation"]
+        Store["Store\n(Postgres + pgvector)"]
+        Collator["Collator\n• patterns\n• suppressions\n• intentions"]
         Briefing["Briefing\n~200 tokens"]
         Store --> Collator --> Briefing
     end
 
     Clients <-- "MCP\n(stdio or HTTPS)" --> Security
     Security <--> Server
-    Edge -- "report_status\nreport_alert" --> Server
+    Signals -- "remember\nadd_context\nremind" --> Server
 ```
 
 ## Quick start
@@ -345,7 +354,7 @@ Awareness fills that gap — a self-hosted store where knowledge from disconnect
 
 **Knowledge becomes ambient.** It accumulates through daily use, not documentation. A living estate document that's always current because it maintained itself as a side effect of living your life with an agent. A house that remembers when the furnace was serviced. A decision trail that preserves the reasoning at the moment you made the choice.
 
-**Goals, not reminders.** The next major feature — intentions — turns awareness into a decision-support system. "Pick up milk" becomes a goal evaluated against real-world circumstances: Is the store open when you'd arrive? Do they have stock? Is it cheaper two minutes further? Is the route clear? Your phone triggers the evaluation; your agent delivers a recommendation with alternatives.
+**Goals, not reminders.** Intentions are already a decision-support system. "Pick up milk" isn't a notification — it's a goal that agents evaluate against real-world circumstances. As signal sources come online (GPS, calendar, vision), intentions will fire based on location, time, and context — then self-resolve through multi-edge correlation without user intervention.
 
 **Personal → family → team → community.** One person today. A shared household store next. Team knowledge that accumulates through work. Community institutional memory for organizations with zero software budget.
 
