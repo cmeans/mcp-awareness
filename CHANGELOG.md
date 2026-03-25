@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.1] - 2026-03-24
+
 ### Fixed
 - **`parse_iso` naive datetime**: Inputs without timezone suffix now default to UTC instead of returning naive datetimes that cause `TypeError` on comparison
 - **`count_active_suppressions` missing expiry filter**: Now excludes expired suppressions, consistent with `get_active_suppressions`
@@ -274,7 +276,8 @@ Initial implementation.
 - **Dockerfile** for container deployment
 - Design docs: core spec and collation layer
 
-[Unreleased]: https://github.com/cmeans/mcp-awareness/compare/v0.11.0...HEAD
+[Unreleased]: https://github.com/cmeans/mcp-awareness/compare/v0.11.1...HEAD
+[0.11.1]: https://github.com/cmeans/mcp-awareness/compare/v0.11.0...v0.11.1
 [0.11.0]: https://github.com/cmeans/mcp-awareness/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/cmeans/mcp-awareness/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/cmeans/mcp-awareness/compare/v0.8.0...v0.9.0
