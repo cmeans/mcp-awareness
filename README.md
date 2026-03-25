@@ -33,6 +33,11 @@ The store also provides ambient awareness: a collation engine applies learned pa
 
 ## How it started
 
+What started as a homelab monitoring experiment turned into a portable knowledge layer for your entire life. The [original LinkedIn post](https://www.linkedin.com/posts/cmeans_mcp-modelcontextprotocol-platformengineering-activity-7440439710315098112-Fstj) tells the origin story.
+
+<details>
+<summary>The full origin story</summary>
+
 This project began with a single memory instruction in Claude.ai:
 
 > *"On the first turn of each conversation, call `synology-admin:get_resource_usage`. If CPU > 90%, RAM > 85%, any disk > 90% busy, or network/disk I/O looks abnormally high, briefly mention it as an FYI before responding."*
@@ -41,9 +46,9 @@ That worked surprisingly well. Infrastructure awareness surfaced inline during u
 
 But it had obvious limits. Diagnostics weren't captured at detection time. There was no structural detection — if a key process stopped, every metric looked *better*, and nothing alerted. Knowledge lived in platform-locked memory. It only worked with one system, on one platform.
 
-The [original LinkedIn post](https://www.linkedin.com/posts/cmeans_mcp-modelcontextprotocol-platformengineering-activity-7440439710315098112-Fstj) tells the full story.
+</details>
 
-`mcp-awareness` is the generalization of that experiment — and it turned out to be much bigger than monitoring. Today it's a portable knowledge store that tracks personal facts, project history, design decisions, family schedules, health data, and intentions alongside infrastructure. The monitoring origin story is one use case of many.
+Today it's a portable knowledge store that tracks personal facts, project history, design decisions, family schedules, health data, and intentions alongside infrastructure. The monitoring origin story is one use case of many.
 
 ## Core capabilities
 
@@ -66,6 +71,10 @@ Every AI you use shares the same knowledge base. Plan on your phone, implement o
 ### Intentions — todos that manage themselves
 
 Create a todo, reminder, or planned action from any platform. Intentions have a lifecycle — pending → fired → active → completed — and agents advance them automatically based on context. "Assemble the scooter at The Hallmark" becomes active when you arrive and completes when you leave, without you touching it.
+
+### Knowledge that outlives you
+
+Over time, your awareness store becomes a living estate document — financial accounts, insurance details, medical info, system access, family contacts. Not because you sat down to document it, but because it accumulated as a side effect of living your life with an AI. If you weren't here tomorrow, someone could find what they need.
 
 ### Ambient awareness
 
