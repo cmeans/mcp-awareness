@@ -23,9 +23,9 @@
 
 <img src="docs/images/android-briefing-demo.png" alt="Claude on Android surfacing an awareness briefing" width="220" align="right">
 
-You tell Claude Desktop about a doctor appointment at 2pm. Claude Code creates a calendar event, adds transit directions, and reminds you to grab your ID and transit card. On the way, Claude on your phone checks the weather and suggests a jacket for the walk home. When you get home, every AI already knows the appointment is done — no one asks "how did it go?" because the knowledge flowed automatically.
-
 This morning, a plan was drafted on Claude Android during a commute. Claude Desktop picked it up and gave engineering feedback. Claude Code implemented and deployed the changes — updating shared project status so every platform knows what happened. No copy-paste. No "remember what we discussed." The knowledge just flows.
+
+Tell one AI about your infrastructure, your preferences, or a design decision — and every AI knows it. Correct a mistake on your phone, and your desktop assistant never repeats it. That cross-platform continuity works today.
 
 The store also provides ambient awareness: a collation engine applies learned patterns and suppressions, and your AI receives a compact briefing (~200 tokens) at the start of each conversation. If something needs attention, it says so. If not, silence — and that silence is the product.
 
@@ -48,7 +48,7 @@ But it had obvious limits. Diagnostics weren't captured at detection time. There
 
 </details>
 
-Today it's a portable knowledge store that tracks personal facts, project history, design decisions, family schedules, health data, and intentions alongside infrastructure. The monitoring origin story is one use case of many.
+Today it's a portable knowledge store that tracks personal facts, project history, design decisions, and intentions alongside infrastructure monitoring. As edge providers come online, it will extend to calendars, location, health, and more — but the core store and cross-platform continuity work now.
 
 ## Core capabilities
 
@@ -70,7 +70,7 @@ Every AI you use shares the same knowledge base. Plan on your phone, implement o
 
 ### Intentions — todos that manage themselves
 
-Create a todo, reminder, or planned action from any platform. Intentions have a lifecycle — pending → fired → active → completed — and agents advance them automatically based on context. "Assemble the scooter at The Hallmark" becomes active when you arrive and completes when you leave, without you touching it.
+Create a todo, reminder, or planned action from any platform. Intentions have a lifecycle — pending → fired → active → completed — and agents advance them through conversation. Time-based intentions fire automatically at `deliver_at` timestamps. As signal sources come online (GPS, calendar), intentions will also fire based on location and context.
 
 ### Knowledge that outlives you
 
