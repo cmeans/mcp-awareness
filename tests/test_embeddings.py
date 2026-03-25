@@ -108,6 +108,16 @@ class TestComposeEmbeddingText:
         text = compose_embedding_text(entry)
         assert "source: test" in text
 
+    def test_entry_type_included(self):
+        """Entry type should be included to disambiguate note vs context."""
+        note = _make_entry(data={"description": "same text"})
+        context = _make_entry(entry_type=EntryType.CONTEXT, data={"description": "same text"})
+        note_text = compose_embedding_text(note)
+        context_text = compose_embedding_text(context)
+        assert "type: note" in note_text
+        assert "type: context" in context_text
+        assert note_text != context_text
+
 
 # ---------------------------------------------------------------------------
 # text_hash

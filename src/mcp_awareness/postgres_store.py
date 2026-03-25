@@ -390,7 +390,8 @@ class PostgresStore:
     def count_active_suppressions(self) -> int:
         with self._pool.connection() as conn, conn.cursor() as cur:
             cur.execute(
-                f"SELECT COUNT(*) AS cnt FROM entries WHERE type = %s AND {self._ACTIVE}",
+                f"SELECT COUNT(*) AS cnt FROM entries WHERE type = %s AND {self._ACTIVE}"
+                " AND (expires IS NULL OR expires > NOW())",
                 (EntryType.SUPPRESSION.value,),
             )
             row = cur.fetchone()
@@ -403,6 +404,7 @@ class PostgresStore:
         since: datetime | None = None,
         until: datetime | None = None,
         source: str | None = None,
+        entry_type: EntryType | None = None,
         learned_from: str | None = None,
         created_after: datetime | None = None,
         created_before: datetime | None = None,
@@ -410,15 +412,19 @@ class PostgresStore:
         offset: int | None = None,
     ) -> list[Entry]:
         """Get knowledge entries (patterns, context, preferences, notes)."""
-        types = [
-            EntryType.PATTERN.value,
-            EntryType.CONTEXT.value,
-            EntryType.PREFERENCE.value,
-            EntryType.NOTE.value,
-        ]
-        placeholders = ",".join("%s" for _ in types)
-        clauses = [f"type IN ({placeholders})"]
-        params: list[Any] = list(types)
+        if entry_type is not None:
+            clauses = ["type = %s"]
+            params: list[Any] = [entry_type.value]
+        else:
+            types = [
+                EntryType.PATTERN.value,
+                EntryType.CONTEXT.value,
+                EntryType.PREFERENCE.value,
+                EntryType.NOTE.value,
+            ]
+            placeholders = ",".join("%s" for _ in types)
+            clauses = [f"type IN ({placeholders})"]
+            params = list(types)
         if source is not None:
             clauses.append("source = %s")
             params.append(source)

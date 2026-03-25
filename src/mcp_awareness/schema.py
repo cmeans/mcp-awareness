@@ -48,7 +48,11 @@ def parse_iso(s: str) -> datetime:
     # Python 3.10 doesn't support 'Z' suffix in fromisoformat — normalize to +00:00
     if s.endswith("Z"):
         s = s[:-1] + "+00:00"
-    return datetime.fromisoformat(s)
+    dt = datetime.fromisoformat(s)
+    # Always return timezone-aware datetimes — naive inputs assumed UTC
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt
 
 
 def to_iso(dt: datetime) -> str:

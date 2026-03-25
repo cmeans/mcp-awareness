@@ -66,6 +66,7 @@ class Store(Protocol):
         since: datetime | None = None,
         until: datetime | None = None,
         source: str | None = None,
+        entry_type: EntryType | None = None,
         learned_from: str | None = None,
         created_after: datetime | None = None,
         created_before: datetime | None = None,

@@ -33,6 +33,23 @@ from .store import Store
 
 _start_time = time.monotonic()
 
+# Valid values for enum-like parameters
+VALID_ALERT_LEVELS = {"warning", "critical"}
+VALID_ALERT_TYPES = {"threshold", "structural", "baseline"}
+VALID_URGENCY = {"low", "normal", "high"}
+
+
+def _validate_pagination(
+    limit: int | None, offset: int | None
+) -> tuple[int | None, int | None] | str:
+    """Validate and clamp pagination params. Returns (limit, offset) or error string."""
+    if limit is not None and limit < 0:
+        return "limit must be non-negative"
+    if offset is not None and offset < 0:
+        return "offset must be non-negative"
+    return limit, offset
+
+
 TRANSPORT: Literal["stdio", "streamable-http"] = os.environ.get(  # type: ignore[assignment]
     "AWARENESS_TRANSPORT", "stdio"
 )
@@ -389,33 +406,28 @@ async def get_knowledge(
     or platform layer, not in awareness."""
     if since is not None and not since:
         return json.dumps({"error": "since cannot be empty; omit or provide an ISO 8601 timestamp"})
+    pv = _validate_pagination(limit, offset)
+    if isinstance(pv, str):
+        return json.dumps({"error": pv})
+    limit, offset = pv
     since_dt = ensure_dt(since) if since else None
     until_dt = ensure_dt(until) if until else None
     created_after_dt = ensure_dt(created_after) if created_after else None
     created_before_dt = ensure_dt(created_before) if created_before else None
-    if entry_type:
-        et = EntryType(entry_type)
-        entries = store.get_entries(
-            entry_type=et,
-            source=source,
-            tags=tags,
-            since=since_dt,
-            limit=limit,
-            offset=offset,
-        )
-    else:
-        entries = store.get_knowledge(
-            tags=tags,
-            include_history=include_history,
-            since=since_dt,
-            until=until_dt,
-            source=source,
-            learned_from=learned_from,
-            created_after=created_after_dt,
-            created_before=created_before_dt,
-            limit=limit,
-            offset=offset,
-        )
+    et = EntryType(entry_type) if entry_type else None
+    entries = store.get_knowledge(
+        tags=tags,
+        include_history=include_history,
+        since=since_dt,
+        until=until_dt,
+        source=source,
+        entry_type=et,
+        learned_from=learned_from,
+        created_after=created_after_dt,
+        created_before=created_before_dt,
+        limit=limit,
+        offset=offset,
+    )
     _log_reads(entries, "get_knowledge")
 
     # Semantic re-ranking: if hint is provided and embeddings are available,
@@ -518,6 +530,17 @@ async def report_alert(
     captured at detection time — evidence may be transient. Use resolved=True
     to mark an existing alert as resolved. Alert levels: 'warning', 'critical'.
     Alert types: 'threshold', 'structural', 'baseline'."""
+    if level not in VALID_ALERT_LEVELS:
+        return json.dumps(
+            {"error": f"invalid level '{level}', must be one of: {sorted(VALID_ALERT_LEVELS)}"}
+        )
+    if alert_type not in VALID_ALERT_TYPES:
+        return json.dumps(
+            {
+                "error": f"invalid alert_type '{alert_type}',"
+                f" must be one of: {sorted(VALID_ALERT_TYPES)}"
+            }
+        )
     data: dict[str, Any] = {
         "alert_id": alert_id,
         "level": level,
@@ -717,6 +740,12 @@ async def suppress_alert(
     Not a plain-text memory edit — survives across agent platforms.
     Use this when the user says things like 'stop bugging me about disk I/O'.
     Escalation override means critical alerts will still break through."""
+    if level not in VALID_ALERT_LEVELS:
+        return json.dumps(
+            {"error": f"invalid level '{level}', must be one of: {sorted(VALID_ALERT_LEVELS)}"}
+        )
+    if duration_minutes < 1:
+        return json.dumps({"error": "duration_minutes must be at least 1"})
     now = now_utc()
     expires = now + timedelta(minutes=duration_minutes)
     entry = Entry(
@@ -753,6 +782,8 @@ async def add_context(
     'Alice moving this week', 'construction on Ashland through April'.
     Quick test: still true in 30 days? → remember instead. Happening now,
     will become stale? → add_context. Any agent on any platform can read this."""
+    if expires_days < 1:
+        return json.dumps({"error": "expires_days must be at least 1"})
     now = now_utc()
     expires = now + timedelta(days=expires_days)
     entry = Entry(
@@ -822,11 +853,14 @@ async def delete_entry(
         )
     if tags:
         if not confirm:
-            entries = store.get_entries(tags=tags)
+            # Use AND logic to match soft_delete_by_tags behavior
+            all_entries = store.get_entries(tags=tags)
+            tag_set = set(tags)
+            matching = [e for e in all_entries if tag_set.issubset(set(e.tags))]
             return json.dumps(
                 {
                     "status": "dry_run",
-                    "would_trash": len(entries),
+                    "would_trash": len(matching),
                     "tags": tags,
                     "message": "Set confirm=True to move to trash. Show the user this count first.",
                 }
@@ -1043,6 +1077,10 @@ async def remind(
     urgency: 'low', 'normal', or 'high'. High-urgency intentions surface more prominently.
     recurrence: reserved for future use. Currently only one-shot intentions are supported.
     This tool always returns structured JSON."""
+    if urgency not in VALID_URGENCY:
+        return json.dumps(
+            {"error": f"invalid urgency '{urgency}', must be one of: {sorted(VALID_URGENCY)}"}
+        )
     now = now_utc()
     deliver_at_dt = ensure_dt(deliver_at) if deliver_at else None
     entry = Entry(
