@@ -295,6 +295,11 @@ def test_upsert_preference_deduplicates(store):
     assert entry1.id == entry2.id
 
 
+def test_get_entries_by_ids_empty_list(store):
+    """Calling get_entries_by_ids with an empty list returns [] immediately."""
+    assert store.get_entries_by_ids([]) == []
+
+
 def test_soft_delete_by_id(store):
     now = now_utc()
     entry = Entry(
@@ -2048,3 +2053,291 @@ class TestEmbeddings:
         h = text_hash(compose_embedding_text(entry))
         store.upsert_embedding(entry.id, "m", 768, h, self._vec(768, 0))
         assert store.get_stale_embeddings("m") == []
+
+
+class TestEmbeddingRoundTrip:
+    """End-to-end tests for the embedding pipeline.
+
+    Verifies the full flow: compose_embedding_text → text_hash →
+    upsert_embedding → semantic_search, plus stale detection and
+    re-embedding after content changes.  Uses hand-crafted unit vectors
+    so no real embedding model (Ollama) is needed.
+    """
+
+    @staticmethod
+    def _vec(dim: int, axis: int) -> list[float]:
+        """Unit vector along a specific axis in `dim`-dimensional space."""
+        v = [0.0] * dim
+        v[axis] = 1.0
+        return v
+
+    # -- 1. Full round-trip: compose → store → search -----------------------
+
+    def test_compose_store_search_round_trip(self, store):
+        """Create entries, compose text, hash, store embeddings, then search."""
+        from mcp_awareness.embeddings import compose_embedding_text, text_hash
+
+        now = now_utc()
+        entries = [
+            Entry(
+                id=make_id(),
+                type=EntryType.NOTE,
+                source="nas",
+                tags=["infra"],
+                created=now,
+                updated=now,
+                expires=None,
+                data={"description": "NAS storage pool is 85% full"},
+            ),
+            Entry(
+                id=make_id(),
+                type=EntryType.NOTE,
+                source="personal",
+                tags=["health"],
+                created=now,
+                updated=now,
+                expires=None,
+                data={"description": "Morning run completed 5km in 28 minutes"},
+            ),
+            Entry(
+                id=make_id(),
+                type=EntryType.NOTE,
+                source="calendar",
+                tags=["work"],
+                created=now,
+                updated=now,
+                expires=None,
+                data={"description": "Team standup moved to 10am starting Monday"},
+            ),
+        ]
+
+        # Compose text — each should be distinct
+        texts = [compose_embedding_text(e) for e in entries]
+        assert len(set(texts)) == 3, "composed texts should be distinct"
+        for t in texts:
+            assert len(t) > 0, "composed text should be non-empty"
+
+        # Hash — each should be distinct (distinct inputs → distinct hashes)
+        hashes = [text_hash(t) for t in texts]
+        assert len(set(hashes)) == 3, "hashes should be distinct"
+
+        # Store entries and embeddings on orthogonal axes
+        for i, entry in enumerate(entries):
+            store.add(entry)
+            store.upsert_embedding(entry.id, "m", 768, hashes[i], self._vec(768, i))
+
+        # Search with each vector — should find its own entry first
+        for i, entry in enumerate(entries):
+            results = store.semantic_search(self._vec(768, i), "m", limit=3)
+            assert len(results) == 3
+            assert results[0][0].id == entry.id
+            assert results[0][1] > 0.99  # cosine similarity with itself
+
+    # -- 2. Stale embedding detection ----------------------------------------
+
+    def test_stale_embedding_detection(self, store):
+        """Updating an entry's description makes its embedding stale."""
+        from mcp_awareness.embeddings import compose_embedding_text, text_hash
+
+        now = now_utc()
+        entry = Entry(
+            id=make_id(),
+            type=EntryType.NOTE,
+            source="test",
+            tags=["project"],
+            created=now,
+            updated=now,
+            expires=None,
+            data={"description": "original description"},
+        )
+        store.add(entry)
+
+        original_hash = text_hash(compose_embedding_text(entry))
+        store.upsert_embedding(entry.id, "m", 768, original_hash, self._vec(768, 0))
+
+        # Not stale yet
+        assert store.get_stale_embeddings("m") == []
+
+        # Update the entry — changes the composed text
+        store.update_entry(entry.id, {"description": "completely different description"})
+
+        # Now it should be stale
+        stale = store.get_stale_embeddings("m")
+        assert len(stale) == 1
+        assert stale[0].id == entry.id
+
+    # -- 3. Embedding update (re-embed after content change) -----------------
+
+    def test_reembed_after_content_change(self, store):
+        """After re-computing and storing a new embedding, entry is no longer stale."""
+        from mcp_awareness.embeddings import compose_embedding_text, text_hash
+
+        now = now_utc()
+        entry = Entry(
+            id=make_id(),
+            type=EntryType.NOTE,
+            source="test",
+            tags=[],
+            created=now,
+            updated=now,
+            expires=None,
+            data={"description": "version one"},
+        )
+        store.add(entry)
+
+        h1 = text_hash(compose_embedding_text(entry))
+        store.upsert_embedding(entry.id, "m", 768, h1, self._vec(768, 0))
+        assert store.get_stale_embeddings("m") == []
+
+        # Mutate entry
+        store.update_entry(entry.id, {"description": "version two"})
+        assert len(store.get_stale_embeddings("m")) == 1
+
+        # Re-embed: fetch updated entry, recompose, re-hash, re-store
+        updated = store.get_entry_by_id(entry.id)
+        assert updated is not None
+        new_text = compose_embedding_text(updated)
+        h2 = text_hash(new_text)
+        assert h2 != h1
+        store.upsert_embedding(entry.id, "m", 768, h2, self._vec(768, 1))
+
+        # No longer stale
+        assert store.get_stale_embeddings("m") == []
+
+        # Still searchable
+        results = store.semantic_search(self._vec(768, 1), "m", limit=1)
+        assert len(results) == 1
+        assert results[0][0].id == entry.id
+
+    # -- 4. Search with filters ----------------------------------------------
+
+    def test_search_filters_combined(self, store):
+        """Source, tag, and entry_type filters narrow semantic search results."""
+        now = now_utc()
+        note_infra = Entry(
+            id=make_id(),
+            type=EntryType.NOTE,
+            source="nas",
+            tags=["infra"],
+            created=now,
+            updated=now,
+            expires=None,
+            data={"description": "disk usage high"},
+        )
+        note_personal = Entry(
+            id=make_id(),
+            type=EntryType.NOTE,
+            source="personal",
+            tags=["health"],
+            created=now,
+            updated=now,
+            expires=None,
+            data={"description": "went for a run"},
+        )
+        alert_infra = Entry(
+            id=make_id(),
+            type=EntryType.ALERT,
+            source="nas",
+            tags=["infra"],
+            created=now,
+            updated=now,
+            expires=None,
+            data={
+                "alert_id": "disk1",
+                "message": "disk failing",
+                "level": "critical",
+                "resolved": False,
+            },
+        )
+
+        # Same vector for all — filters are what differentiate results
+        vec = self._vec(768, 0)
+        for i, e in enumerate([note_infra, note_personal, alert_infra]):
+            store.add(e)
+            store.upsert_embedding(e.id, "m", 768, f"h{i}", vec)
+
+        # Source filter
+        results = store.semantic_search(vec, "m", source="nas")
+        assert len(results) == 2
+        assert all(r[0].source == "nas" for r in results)
+
+        # Tag filter
+        results = store.semantic_search(vec, "m", tags=["health"])
+        assert len(results) == 1
+        assert results[0][0].id == note_personal.id
+
+        # Entry type filter
+        results = store.semantic_search(vec, "m", entry_type=EntryType.ALERT)
+        assert len(results) == 1
+        assert results[0][0].id == alert_infra.id
+
+        # Combined: source + type
+        results = store.semantic_search(vec, "m", source="nas", entry_type=EntryType.NOTE)
+        assert len(results) == 1
+        assert results[0][0].id == note_infra.id
+
+    # -- 5. compose_embedding_text covers all entry types --------------------
+
+    def test_compose_text_covers_entry_types(self, store):
+        """compose_embedding_text produces non-empty, distinct text for each type."""
+        from mcp_awareness.embeddings import compose_embedding_text
+
+        now = now_utc()
+        entries = [
+            Entry(
+                id=make_id(),
+                type=EntryType.NOTE,
+                source="test-note",
+                tags=["tag-a"],
+                created=now,
+                updated=now,
+                expires=None,
+                data={"description": "a note about something"},
+            ),
+            Entry(
+                id=make_id(),
+                type=EntryType.PATTERN,
+                source="test-pattern",
+                tags=["tag-b"],
+                created=now,
+                updated=now,
+                expires=None,
+                data={"description": "when CPU spikes", "effect": "fans run loud"},
+            ),
+            Entry(
+                id=make_id(),
+                type=EntryType.CONTEXT,
+                source="test-context",
+                tags=["tag-c"],
+                created=now,
+                updated=now,
+                expires=None,
+                data={"description": "working on embedding tests"},
+            ),
+            Entry(
+                id=make_id(),
+                type=EntryType.INTENTION,
+                source="test-intention",
+                tags=["tag-d"],
+                created=now,
+                updated=now,
+                expires=None,
+                data={"goal": "finish the PR by end of day", "description": "embedding round-trip"},
+            ),
+        ]
+
+        texts = [compose_embedding_text(e) for e in entries]
+
+        # All non-empty
+        for t in texts:
+            assert len(t) > 0
+
+        # All distinct
+        assert len(set(texts)) == len(entries)
+
+        # Each includes type, source, and tags
+        for entry, text in zip(entries, texts, strict=True):
+            assert entry.type.value in text
+            assert entry.source in text
+            for tag in entry.tags:
+                assert tag in text
