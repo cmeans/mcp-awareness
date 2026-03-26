@@ -127,10 +127,9 @@ def _do_embed(
     entry_data: dict[str, Any],
     entry_type_val: str,
 ) -> None:
-    """Actual embedding work — runs in thread pool with its own DB connection.
+    """Actual embedding work — runs in thread pool.
 
-    Uses a dedicated connection to avoid racing with the main thread's
-    shared connection (same pattern as _do_cleanup in PostgresStore).
+    Uses the store's connection pool for the DB write.
     """
     try:
         provider = _get_embedding_provider()
@@ -150,21 +149,9 @@ def _do_embed(
         h = text_hash(text)
         vectors = provider.embed([text])
         if vectors:
-            # Use a dedicated connection for the background write to avoid
-            # racing with the main thread's shared connection.
-            import psycopg
-
-            with psycopg.connect(store.dsn) as conn:
-                vector_literal = "[" + ",".join(str(v) for v in vectors[0]) + "]"
-                conn.execute(
-                    "INSERT INTO embeddings (entry_id, model, dimensions, text_hash, embedding) "
-                    "VALUES (%s, %s, %s, %s, %s::vector) "
-                    "ON CONFLICT (entry_id, model) DO UPDATE SET "
-                    "embedding = EXCLUDED.embedding, text_hash = EXCLUDED.text_hash, "
-                    "dimensions = EXCLUDED.dimensions, created = now()",
-                    (entry_id, provider.model_name, provider.dimensions, h, vector_literal),
-                )
-                conn.commit()
+            store.upsert_embedding(
+                entry_id, provider.model_name, provider.dimensions, h, vectors[0]
+            )
     except Exception:
         pass  # Backfill will catch failures
 
