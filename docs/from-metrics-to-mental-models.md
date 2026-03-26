@@ -673,3 +673,7 @@ All use the same `report_status`, `report_alert`, `learn_pattern` tools.
 5. **Separate repos**: `mcp-awareness` (the generic service) and `homelab-edge` (the NAS-specific source provider) should be separate repositories. The service is the platform; the edge daemon is one consumer.
 
 6. **Existing solutions check**: Before building from scratch, verify whether any existing project exposes a generic tagged alert/knowledge store via MCP. The edge daemon is custom regardless, but the store might not need to be.
+
+---
+
+*[mcp-awareness](https://github.com/cmeans/mcp-awareness) is open source under the [Apache 2.0 License](../LICENSE). Copyright (c) 2026 Chris Means.*

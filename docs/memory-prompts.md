@@ -202,3 +202,7 @@ For example, the first audit of this project's data found:
 - Source naming chaos: `chris-personal`, `chris-career`, `chris-health` instead of one `personal` source with domain tags. The prompt lacked explicit naming conventions.
 
 Each finding led to a prompt update. The current prompts reflect these lessons — but they'll continue to evolve as usage patterns reveal new gaps. Expect to run this cycle periodically, especially after adding new platforms or onboarding new users.
+
+---
+
+*[mcp-awareness](https://github.com/cmeans/mcp-awareness) is open source under the [Apache 2.0 License](../LICENSE). Copyright (c) 2026 Chris Means.*

@@ -176,3 +176,7 @@ The fix replaced aspirational scenarios with grounded examples of what actually 
 Documentation that overpromises erodes trust — especially when visitors are evaluating whether to adopt. Having agents review documentation for accuracy, not just code for correctness, catches a class of problems that traditional CI can't detect. The two-role pattern (Dev writes, QA reviews) provided an additional layer of scrutiny.
 
 </details>
+
+---
+
+*[mcp-awareness](https://github.com/cmeans/mcp-awareness) is open source under the [Apache 2.0 License](../LICENSE). Copyright (c) 2026 Chris Means.*

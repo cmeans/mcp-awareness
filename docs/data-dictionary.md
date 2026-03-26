@@ -262,3 +262,7 @@ The PostgreSQL backend is designed for a clean migration path to AWS RDS:
 - **Logical replication** supported via `wal_level=logical` (RDS parameter group setting)
 - **Migration:** `pg_dump` / `pg_restore` with `CREATE EXTENSION` statements
 - **No unlogged tables, no large objects** — replication-safe by design
+
+---
+
+*[mcp-awareness](https://github.com/cmeans/mcp-awareness) is open source under the [Apache 2.0 License](../LICENSE). Copyright (c) 2026 Chris Means.*
