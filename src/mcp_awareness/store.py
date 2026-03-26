@@ -188,9 +188,7 @@ class Store(Protocol):
         """Query action records with optional filters."""
         ...
 
-    def get_unread(
-        self, since: datetime | None = None, limit: int | None = None
-    ) -> list[Entry]:
+    def get_unread(self, since: datetime | None = None, limit: int | None = None) -> list[Entry]:
         """Get entries with zero reads, optionally created since a timestamp."""
         ...
 
