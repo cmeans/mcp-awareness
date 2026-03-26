@@ -606,6 +606,30 @@ class TestGetKnowledgeTool:
         assert entries[0]["data"]["description"] == "nas infra"
 
 
+class TestInvalidEntryType:
+    @pytest.mark.anyio
+    async def test_get_knowledge_invalid_entry_type(self) -> None:
+        result = await server_mod.get_knowledge(entry_type="bogus")
+        parsed = json.loads(result)
+        assert "error" in parsed
+        assert "bogus" in parsed["error"]
+        assert "Valid:" in parsed["error"]
+
+    @pytest.mark.anyio
+    async def test_delete_entry_invalid_entry_type(self) -> None:
+        result = await server_mod.delete_entry(source="test", entry_type="fake")
+        parsed = json.loads(result)
+        assert parsed["status"] == "error"
+        assert "fake" in parsed["message"]
+
+    @pytest.mark.anyio
+    async def test_semantic_search_invalid_entry_type(self) -> None:
+        result = await server_mod.semantic_search(query="test", entry_type="nope")
+        parsed = json.loads(result)
+        assert parsed["status"] == "error"
+        assert "nope" in parsed["message"]
+
+
 class TestSuppressAlertTagsNotDuplicated:
     @pytest.mark.anyio
     async def test_suppression_data_has_no_tags_field(self) -> None:
@@ -1078,6 +1102,18 @@ class TestLogicalKeyUpsert:
         changelog = entries[0]["data"]["changelog"]
         assert len(changelog) == 1
         assert changelog[0]["changed"]["description"] == "original"
+
+    @pytest.mark.anyio
+    async def test_logical_key_upsert_updates_tags(self) -> None:
+        await server_mod.remember(
+            source="project", tags=["v1-tag"], description="initial", logical_key="tag-test"
+        )
+        await server_mod.remember(
+            source="project", tags=["v2-tag"], description="initial", logical_key="tag-test"
+        )
+        entries = json.loads(await server_mod.get_knowledge(entry_type="note"))
+        assert len(entries) == 1
+        assert entries[0]["tags"] == ["v2-tag"]
 
     @pytest.mark.anyio
     async def test_different_logical_keys_no_conflict(self) -> None:

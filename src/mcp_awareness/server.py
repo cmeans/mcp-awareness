@@ -40,6 +40,19 @@ VALID_ALERT_TYPES = {"threshold", "structural", "baseline"}
 VALID_URGENCY = {"low", "normal", "high"}
 
 
+_VALID_ENTRY_TYPES = [e.value for e in EntryType]
+
+
+def _parse_entry_type(entry_type: str | None) -> tuple[EntryType | None, str | None]:
+    """Parse entry_type string. Returns (value, None) or (None, error)."""
+    if not entry_type:
+        return None, None
+    try:
+        return EntryType(entry_type), None
+    except ValueError:
+        return None, f"Invalid entry_type: {entry_type!r}. Valid: {_VALID_ENTRY_TYPES}"
+
+
 def _validate_pagination(
     limit: int | None, offset: int | None
 ) -> tuple[int | None, int | None] | str:
@@ -405,7 +418,9 @@ async def get_knowledge(
     until_dt = ensure_dt(until) if until else None
     created_after_dt = ensure_dt(created_after) if created_after else None
     created_before_dt = ensure_dt(created_before) if created_before else None
-    et = EntryType(entry_type) if entry_type else None
+    et, et_err = _parse_entry_type(entry_type)
+    if et_err:
+        return json.dumps({"error": et_err})
     entries = store.get_knowledge(
         tags=tags,
         include_history=include_history,
@@ -430,7 +445,7 @@ async def get_knowledge(
             try:
                 hint_vec = provider.embed([hint])
                 if hint_vec:
-                    hint_et = EntryType(entry_type) if entry_type else None
+                    hint_et = et
                     scored = store.semantic_search(
                         embedding=hint_vec[0],
                         model=provider.model_name,
@@ -867,7 +882,9 @@ async def delete_entry(
         )
     if not source:
         return json.dumps({"status": "error", "message": "Provide entry_id, tags, or source"})
-    et = EntryType(entry_type) if entry_type else None
+    et, et_err = _parse_entry_type(entry_type)
+    if et_err:
+        return json.dumps({"status": "error", "message": et_err})
     if not confirm:
         entries = store.get_entries(entry_type=et, source=source)
         return json.dumps(
@@ -1161,6 +1178,9 @@ async def semantic_search(
     Returns entries sorted by relevance with similarity scores.
     Requires an embedding provider (AWARENESS_EMBEDDING_PROVIDER env var).
     mode: omit for full entries, 'list' for metadata only + similarity."""
+    et, et_err = _parse_entry_type(entry_type)
+    if et_err:
+        return json.dumps({"status": "error", "message": et_err})
     provider = _get_embedding_provider()
     if not provider.is_available():
         return json.dumps(
@@ -1180,7 +1200,6 @@ async def semantic_search(
     except Exception as exc:
         return json.dumps({"status": "error", "message": f"Embedding error: {exc}"})
 
-    et = EntryType(entry_type) if entry_type else None
     since_dt = parse_iso(since) if since else None
     until_dt = parse_iso(until) if until else None
 
@@ -1236,34 +1255,36 @@ async def backfill_embeddings(
     # Phase 1: entries without embeddings
     missing = store.get_entries_without_embeddings(provider.model_name, limit=limit)
     new_count = 0
-    for entry in missing:
+    if missing:
+        texts = [compose_embedding_text(e) for e in missing]
+        hashes = [text_hash(t) for t in texts]
         try:
-            text = compose_embedding_text(entry)
-            h = text_hash(text)
-            vectors = provider.embed([text])
-            if vectors:
-                store.upsert_embedding(
-                    entry.id, provider.model_name, provider.dimensions, h, vectors[0]
-                )
-                new_count += 1
+            vectors = provider.embed(texts)
         except Exception:  # pragma: no cover
-            continue
+            vectors = []
+        for entry, h, vec in zip(missing, hashes, vectors, strict=False):
+            try:
+                store.upsert_embedding(entry.id, provider.model_name, provider.dimensions, h, vec)
+                new_count += 1
+            except Exception:  # pragma: no cover
+                continue
 
     # Phase 2: stale embeddings (text changed since embedding)
     stale = store.get_stale_embeddings(provider.model_name, limit=limit)
     refreshed_count = 0
-    for entry in stale:
+    if stale:
+        texts = [compose_embedding_text(e) for e in stale]
+        hashes = [text_hash(t) for t in texts]
         try:
-            text = compose_embedding_text(entry)
-            h = text_hash(text)
-            vectors = provider.embed([text])
-            if vectors:
-                store.upsert_embedding(
-                    entry.id, provider.model_name, provider.dimensions, h, vectors[0]
-                )
-                refreshed_count += 1
+            vectors = provider.embed(texts)
         except Exception:  # pragma: no cover
-            continue
+            vectors = []
+        for entry, h, vec in zip(stale, hashes, vectors, strict=False):
+            try:
+                store.upsert_embedding(entry.id, provider.model_name, provider.dimensions, h, vec)
+                refreshed_count += 1
+            except Exception:  # pragma: no cover
+                continue
 
     remaining = len(store.get_entries_without_embeddings(provider.model_name, limit=1))
     return json.dumps(
@@ -1294,9 +1315,8 @@ async def get_related(
         return json.dumps({"status": "error", "message": f"Entry not found: {entry_id}"})
 
     # Forward: entries this entry references
-    forward_ids: list[str] = entry.data.get("related_ids", [])
-    forward = [store.get_entry_by_id(rid) for rid in forward_ids if rid != entry_id]
-    forward = [e for e in forward if e is not None]
+    forward_ids: list[str] = [rid for rid in entry.data.get("related_ids", []) if rid != entry_id]
+    forward = store.get_entries_by_ids(forward_ids) if forward_ids else []
 
     # Reverse: entries that reference this entry via JSONB containment
     reverse = store.get_referencing_entries(entry_id)
@@ -1519,12 +1539,8 @@ async def write_guide() -> str:
 async def catchup(hours: int = 24) -> str:
     """Compose a catchup summary of recently updated entries."""
     since = now_utc() - timedelta(hours=hours)
-    # Pull all knowledge and filter by updated timestamp
-    all_entries = store.get_knowledge(include_history="true")
-    recent = [e for e in all_entries if e.updated >= since]
-    # Also check alerts
-    alerts = store.get_active_alerts()
-    recent_alerts = [a for a in alerts if a.updated >= since]
+    recent = store.get_knowledge(include_history="true", since=since)
+    recent_alerts = store.get_active_alerts(since=since)
 
     parts: list[str] = [f"# Catchup — last {hours} hours"]
 
