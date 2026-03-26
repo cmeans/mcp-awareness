@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- Replace silent `except Exception: pass` blocks with `logger.debug` logging in server and store
 - `upsert_by_logical_key` race condition: concurrent writers can no longer create duplicate entries
 - Logical key unique index now excludes soft-deleted entries, allowing re-creation after delete
 - Invalid `entry_type` parameter now returns structured error instead of unhandled ValueError
@@ -19,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Tag filtering in `get_entries` and `get_knowledge` now uses AND logic (match ALL tags) instead of OR, consistent with delete/restore operations
 
 ### Added
+- Concurrency tests for connection pool, background cleanup, and concurrent upserts
 - **Embedding round-trip tests**: compose → store → search pipeline, stale detection, filtered search
 - **Store protocol docstrings**: Concise one-line docstrings for all ~30 methods in the `Store` protocol, documenting the contract for backend implementors
 - `uv.lock` for reproducible dependency resolution across builds

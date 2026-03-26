@@ -10,6 +10,7 @@ Requires: pip install psycopg[binary] psycopg_pool
 from __future__ import annotations
 
 import json
+import logging
 import threading
 import time
 from datetime import datetime, timedelta, timezone
@@ -20,6 +21,8 @@ from psycopg.rows import dict_row
 from psycopg_pool import ConnectionPool
 
 from .schema import Entry, EntryType, ensure_dt, ensure_dt_optional, make_id, now_utc, to_iso
+
+logger = logging.getLogger(__name__)
 
 # How long soft-deleted entries remain recoverable before auto-purge
 TRASH_RETENTION_DAYS = 30
@@ -743,7 +746,7 @@ class PostgresStore:
                         (eid, platform, tool_used),
                     )
         except Exception:
-            pass  # Fire-and-forget
+            logger.debug("log_read failed", exc_info=True)
 
     def log_action(
         self,
