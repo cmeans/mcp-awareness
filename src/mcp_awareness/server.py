@@ -10,6 +10,7 @@ from __future__ import annotations
 import concurrent.futures
 import functools
 import json
+import logging
 import os
 import pathlib
 import re
@@ -31,6 +32,8 @@ from .embeddings import (
 from .postgres_store import PostgresStore
 from .schema import Entry, EntryType, ensure_dt, make_id, now_utc, parse_iso, to_iso
 from .store import Store
+
+logger = logging.getLogger(__name__)
 
 _start_time = time.monotonic()
 
@@ -140,10 +143,9 @@ def _do_embed(
     entry_data: dict[str, Any],
     entry_type_val: str,
 ) -> None:
-    """Actual embedding work — runs in thread pool with its own DB connection.
+    """Actual embedding work — runs in thread pool.
 
-    Uses a dedicated connection to avoid racing with the main thread's
-    shared connection (same pattern as _do_cleanup in PostgresStore).
+    Uses the store's connection pool for the DB write.
     """
     try:
         provider = _get_embedding_provider()
@@ -163,23 +165,11 @@ def _do_embed(
         h = text_hash(text)
         vectors = provider.embed([text])
         if vectors:
-            # Use a dedicated connection for the background write to avoid
-            # racing with the main thread's shared connection.
-            import psycopg
-
-            with psycopg.connect(store.dsn) as conn:
-                vector_literal = "[" + ",".join(str(v) for v in vectors[0]) + "]"
-                conn.execute(
-                    "INSERT INTO embeddings (entry_id, model, dimensions, text_hash, embedding) "
-                    "VALUES (%s, %s, %s, %s, %s::vector) "
-                    "ON CONFLICT (entry_id, model) DO UPDATE SET "
-                    "embedding = EXCLUDED.embedding, text_hash = EXCLUDED.text_hash, "
-                    "dimensions = EXCLUDED.dimensions, created = now()",
-                    (entry_id, provider.model_name, provider.dimensions, h, vector_literal),
-                )
-                conn.commit()
+            store.upsert_embedding(
+                entry_id, provider.model_name, provider.dimensions, h, vectors[0]
+            )
     except Exception:
-        pass  # Backfill will catch failures
+        logger.debug("Embedding failed for entry %s", entry_id, exc_info=True)
 
 
 def _generate_embedding(entry: Entry) -> None:
@@ -199,7 +189,7 @@ def _log_reads(entries: list[Any], tool_name: str) -> None:
         if ids:
             store.log_read(ids, tool_used=tool_name)
     except Exception:
-        pass  # Read logging must never break the tool response
+        logger.debug("Read logging failed for %s", tool_name, exc_info=True)
 
 
 def _log_timing(tool_name: str, elapsed_ms: float) -> None:
@@ -461,7 +451,7 @@ async def get_knowledge(
                     # entries without embeddings at the end
                     entries.sort(key=lambda e: similarity_map.get(e.id, -1.0), reverse=True)
             except Exception:  # pragma: no cover
-                pass  # Fall back to default ordering
+                logger.debug("Hint re-ranking failed", exc_info=True)
 
     if mode == "list":
         read_counts = store.get_read_counts([e.id for e in entries])
@@ -1261,12 +1251,14 @@ async def backfill_embeddings(
         try:
             vectors = provider.embed(texts)
         except Exception:  # pragma: no cover
+            logger.debug("Backfill embed failed", exc_info=True)
             vectors = []
         for entry, h, vec in zip(missing, hashes, vectors, strict=False):
             try:
                 store.upsert_embedding(entry.id, provider.model_name, provider.dimensions, h, vec)
                 new_count += 1
             except Exception:  # pragma: no cover
+                logger.debug("Backfill upsert failed for entry %s", entry.id, exc_info=True)
                 continue
 
     # Phase 2: stale embeddings (text changed since embedding)
@@ -1278,12 +1270,14 @@ async def backfill_embeddings(
         try:
             vectors = provider.embed(texts)
         except Exception:  # pragma: no cover
+            logger.debug("Backfill refresh embed failed", exc_info=True)
             vectors = []
         for entry, h, vec in zip(stale, hashes, vectors, strict=False):
             try:
                 store.upsert_embedding(entry.id, provider.model_name, provider.dimensions, h, vec)
                 refreshed_count += 1
             except Exception:  # pragma: no cover
+                logger.debug("Backfill refresh upsert failed for entry %s", entry.id, exc_info=True)
                 continue
 
     remaining = len(store.get_entries_without_embeddings(provider.model_name, limit=1))
