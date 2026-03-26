@@ -199,7 +199,7 @@ Stores vector embeddings for semantic search. One embedding per entry per model.
 | `model` | `TEXT` | NO | — | Embedding model name (e.g., `nomic-embed-text`) |
 | `dimensions` | `INTEGER` | NO | — | Vector dimension count (e.g., 768) |
 | `text_hash` | `TEXT` | NO | — | SHA-256 of embedded text (staleness detection) |
-| `embedding` | `VECTOR(768)` | NO | — | pgvector embedding |
+| `embedding` | `VECTOR(N)` | NO | — | pgvector embedding (N = `AWARENESS_EMBEDDING_DIMENSIONS`, default 768) |
 | `created` | `TIMESTAMPTZ` | NO | `now()` | When this embedding was generated |
 
 **Constraints:** `UNIQUE (entry_id, model)` — one embedding per entry per model, upsert on conflict.
@@ -218,7 +218,7 @@ Stores vector embeddings for semantic search. One embedding per entry per model.
 - The `text_hash` column enables detection of stale embeddings after entry updates
 - `ON DELETE CASCADE` ensures embeddings are cleaned up when entries are deleted
 - Requires `AWARENESS_EMBEDDING_PROVIDER=ollama` to activate (optional)
-- **Dimension constraint**: `VECTOR(768)` is hardcoded in both inline DDL and Alembic migration, matching `nomic-embed-text`. To use a model with different dimensions, both the DDL and migration must be updated. `AWARENESS_EMBEDDING_DIMENSIONS` configures the provider but does not alter the column type.
+- **Dimension constraint**: The `VECTOR` column dimension is configured via `AWARENESS_EMBEDDING_DIMENSIONS` (default: 768, matching `nomic-embed-text`). The inline DDL uses this value at table creation time. The initial Alembic migration hardcodes 768 — existing deployments that need a different dimension require a new migration. The dimension must match the embedding model's output size.
 
 ## Conventions
 

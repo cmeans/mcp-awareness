@@ -29,8 +29,15 @@ TRASH_RETENTION_DAYS = 30
 
 
 class PostgresStore:
-    def __init__(self, dsn: str, min_pool: int = 2, max_pool: int = 5) -> None:
+    def __init__(
+        self,
+        dsn: str,
+        min_pool: int = 2,
+        max_pool: int = 5,
+        embedding_dimensions: int = 768,
+    ) -> None:
         self.dsn = dsn
+        self._embedding_dimensions = embedding_dimensions
         self._pool: ConnectionPool[psycopg.Connection[dict[str, Any]]] = ConnectionPool(
             dsn,
             min_size=min_pool,
@@ -45,7 +52,7 @@ class PostgresStore:
 
     def _create_tables(self) -> None:
         with self._pool.connection() as conn, conn.cursor() as cur:
-            cur.execute("""
+            cur.execute(f"""
                 CREATE TABLE IF NOT EXISTS entries (
                     id       TEXT PRIMARY KEY,
                     type     TEXT NOT NULL,
@@ -55,7 +62,7 @@ class PostgresStore:
                     expires  TIMESTAMPTZ,
                     deleted  TIMESTAMPTZ,
                     tags     JSONB NOT NULL DEFAULT '[]',
-                    data     JSONB NOT NULL DEFAULT '{}',
+                    data     JSONB NOT NULL DEFAULT '{{}}',
                     logical_key TEXT
                 );
                 CREATE INDEX IF NOT EXISTS idx_entries_type ON entries(type);
@@ -97,7 +104,7 @@ class PostgresStore:
                     model       TEXT NOT NULL,
                     dimensions  INTEGER NOT NULL,
                     text_hash   TEXT NOT NULL,
-                    embedding   VECTOR(768) NOT NULL,
+                    embedding   VECTOR({self._embedding_dimensions}) NOT NULL,
                     created     TIMESTAMPTZ NOT NULL DEFAULT now(),
                     UNIQUE (entry_id, model)
                 );

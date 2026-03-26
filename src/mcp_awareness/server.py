@@ -96,7 +96,7 @@ def _create_store() -> Store:
             "AWARENESS_DATABASE_URL is required. "
             "Example: postgresql://user:pass@localhost:5432/awareness"
         )
-    return PostgresStore(url)
+    return PostgresStore(url, embedding_dimensions=EMBEDDING_DIMENSIONS)
 
 
 class _LazyStore:
