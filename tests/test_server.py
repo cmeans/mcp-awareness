@@ -29,6 +29,34 @@ def _store() -> PostgresStore:
 
 
 # ---------------------------------------------------------------------------
+# Store factory tests
+# ---------------------------------------------------------------------------
+
+
+class TestCreateStore:
+    def test_passes_embedding_dimensions(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """_create_store passes EMBEDDING_DIMENSIONS to PostgresStore."""
+        monkeypatch.setenv("AWARENESS_DATABASE_URL", "postgresql://fake:5432/db")
+        monkeypatch.setattr(server_mod, "EMBEDDING_DIMENSIONS", 1024)
+        captured: dict = {}
+        _orig_init = PostgresStore.__init__
+
+        def _capture_init(self: PostgresStore, *args: object, **kwargs: object) -> None:
+            captured["args"] = args
+            captured["kwargs"] = kwargs
+
+        monkeypatch.setattr(PostgresStore, "__init__", _capture_init)
+        server_mod._create_store()
+        assert captured["kwargs"].get("embedding_dimensions") == 1024
+
+    def test_raises_without_database_url(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """_create_store raises ValueError when AWARENESS_DATABASE_URL is unset."""
+        monkeypatch.delenv("AWARENESS_DATABASE_URL", raising=False)
+        with pytest.raises(ValueError, match="AWARENESS_DATABASE_URL is required"):
+            server_mod._create_store()
+
+
+# ---------------------------------------------------------------------------
 # Resource tests
 # ---------------------------------------------------------------------------
 
