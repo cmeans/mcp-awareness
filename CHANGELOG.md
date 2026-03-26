@@ -7,14 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.2] - 2026-03-25
+
 ### Added
 - **Query discipline in server instructions**: MCP instructions now guide clients to use `mode='list'` before full fetches, set `limit`, use `hint` for relevance ranking, narrow with specific tags, and check `get_stats`/`get_tags` before broad queries
 - **Externalized server instructions**: MCP instructions moved from inline Python string to `instructions.md` for cleaner content/code separation
-- **Case studies doc**: `docs/case-studies.md` with 7 real-world examples of awareness in practice, each attributed to the agent/platform that drove the discovery
+- **Case studies doc**: `docs/case-studies.md` with 7 real-world examples of awareness in practice, each attributed to the agent/platform involved
 
 ### Changed
 - **README aspirational claims**: Replaced doctor appointment scenario with grounded cross-platform example, qualified "family schedules, health data" as planned edge capabilities, reframed intentions section around working features (time-based firing) with location-based noted as planned
 - **README "How it's built" section**: Condensed inline examples to a summary paragraph with link to case studies doc
+- **Human-directed framing**: All documentation now explicitly credits the user directing the work, not agents acting autonomously
+- **Copyright footers**: Added to all 5 docs that were missing them
+- **Docker Compose**: Use `pull_policy: always` for production deployment
 
 ## [0.11.1] - 2026-03-24
 
@@ -286,7 +291,8 @@ Initial implementation.
 - **Dockerfile** for container deployment
 - Design docs: core spec and collation layer
 
-[Unreleased]: https://github.com/cmeans/mcp-awareness/compare/v0.11.1...HEAD
+[Unreleased]: https://github.com/cmeans/mcp-awareness/compare/v0.11.2...HEAD
+[0.11.2]: https://github.com/cmeans/mcp-awareness/compare/v0.11.1...v0.11.2
 [0.11.1]: https://github.com/cmeans/mcp-awareness/compare/v0.11.0...v0.11.1
 [0.11.0]: https://github.com/cmeans/mcp-awareness/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/cmeans/mcp-awareness/compare/v0.9.0...v0.10.0
