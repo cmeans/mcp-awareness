@@ -1,5 +1,5 @@
-"""Allow ``python -m mcp_awareness`` to start the server."""
+"""Allow ``python -m mcp_awareness`` to start the server."""  # pragma: no cover
 
-from mcp_awareness.server import main
+from mcp_awareness.server import main  # pragma: no cover
 
-main()
+main()  # pragma: no cover
