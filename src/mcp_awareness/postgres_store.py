@@ -800,9 +800,7 @@ class PostgresStore:
             for r in rows
         ]
 
-    def get_unread(
-        self, since: datetime | None = None, limit: int | None = None
-    ) -> list[Entry]:
+    def get_unread(self, since: datetime | None = None, limit: int | None = None) -> list[Entry]:
         """Get entries with zero reads (optionally since a timestamp). Cleanup candidates."""
         since_clause = ""
         params: list[Any] = []
