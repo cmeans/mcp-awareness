@@ -4,7 +4,10 @@ Real-world examples of awareness in practice — what worked, what broke, and wh
 
 ---
 
-## Patterns over events — OS update analysis
+<details>
+<summary><strong>Patterns over events</strong> — OS update analysis (Claude on claude.ai)</summary>
+
+### Patterns over events — OS update analysis
 
 **Discovered by:** Claude on claude.ai
 **When:** January–March 2026
@@ -22,7 +25,7 @@ Three reasons:
 
 3. **Patterns are durable; events are not.** Across 24 updates, three operational patterns kept recurring. Those are genuinely useful for any agent working on the system — they encode "when X happens, expect Y" knowledge that saves time and prevents mistakes.
 
-### What was stored (3 learned patterns)
+#### What was stored (3 learned patterns)
 
 1. **Mesa / RPM Fusion lag** — When Fedora bumps mesa, RPM Fusion's `mesa-va-drivers-freeworld` frequently hasn't caught up, blocking the upgrade. Resolution: wait 1–3 days, don't force-remove (loses hardware video decode).
 
@@ -30,7 +33,7 @@ Three reasons:
 
 3. **GNOME Software phantom notifications** — After dnf applies updates requiring reboot, the GNOME Software tray shows "updates available." It's the same packages, not new ones. Clears after reboot.
 
-### Why it matters
+#### Why it matters
 
 - **Claude on claude.ai** already has the patterns next time a Mesa update is held back — no re-derivation needed.
 - **Claude Code** doing system maintenance can query awareness and find the VirtualBox fix without the user explaining it.
@@ -38,9 +41,14 @@ Three reasons:
 
 **The principle:** Awareness is for knowledge that transfers — patterns, decisions, preferences, operational rules. If the data goes stale with the next occurrence, it belongs in conversation history. If it teaches something reusable, it belongs in awareness.
 
+</details>
+
 ---
 
-## Feature discovery through friction — logical_key upsert
+<details>
+<summary><strong>Feature discovery through friction</strong> — logical_key upsert (Claude Desktop → Claude Code)</summary>
+
+### Feature discovery through friction — logical_key upsert
 
 **Discovered by:** Claude Desktop
 **Implemented by:** Claude Code
@@ -53,13 +61,18 @@ The workaround was creating a duplicate with a "supersedes" note. Desktop recogn
 
 Claude Code discovered the proposal in the shared store, implemented it, and shipped it — all without any copy-paste or "remember what we discussed."
 
-### Why it matters
+#### Why it matters
 
 Three agents, three platforms, one feature — discovered through friction, designed by the agent that hit the problem, implemented by the agent best suited for coding. The shared knowledge store was both the communication channel and the subject of the improvement.
 
+</details>
+
 ---
 
-## Prompt tuning through data audit
+<details>
+<summary><strong>Prompt tuning through data audit</strong> — 53/56 entries misclassified (Claude on claude.ai)</summary>
+
+### Prompt tuning through data audit
 
 **Discovered by:** Claude on claude.ai
 **When:** March 2026
@@ -69,13 +82,18 @@ The first audit of stored data found 53 out of 56 `learn_pattern` entries had em
 
 Each finding led to a prompt update. The prompts got more explicit, the naming conventions got documented, and the next round of data was cleaner.
 
-### Why it matters
+#### Why it matters
 
 The quality of a knowledge store depends on the quality of what goes in. Agent prompts are the input filter. Auditing the data revealed prompt gaps that would have been invisible from code review alone.
 
+</details>
+
 ---
 
-## Cross-platform planning
+<details>
+<summary><strong>Cross-platform planning</strong> — commute to deployment (Claude Android → Desktop → Code)</summary>
+
+### Cross-platform planning
 
 **Drafted by:** Claude on Android (claude.ai mobile)
 **Refined by:** Claude Desktop
@@ -87,13 +105,18 @@ A health data integration plan was drafted on Claude mobile during a commute, st
 
 No copy-paste. No "remember what we discussed." The knowledge just followed.
 
-### Why it matters
+#### Why it matters
 
 This is the core value proposition in action. Three platforms, three contexts (commute, desk, terminal), one continuous thread of work. The awareness store replaced the human as the message bus.
 
+</details>
+
 ---
 
-## Agent-driven code review
+<details>
+<summary><strong>Agent-driven code review</strong> — tool surface feedback (Claude Desktop)</summary>
+
+### Agent-driven code review
 
 **Performed by:** Claude Desktop
 **When:** March 2026
@@ -101,13 +124,18 @@ This is the core value proposition in action. Three platforms, three contexts (c
 
 Claude Desktop reviewed the awareness tools as a consumer and gave engineering feedback: filtered queries needed to reduce token cost, error messages were opaque, tag matching had data model inconsistencies. Every suggestion was actionable, and most shipped within hours.
 
-### Why it matters
+#### Why it matters
 
 The agent consuming the API is uniquely positioned to evaluate it — it experiences the friction that human code review misses. Desktop's feedback led to query optimizations, better error messages, and data model fixes that improved the experience for every connected agent.
 
+</details>
+
 ---
 
-## Query discipline — the 356K blowout
+<details>
+<summary><strong>Query discipline</strong> — the 356K blowout (Claude Code)</summary>
+
+### Query discipline — the 356K blowout
 
 **Discovered by:** Claude Code
 **When:** March 2026 ([PR #54](https://github.com/cmeans/mcp-awareness/pull/54))
@@ -119,13 +147,18 @@ The fix was two-fold:
 1. **Query discipline guidance** added to the MCP server instructions — all clients now receive guidance to use `mode='list'` first, always set `limit`, use `hint` for relevance ranking, and narrow with specific tags.
 2. **String externalization** — the instructions were moved from an inline Python string to `instructions.md`, establishing content/code separation for maintainability and future i18n.
 
-### Why it matters
+#### Why it matters
 
 The server can't control how clients query, but it can teach them. By embedding query discipline in the MCP instructions, every connected client — on every platform — receives the same guidance. The 356K blowout was a one-time learning event; the server instructions ensure it doesn't recur.
 
+</details>
+
 ---
 
-## Aspirational README audit — catching our own overpromises
+<details>
+<summary><strong>Aspirational README audit</strong> — catching our own overpromises (Claude Code Dev + QA roles)</summary>
+
+### Aspirational README audit — catching our own overpromises
 
 **Discovered by:** Claude Code (Dev role)
 **Reviewed by:** Claude Code (QA role)
@@ -138,6 +171,8 @@ Claude Code (in its QA role) independently confirmed the findings and noted a CH
 
 The fix replaced aspirational scenarios with grounded examples of what actually works, while keeping the vision in the Vision section where it belongs.
 
-### Why it matters
+#### Why it matters
 
 Documentation that overpromises erodes trust — especially when visitors are evaluating whether to adopt. Having agents review documentation for accuracy, not just code for correctness, catches a class of problems that traditional CI can't detect. The two-role pattern (Dev writes, QA reviews) provided an additional layer of scrutiny.
+
+</details>
