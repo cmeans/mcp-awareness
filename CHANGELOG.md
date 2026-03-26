@@ -29,7 +29,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **README logo header**: Wordmark hero replaces plain `# mcp-awareness` heading, centered badge row
 
 ### Fixed
+- All client-facing query tools now apply a default LIMIT (200) to prevent unbounded result sets
+- Added `limit` parameter to `get_unread` tool
 - `backfill_embeddings` now batches embedding generation instead of making individual API calls per entry
+
 ### Changed
 - **README**: Remove stale "proof of concept" framing — project is deployed with 333+ tests and 12+ releases
 - Dockerfile uses `uv` for deterministic installs
