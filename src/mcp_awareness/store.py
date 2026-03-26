@@ -132,7 +132,9 @@ class Store(Protocol):
         limit: int | None = None,
     ) -> list[dict[str, Any]]: ...
 
-    def get_unread(self, since: datetime | None = None) -> list[Entry]: ...
+    def get_unread(
+        self, since: datetime | None = None, limit: int | None = None
+    ) -> list[Entry]: ...
 
     def get_activity(
         self,
