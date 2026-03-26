@@ -320,10 +320,10 @@ class PostgresStore:
             clauses.append("source = %s")
             params.append(source)
         if tags:
-            # Use GIN-indexed @> operator: match entries containing ANY of the tags
-            tag_clauses = ["tags @> %s::jsonb" for _ in tags]
-            clauses.append(f"({' OR '.join(tag_clauses)})")
-            params.extend(json.dumps([t]) for t in tags)
+            # AND logic: entry must contain ALL given tags
+            for t in tags:
+                clauses.append("tags @> %s::jsonb")
+                params.append(json.dumps([t]))
         if since is not None:
             clauses.append("updated >= %s")
             params.append(since)
@@ -429,9 +429,10 @@ class PostgresStore:
             clauses.append("source = %s")
             params.append(source)
         if tags:
-            tag_clauses = ["tags @> %s::jsonb" for _ in tags]
-            clauses.append(f"({' OR '.join(tag_clauses)})")
-            params.extend(json.dumps([t]) for t in tags)
+            # AND logic: entry must contain ALL given tags
+            for t in tags:
+                clauses.append("tags @> %s::jsonb")
+                params.append(json.dumps([t]))
         if since is not None:
             clauses.append("updated >= %s")
             params.append(since)
