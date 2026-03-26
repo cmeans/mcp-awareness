@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Branding assets**: 9 SVG logo variants (icon sizes 16–200px, light/dark, wordmark light/dark) and favicon.ico in `docs/branding/`
+- **README logo header**: Wordmark hero replaces plain `# mcp-awareness` heading, centered badge row
+
 ## [0.11.2] - 2026-03-25
 
 ### Added
