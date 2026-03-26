@@ -295,6 +295,11 @@ def test_upsert_preference_deduplicates(store):
     assert entry1.id == entry2.id
 
 
+def test_get_entries_by_ids_empty_list(store):
+    """Calling get_entries_by_ids with an empty list returns [] immediately."""
+    assert store.get_entries_by_ids([]) == []
+
+
 def test_soft_delete_by_id(store):
     now = now_utc()
     entry = Entry(
