@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- Embedding vector dimension is now configurable via `AWARENESS_EMBEDDING_DIMENSIONS` in both the provider and the DDL (was hardcoded to 768 in the schema)
 - Background embedding now uses the connection pool via `store.upsert_embedding()` instead of duplicated SQL with a dedicated connection
 - Replace silent `except Exception: pass` blocks with `logger.debug` logging in server and store
 - `upsert_by_logical_key` race condition: concurrent writers can no longer create duplicate entries
@@ -30,7 +31,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **README logo header**: Wordmark hero replaces plain `# mcp-awareness` heading, centered badge row
 
 ### Fixed
+- All client-facing query tools now apply a default LIMIT (200) to prevent unbounded result sets
+- Added `limit` parameter to `get_unread` tool
 - `backfill_embeddings` now batches embedding generation instead of making individual API calls per entry
+
 ### Changed
 - **README**: Remove stale "proof of concept" framing — project is deployed with 333+ tests and 12+ releases
 - Dockerfile uses `uv` for deterministic installs

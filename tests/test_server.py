@@ -29,6 +29,34 @@ def _store() -> PostgresStore:
 
 
 # ---------------------------------------------------------------------------
+# Store factory tests
+# ---------------------------------------------------------------------------
+
+
+class TestCreateStore:
+    def test_passes_embedding_dimensions(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """_create_store passes EMBEDDING_DIMENSIONS to PostgresStore."""
+        monkeypatch.setenv("AWARENESS_DATABASE_URL", "postgresql://fake:5432/db")
+        monkeypatch.setattr(server_mod, "EMBEDDING_DIMENSIONS", 1024)
+        captured: dict = {}
+        _orig_init = PostgresStore.__init__
+
+        def _capture_init(self: PostgresStore, *args: object, **kwargs: object) -> None:
+            captured["args"] = args
+            captured["kwargs"] = kwargs
+
+        monkeypatch.setattr(PostgresStore, "__init__", _capture_init)
+        server_mod._create_store()
+        assert captured["kwargs"].get("embedding_dimensions") == 1024
+
+    def test_raises_without_database_url(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """_create_store raises ValueError when AWARENESS_DATABASE_URL is unset."""
+        monkeypatch.delenv("AWARENESS_DATABASE_URL", raising=False)
+        with pytest.raises(ValueError, match="AWARENESS_DATABASE_URL is required"):
+            server_mod._create_store()
+
+
+# ---------------------------------------------------------------------------
 # Resource tests
 # ---------------------------------------------------------------------------
 
@@ -538,6 +566,18 @@ class TestGetAlertsTool:
         nas_result = await server_mod.get_alerts(source="nas")
         assert len(json.loads(nas_result)) == 1
 
+    @pytest.mark.anyio
+    async def test_get_alerts_negative_limit(self) -> None:
+        result = json.loads(await server_mod.get_alerts(limit=-1))
+        assert "error" in result
+        assert "limit" in result["error"]
+
+    @pytest.mark.anyio
+    async def test_get_alerts_negative_offset(self) -> None:
+        result = json.loads(await server_mod.get_alerts(offset=-1))
+        assert "error" in result
+        assert "offset" in result["error"]
+
 
 class TestGetStatusTool:
     @pytest.mark.anyio
@@ -768,6 +808,18 @@ class TestGetDeletedTool:
         trash = json.loads(await server_mod.get_deleted())
         assert len(trash) == 1
         assert trash[0]["id"] == entry_id
+
+    @pytest.mark.anyio
+    async def test_get_deleted_negative_limit(self) -> None:
+        result = json.loads(await server_mod.get_deleted(limit=-1))
+        assert "error" in result
+        assert "limit" in result["error"]
+
+    @pytest.mark.anyio
+    async def test_get_deleted_negative_offset(self) -> None:
+        result = json.loads(await server_mod.get_deleted(offset=-1))
+        assert "error" in result
+        assert "offset" in result["error"]
 
 
 class TestRememberTool:
@@ -1643,6 +1695,29 @@ class TestReadActionTracking:
         unread = json.loads(await server_mod.get_unread())
         assert len(unread) == 1
         assert unread[0]["description"] == "never read"
+
+    @pytest.mark.anyio
+    async def test_get_unread_with_limit(self) -> None:
+        from mcp_awareness.schema import Entry, EntryType, make_id, now_utc
+
+        s = _store()
+        for i in range(5):
+            s.add(
+                Entry(
+                    id=make_id(),
+                    type=EntryType.NOTE,
+                    source="test",
+                    tags=[],
+                    created=now_utc(),
+                    updated=now_utc(),
+                    expires=None,
+                    data={"description": f"unread-{i}"},
+                )
+            )
+        all_unread = json.loads(await server_mod.get_unread())
+        assert len(all_unread) == 5
+        limited = json.loads(await server_mod.get_unread(limit=2))
+        assert len(limited) == 2
 
     @pytest.mark.anyio
     async def test_get_activity(self) -> None:
