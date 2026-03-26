@@ -872,19 +872,23 @@ class PostgresStore:
             for r in rows
         ]
 
-    def get_unread(self, since: datetime | None = None) -> list[Entry]:
+    def get_unread(self, since: datetime | None = None, limit: int | None = None) -> list[Entry]:
         """Get entries with zero reads (optionally since a timestamp). Cleanup candidates."""
         since_clause = ""
-        params: tuple[Any, ...] = ()
+        params: list[Any] = []
         if since:
             since_clause = "AND r.timestamp >= %s"
-            params = (since,)
+            params.append(since)
+        limit_clause = ""
+        if limit is not None:
+            limit_clause = " LIMIT %s"
+            params.append(limit)
         with self._pool.connection() as conn, conn.cursor() as cur:
             cur.execute(
                 f"SELECT e.* FROM entries e "
                 f"LEFT JOIN reads r ON e.id = r.entry_id {since_clause} "
                 f"WHERE e.deleted IS NULL AND r.id IS NULL "
-                f"ORDER BY e.created DESC",
+                f"ORDER BY e.created DESC{limit_clause}",
                 params,
             )
             return [self._row_to_entry(r) for r in cur.fetchall()]
