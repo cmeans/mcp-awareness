@@ -11,14 +11,16 @@ LABEL org.opencontainers.image.vendor="Chris Means"
 
 WORKDIR /app
 
-COPY pyproject.toml README.md ./
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+
+COPY pyproject.toml uv.lock README.md ./
 COPY src/ src/
 COPY alembic.ini ./
 COPY alembic/ alembic/
 COPY docker-entrypoint.sh ./
 COPY seed-demo.sql seed_demo.py ./
 
-RUN pip install --no-cache-dir . \
+RUN uv pip install --system --no-cache . \
     && useradd --system --no-create-home awareness \
     && mkdir -p /app/data \
     && chown -R awareness:awareness /app
