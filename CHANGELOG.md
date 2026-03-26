@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Catchup prompt now pushes `since` filter to SQL instead of loading all entries into Python
+
 ### Added
 - **Branding assets**: 9 SVG logo variants (icon sizes 16–200px, light/dark, wordmark light/dark) and favicon.ico in `docs/branding/`
 - **README logo header**: Wordmark hero replaces plain `# mcp-awareness` heading, centered badge row
