@@ -1178,6 +1178,9 @@ async def semantic_search(
     Returns entries sorted by relevance with similarity scores.
     Requires an embedding provider (AWARENESS_EMBEDDING_PROVIDER env var).
     mode: omit for full entries, 'list' for metadata only + similarity."""
+    et, et_err = _parse_entry_type(entry_type)
+    if et_err:
+        return json.dumps({"status": "error", "message": et_err})
     provider = _get_embedding_provider()
     if not provider.is_available():
         return json.dumps(
@@ -1197,9 +1200,6 @@ async def semantic_search(
     except Exception as exc:
         return json.dumps({"status": "error", "message": f"Embedding error: {exc}"})
 
-    et, et_err = _parse_entry_type(entry_type)
-    if et_err:
-        return json.dumps({"status": "error", "message": et_err})
     since_dt = parse_iso(since) if since else None
     until_dt = parse_iso(until) if until else None
 
