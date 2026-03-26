@@ -10,9 +10,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - **Query discipline in server instructions**: MCP instructions now guide clients to use `mode='list'` before full fetches, set `limit`, use `hint` for relevance ranking, narrow with specific tags, and check `get_stats`/`get_tags` before broad queries
 - **Externalized server instructions**: MCP instructions moved from inline Python string to `instructions.md` for cleaner content/code separation
+- **Case studies doc**: `docs/case-studies.md` with 7 real-world examples of awareness in practice, each attributed to the agent/platform that drove the discovery
 
 ### Changed
 - **README aspirational claims**: Replaced doctor appointment scenario with grounded cross-platform example, qualified "family schedules, health data" as planned edge capabilities, reframed intentions section around working features (time-based firing) with location-based noted as planned
+- **README "How it's built" section**: Condensed inline examples to a summary paragraph with link to case studies doc
 
 ## [0.11.1] - 2026-03-24
 
