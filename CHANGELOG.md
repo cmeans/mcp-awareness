@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- Remove dead `if __name__ == "__main__"` block from `server.py` (caused circular import) and add `__main__.py` so `python -m mcp_awareness` works correctly
 - Embedding vector dimension is now configurable via `AWARENESS_EMBEDDING_DIMENSIONS` in both the provider and the DDL (was hardcoded to 768 in the schema)
 - Background embedding now uses the connection pool via `store.upsert_embedding()` instead of duplicated SQL with a dedicated connection
 - Replace silent `except Exception: pass` blocks with `logger.debug` logging in server and store

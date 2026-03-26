@@ -373,6 +373,3 @@ from .tools import (  # noqa: E402, F401
     update_entry,
     update_intention,
 )
-
-if __name__ == "__main__":
-    main()
