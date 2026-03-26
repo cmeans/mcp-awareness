@@ -563,11 +563,17 @@ class PostgresStore:
     def soft_delete_by_id(self, entry_id: str) -> bool:
         """Soft-delete a single entry. Returns True if an entry was trashed."""
         now = datetime.now(timezone.utc)
-        expires = now + timedelta(days=TRASH_RETENTION_DAYS)
+        trash_expires = now + timedelta(days=TRASH_RETENTION_DAYS)
         with self._pool.connection() as conn, conn.cursor() as cur:
+            # Save original expires into data so restore can recover it
             cur.execute(
-                f"UPDATE entries SET deleted = %s, expires = %s WHERE id = %s AND {self._ACTIVE}",
-                (now, expires, entry_id),
+                "UPDATE entries SET"
+                " data = CASE WHEN expires IS NOT NULL"
+                "   THEN jsonb_set(data, '{_original_expires}', to_jsonb(expires))"
+                "   ELSE data - '_original_expires' END,"
+                " deleted = %s, expires = %s"
+                f" WHERE id = %s AND {self._ACTIVE}",
+                (now, trash_expires, entry_id),
             )
             affected = cur.rowcount
         return affected > 0
@@ -580,15 +586,19 @@ class PostgresStore:
         if not tags:
             return 0
         now = datetime.now(timezone.utc)
-        expires = now + timedelta(days=TRASH_RETENTION_DAYS)
+        trash_expires = now + timedelta(days=TRASH_RETENTION_DAYS)
         # AND: entry must contain every tag — use @> for each
         tag_clauses = " AND ".join("tags @> %s::jsonb" for _ in tags)
-        params: list[Any] = [now, expires]
+        params: list[Any] = [now, trash_expires]
         params.extend(json.dumps([t]) for t in tags)
         with self._pool.connection() as conn, conn.cursor() as cur:
             cur.execute(
-                f"UPDATE entries SET deleted = %s, expires = %s "
-                f"WHERE {self._ACTIVE} AND {tag_clauses}",
+                "UPDATE entries SET"
+                " data = CASE WHEN expires IS NOT NULL"
+                "   THEN jsonb_set(data, '{_original_expires}', to_jsonb(expires))"
+                "   ELSE data - '_original_expires' END,"
+                " deleted = %s, expires = %s"
+                f" WHERE {self._ACTIVE} AND {tag_clauses}",
                 tuple(params),
             )
             affected = cur.rowcount
@@ -601,7 +611,7 @@ class PostgresStore:
     ) -> int:
         """Soft-delete all entries for a source, optionally filtered by type."""
         now = datetime.now(timezone.utc)
-        expires = now + timedelta(days=TRASH_RETENTION_DAYS)
+        trash_expires = now + timedelta(days=TRASH_RETENTION_DAYS)
         clauses = ["source = %s", self._ACTIVE]
         params: list[Any] = [source]
         if entry_type is not None:
@@ -610,8 +620,12 @@ class PostgresStore:
         where = " AND ".join(clauses)
         with self._pool.connection() as conn, conn.cursor() as cur:
             cur.execute(
-                f"UPDATE entries SET deleted = %s, expires = %s WHERE {where}",
-                (now, expires, *params),
+                "UPDATE entries SET"
+                " data = CASE WHEN expires IS NOT NULL"
+                "   THEN jsonb_set(data, '{_original_expires}', to_jsonb(expires))"
+                "   ELSE data - '_original_expires' END,"
+                f" deleted = %s, expires = %s WHERE {where}",
+                (now, trash_expires, *params),
             )
             affected = cur.rowcount
         return affected
@@ -638,10 +652,15 @@ class PostgresStore:
             return [self._row_to_entry(r) for r in cur.fetchall()]
 
     def restore_by_id(self, entry_id: str) -> bool:
-        """Restore a soft-deleted entry. Returns True if restored."""
+        """Restore a soft-deleted entry. Returns True if restored.
+
+        Recovers the original expires value that was saved during soft-delete.
+        """
         with self._pool.connection() as conn, conn.cursor() as cur:
             cur.execute(
-                "UPDATE entries SET deleted = NULL, expires = NULL"
+                "UPDATE entries SET deleted = NULL,"
+                " expires = (data->>'_original_expires')::timestamptz,"
+                " data = data - '_original_expires'"
                 " WHERE id = %s AND deleted IS NOT NULL",
                 (entry_id,),
             )
@@ -659,8 +678,10 @@ class PostgresStore:
         params = [json.dumps([t]) for t in tags]
         with self._pool.connection() as conn, conn.cursor() as cur:
             cur.execute(
-                "UPDATE entries SET deleted = NULL, expires = NULL "
-                f"WHERE deleted IS NOT NULL AND {tag_clauses}",
+                "UPDATE entries SET deleted = NULL,"
+                " expires = (data->>'_original_expires')::timestamptz,"
+                " data = data - '_original_expires'"
+                f" WHERE deleted IS NOT NULL AND {tag_clauses}",
                 tuple(params),
             )
             affected = cur.rowcount

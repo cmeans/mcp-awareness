@@ -1236,34 +1236,36 @@ async def backfill_embeddings(
     # Phase 1: entries without embeddings
     missing = store.get_entries_without_embeddings(provider.model_name, limit=limit)
     new_count = 0
-    for entry in missing:
+    if missing:
+        texts = [compose_embedding_text(e) for e in missing]
+        hashes = [text_hash(t) for t in texts]
         try:
-            text = compose_embedding_text(entry)
-            h = text_hash(text)
-            vectors = provider.embed([text])
-            if vectors:
-                store.upsert_embedding(
-                    entry.id, provider.model_name, provider.dimensions, h, vectors[0]
-                )
-                new_count += 1
+            vectors = provider.embed(texts)
         except Exception:  # pragma: no cover
-            continue
+            vectors = []
+        for entry, h, vec in zip(missing, hashes, vectors, strict=False):
+            try:
+                store.upsert_embedding(entry.id, provider.model_name, provider.dimensions, h, vec)
+                new_count += 1
+            except Exception:  # pragma: no cover
+                continue
 
     # Phase 2: stale embeddings (text changed since embedding)
     stale = store.get_stale_embeddings(provider.model_name, limit=limit)
     refreshed_count = 0
-    for entry in stale:
+    if stale:
+        texts = [compose_embedding_text(e) for e in stale]
+        hashes = [text_hash(t) for t in texts]
         try:
-            text = compose_embedding_text(entry)
-            h = text_hash(text)
-            vectors = provider.embed([text])
-            if vectors:
-                store.upsert_embedding(
-                    entry.id, provider.model_name, provider.dimensions, h, vectors[0]
-                )
-                refreshed_count += 1
+            vectors = provider.embed(texts)
         except Exception:  # pragma: no cover
-            continue
+            vectors = []
+        for entry, h, vec in zip(stale, hashes, vectors, strict=False):
+            try:
+                store.upsert_embedding(entry.id, provider.model_name, provider.dimensions, h, vec)
+                refreshed_count += 1
+            except Exception:  # pragma: no cover
+                continue
 
     remaining = len(store.get_entries_without_embeddings(provider.model_name, limit=1))
     return json.dumps(
