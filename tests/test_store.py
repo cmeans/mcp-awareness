@@ -4,8 +4,6 @@ import concurrent.futures
 import threading
 import time
 
-import pytest
-
 from mcp_awareness.schema import Entry, EntryType, make_id, now_utc
 
 # store fixture comes from conftest.py (testcontainers Postgres)
