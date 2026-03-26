@@ -29,6 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `uv.lock` for reproducible dependency resolution across builds
 - **Branding assets**: 9 SVG logo variants (icon sizes 16–200px, light/dark, wordmark light/dark) and favicon.ico in `docs/branding/`
 - **README logo header**: Wordmark hero replaces plain `# mcp-awareness` heading, centered badge row
+- **Integration tests for server startup**: health endpoint, secret path middleware routing, and MCP endpoint — covers `_run()`, `_create_store()`, middleware instantiation, and transport config
 
 ### Fixed
 - All client-facing query tools now apply a default LIMIT (200) to prevent unbounded result sets

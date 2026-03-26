@@ -38,6 +38,9 @@ packages = ["src/mcp_awareness"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "integration: integration tests that start a real server (slow)",
+]
 
 # --- Ruff ---
 [tool.ruff]
