@@ -23,7 +23,7 @@
 
 <img src="docs/images/android-briefing-demo.png" alt="Claude on Android surfacing an awareness briefing" width="220" align="right">
 
-This morning, a plan was drafted on Claude Android during a commute. Claude Desktop picked it up and gave engineering feedback. Claude Code implemented and deployed the changes — updating shared project status so every platform knows what happened. No copy-paste. No "remember what we discussed." The knowledge just flows.
+This morning, you drafted a plan with Claude on your phone during a commute. Back at your desk, Claude Desktop already had the context — you refined the engineering approach together. You moved to Claude Code for implementation and deployment, updating shared project status so every platform knows what happened. No copy-paste. No "remember what we discussed." The knowledge just follows you.
 
 Tell one AI about your infrastructure, your preferences, or a design decision — and every AI knows it. Correct a mistake on your phone, and your desktop assistant never repeats it. That cross-platform continuity works today.
 
@@ -74,7 +74,7 @@ Create a todo, reminder, or planned action from any platform. Intentions have a 
 
 ### Knowledge that outlives you
 
-Over time, your awareness store becomes a living estate document — financial accounts, insurance details, medical info, system access, family contacts. Not because you sat down to document it, but because it accumulated as a side effect of living your life with an AI. If you weren't here tomorrow, someone could find what they need.
+Over time, your awareness store becomes a living estate document — financial accounts, insurance details, medical info, system access, family contacts. Not because you sat down to write a manual, but because you asked your AI to remember important details as you mentioned them. If you weren't here tomorrow, someone could find what they need.
 
 ### Ambient awareness
 
@@ -361,9 +361,9 @@ Awareness fills that gap — a self-hosted store where knowledge from disconnect
 
 **The product is silence.** The most important briefing is `attention_needed: false` — confirmation that everything was checked and nothing needs you. An attention firewall, not another notification source.
 
-**Knowledge becomes ambient.** It accumulates through daily use, not documentation. A living estate document that's always current because it maintained itself as a side effect of living your life with an agent. A house that remembers when the furnace was serviced. A decision trail that preserves the reasoning at the moment you made the choice.
+**Knowledge becomes ambient.** It accumulates through daily use, not documentation. A living estate document that's always current because you and your agents maintain it together as a natural part of working. A house that remembers when the furnace was serviced. A decision trail that preserves the reasoning at the moment you made the choice.
 
-**Goals, not reminders.** Intentions are already a decision-support system. "Pick up milk" isn't a notification — it's a goal that agents evaluate against real-world circumstances. As signal sources come online (GPS, calendar, vision), intentions will fire based on location, time, and context — then self-resolve through multi-edge correlation without user intervention.
+**Goals, not reminders.** Intentions are already a decision-support system. "Pick up milk" isn't a notification — it's a goal that your agent evaluates against real-world circumstances. As signal sources come online (GPS, calendar, vision), intentions will fire based on location, time, and context — with your agent surfacing recommendations and you deciding what to act on.
 
 **Personal → family → team → community.** One person today. A shared household store next. Team knowledge that accumulates through work. Community institutional memory for organizations with zero software budget.
 
@@ -371,6 +371,7 @@ Read the full vision: **[What Knowledge Becomes When It's Ambient](docs/vision.m
 
 ## Design docs
 
+- [Case Studies](docs/case-studies.md) — real-world examples of awareness in practice, with agent attribution
 - [Vision](docs/vision.md) — what knowledge becomes when it's ambient: silence, estate planning, place memory, intentions, and the progression from personal to community
 - [Deployment Guide](docs/deployment-guide.md) — demo install, secure deployment with Cloudflare Tunnel + WAF, client configuration
 - [From Metrics to Mental Models](docs/from-metrics-to-mental-models.md) — core spec: three-layer detection model, API design, data schema
@@ -393,19 +394,11 @@ Read the full vision: **[What Knowledge Becomes When It's Ambient](docs/vision.m
 
 ## How it's built
 
-This project is built using the thing it builds. Multiple AI instances across platforms collaborate through awareness itself, and the friction they encounter drives the features they propose.
+This project is built using the thing it builds. The developer works across multiple AI platforms — Claude Desktop, Claude Code, Claude on Android — and the friction encountered in daily use drives the features that get built. The agents are tools; the human directs every decision.
 
-### The feedback loop in action
+Claude Desktop surfaced a data pollution problem; the user directed the fix through Claude Code. A plan drafted on mobile during a commute was waiting in awareness when the user sat down at the desk. Claude Code flagged aspirational README claims; the user confirmed and corrected them.
 
-**Feature discovery through friction.** Claude Desktop ran a code review of the mcp-awareness codebase and tried to update an existing review entry. It couldn't — `update_entry` requires a UUID, and Desktop didn't know the UUID from the entry Claude.ai had created in a different session. The workaround was creating a duplicate with a "supersedes" note. Desktop recognized this as exactly the kind of data pollution awareness should prevent, designed a solution ([`logical_key` upsert](https://github.com/cmeans/mcp-awareness/pull/18)), and stored the full proposal in awareness. Claude Code discovered it, implemented it, and shipped it — all through the shared store.
-
-**Prompt tuning through data audit.** The first audit of stored data found 53 out of 56 `learn_pattern` entries had empty conditions/effects — they should have been notes. Tag drift was rampant: `infrastructure` vs `infra`, `torrent` vs `torrents`. Source naming was chaotic: `chris-personal`, `chris-career`, `chris-health` instead of one `personal` source with domain tags. Each finding led to a prompt update. The prompts got more explicit, the naming conventions got documented, and the next round of data was cleaner.
-
-**Cross-platform planning.** A health data integration plan was drafted on Claude mobile during a commute, stored in awareness, and picked up by Claude Code for implementation — no copy-paste, no "remember what we discussed." The context just followed.
-
-**Agent-driven code review.** Claude Desktop reviewed the awareness tools as a consumer and gave engineering feedback: filtered queries needed to reduce token cost, error messages were opaque, tag matching had data model inconsistencies. Every suggestion was actionable, and most shipped within hours.
-
-The collaboration model itself is what this project explores: AI that builds up shared knowledge through work rather than configuration. The awareness service is a formalization of how that collaboration already works — just extended to everything.
+Each interaction generated a case study. Read them all: **[Case Studies — Awareness in Practice](docs/case-studies.md)**
 
 ## License
 

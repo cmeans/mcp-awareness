@@ -337,3 +337,7 @@ This is dramatically simpler than "read alerts, read knowledge, read suppression
 9. **Briefing staleness**: The briefing is rebuilt on every raw store change. But if no sources report for a while (all sources healthy, nothing to say), the briefing could be stale. Should the collator add a heartbeat timestamp so the agent knows the briefing is current? (Added `staleness_sec` to the schema for this.)
 
 10. **Who composes the `suggested_mention`?** The collator generates it, but it's a natural-language string. Should it be a template with variable substitution (deterministic, boring), or should it use a lightweight LLM call to compose something conversational? The template approach is simpler and cheaper. The LLM approach is more natural but adds a dependency and latency to the collation loop.
+
+---
+
+*[mcp-awareness](https://github.com/cmeans/mcp-awareness) is open source under the [Apache 2.0 License](../LICENSE). Copyright (c) 2026 Chris Means.*
