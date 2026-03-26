@@ -148,9 +148,7 @@ class Store(Protocol):
 
     # Read / action tracking
 
-    def log_read(
-        self, entry_ids: list[str], tool_used: str, platform: str | None = None
-    ) -> None:
+    def log_read(self, entry_ids: list[str], tool_used: str, platform: str | None = None) -> None:
         """Record that entries were read. Fire-and-forget — failures are silent."""
         ...
 
