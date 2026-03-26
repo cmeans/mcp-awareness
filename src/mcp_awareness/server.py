@@ -40,6 +40,19 @@ VALID_ALERT_TYPES = {"threshold", "structural", "baseline"}
 VALID_URGENCY = {"low", "normal", "high"}
 
 
+_VALID_ENTRY_TYPES = [e.value for e in EntryType]
+
+
+def _parse_entry_type(entry_type: str | None) -> tuple[EntryType | None, str | None]:
+    """Parse entry_type string. Returns (value, None) or (None, error)."""
+    if not entry_type:
+        return None, None
+    try:
+        return EntryType(entry_type), None
+    except ValueError:
+        return None, f"Invalid entry_type: {entry_type!r}. Valid: {_VALID_ENTRY_TYPES}"
+
+
 def _validate_pagination(
     limit: int | None, offset: int | None
 ) -> tuple[int | None, int | None] | str:
@@ -405,7 +418,9 @@ async def get_knowledge(
     until_dt = ensure_dt(until) if until else None
     created_after_dt = ensure_dt(created_after) if created_after else None
     created_before_dt = ensure_dt(created_before) if created_before else None
-    et = EntryType(entry_type) if entry_type else None
+    et, et_err = _parse_entry_type(entry_type)
+    if et_err:
+        return json.dumps({"error": et_err})
     entries = store.get_knowledge(
         tags=tags,
         include_history=include_history,
@@ -430,7 +445,7 @@ async def get_knowledge(
             try:
                 hint_vec = provider.embed([hint])
                 if hint_vec:
-                    hint_et = EntryType(entry_type) if entry_type else None
+                    hint_et = et
                     scored = store.semantic_search(
                         embedding=hint_vec[0],
                         model=provider.model_name,
@@ -867,7 +882,9 @@ async def delete_entry(
         )
     if not source:
         return json.dumps({"status": "error", "message": "Provide entry_id, tags, or source"})
-    et = EntryType(entry_type) if entry_type else None
+    et, et_err = _parse_entry_type(entry_type)
+    if et_err:
+        return json.dumps({"status": "error", "message": et_err})
     if not confirm:
         entries = store.get_entries(entry_type=et, source=source)
         return json.dumps(
@@ -1180,7 +1197,9 @@ async def semantic_search(
     except Exception as exc:
         return json.dumps({"status": "error", "message": f"Embedding error: {exc}"})
 
-    et = EntryType(entry_type) if entry_type else None
+    et, et_err = _parse_entry_type(entry_type)
+    if et_err:
+        return json.dumps({"status": "error", "message": et_err})
     since_dt = parse_iso(since) if since else None
     until_dt = parse_iso(until) if until else None
 
