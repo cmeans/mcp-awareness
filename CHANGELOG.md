@@ -7,12 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Tag filtering in `get_entries` and `get_knowledge` now uses AND logic (match ALL tags) instead of OR, consistent with delete/restore operations
+
+### Fixed
+- Catchup prompt now pushes `since` filter to SQL instead of loading all entries into Python
+
 ### Added
+- `uv.lock` for reproducible dependency resolution across builds
 - **Branding assets**: 9 SVG logo variants (icon sizes 16–200px, light/dark, wordmark light/dark) and favicon.ico in `docs/branding/`
 - **README logo header**: Wordmark hero replaces plain `# mcp-awareness` heading, centered badge row
 
 ### Changed
 - **README**: Remove stale "proof of concept" framing — project is deployed with 333+ tests and 12+ releases
+- Dockerfile uses `uv` for deterministic installs
 
 ## [0.11.2] - 2026-03-25
 
