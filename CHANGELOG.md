@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - `get_related` now fetches forward references in a single query instead of N individual lookups
+- Restoring soft-deleted entries now recovers original expiry instead of setting it to NULL
 ### Changed
 - Tag filtering in `get_entries` and `get_knowledge` now uses AND logic (match ALL tags) instead of OR, consistent with delete/restore operations
 
@@ -16,10 +17,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Catchup prompt now pushes `since` filter to SQL instead of loading all entries into Python
 
 ### Added
+- **Store protocol docstrings**: Concise one-line docstrings for all ~30 methods in the `Store` protocol, documenting the contract for backend implementors
 - `uv.lock` for reproducible dependency resolution across builds
 - **Branding assets**: 9 SVG logo variants (icon sizes 16–200px, light/dark, wordmark light/dark) and favicon.ico in `docs/branding/`
 - **README logo header**: Wordmark hero replaces plain `# mcp-awareness` heading, centered badge row
 
+### Fixed
+- `backfill_embeddings` now batches embedding generation instead of making individual API calls per entry
 ### Changed
 - Dockerfile uses `uv` for deterministic installs
 
