@@ -1648,38 +1648,11 @@ def main() -> None:
 def _run() -> None:
     if TRANSPORT == "streamable-http" and MOUNT_PATH:
         import uvicorn
-        from starlette.responses import JSONResponse, Response
-        from starlette.types import ASGIApp, Receive, Scope, Send
+
+        from mcp_awareness.middleware import SecretPathMiddleware
 
         inner_app = mcp.streamable_http_app()
-
-        class SecretPathMiddleware:
-            """Rewrite /SECRET/mcp → /mcp, serve /SECRET/health, reject everything else."""
-
-            def __init__(self, app: ASGIApp, prefix: str) -> None:
-                self.app = app
-                self.prefix = prefix.rstrip("/")
-
-            async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-                if scope["type"] in ("http", "websocket"):
-                    path: str = scope.get("path", "")
-                    # Health endpoint — served at /SECRET/health
-                    if path == f"{self.prefix}/health":
-                        health_resp = JSONResponse(_health_response())
-                        await health_resp(scope, receive, send)
-                        return
-                    if path.startswith(self.prefix):
-                        scope = dict(scope)
-                        scope["path"] = path[len(self.prefix) :] or "/"
-                        await self.app(scope, receive, send)
-                        return
-                    # Not the secret path — 404
-                    not_found = Response("Not Found", status_code=404)
-                    await not_found(scope, receive, send)
-                    return
-                await self.app(scope, receive, send)
-
-        app = SecretPathMiddleware(inner_app, MOUNT_PATH)
+        app = SecretPathMiddleware(inner_app, MOUNT_PATH, _health_response)
 
         config = uvicorn.Config(app, host=HOST, port=PORT)
         server = uvicorn.Server(config)
@@ -1689,25 +1662,11 @@ def _run() -> None:
         anyio.run(server.serve)
     elif TRANSPORT == "streamable-http":
         import uvicorn
-        from starlette.responses import JSONResponse
-        from starlette.types import ASGIApp, Receive, Scope, Send
+
+        from mcp_awareness.middleware import HealthMiddleware
 
         inner_app = mcp.streamable_http_app()
-
-        class HealthMiddleware:
-            """Serve /health, pass everything else to the MCP app."""
-
-            def __init__(self, app: ASGIApp) -> None:
-                self.app = app
-
-            async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-                if scope["type"] == "http" and scope.get("path") == "/health":
-                    health_resp = JSONResponse(_health_response())
-                    await health_resp(scope, receive, send)
-                    return
-                await self.app(scope, receive, send)
-
-        health_app = HealthMiddleware(inner_app)
+        health_app = HealthMiddleware(inner_app, _health_response)
 
         config = uvicorn.Config(health_app, host=HOST, port=PORT)
         server = uvicorn.Server(config)
