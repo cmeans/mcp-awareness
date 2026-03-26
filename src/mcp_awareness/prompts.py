@@ -12,7 +12,8 @@ from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
-from .helpers import _timed, store
+from . import helpers as _h
+from .helpers import _timed
 from .schema import Entry, EntryType, now_utc, to_iso
 
 _TEMPLATE_VAR_RE = re.compile(r"\{\{(\w+)\}\}")
@@ -93,8 +94,8 @@ _mcp_ref: FastMCP | None = None
 async def agent_instructions() -> str:
     """Compose agent instructions from awareness-prompt entries in the store."""
     if _mcp_ref is not None:
-        _sync_custom_prompts(_mcp_ref, store)
-    entries = store.get_knowledge(tags=["memory-prompt"])
+        _sync_custom_prompts(_mcp_ref, _h.store)
+    entries = _h.store.get_knowledge(tags=["memory-prompt"])
     # Sort by entry number (Entry 1, Entry 2, etc.)
     entries.sort(key=lambda e: _extract_entry_number(e.data.get("description", "")))
 
@@ -121,8 +122,8 @@ async def agent_instructions() -> str:
 @_timed
 async def project_context(repo_name: str) -> str:
     """Compose a project briefing from all knowledge tagged with repo_name."""
-    entries = store.get_knowledge(tags=[repo_name])
-    alerts = store.get_active_alerts()
+    entries = _h.store.get_knowledge(tags=[repo_name])
+    alerts = _h.store.get_active_alerts()
     alerts = [a for a in alerts if repo_name in a.tags]
 
     parts: list[str] = [f"# Project Context: {repo_name}"]
@@ -159,9 +160,9 @@ async def project_context(repo_name: str) -> str:
 @_timed
 async def system_status(source: str) -> str:
     """Compose a system status narrative from status, alerts, and patterns."""
-    status = store.get_latest_status(source)
-    alerts = store.get_active_alerts(source=source)
-    patterns = store.get_patterns(source=source)
+    status = _h.store.get_latest_status(source)
+    alerts = _h.store.get_active_alerts(source=source)
+    patterns = _h.store.get_patterns(source=source)
 
     parts: list[str] = [f"# System Status: {source}"]
 
@@ -201,8 +202,8 @@ async def system_status(source: str) -> str:
 @_timed
 async def write_guide() -> str:
     """Compose a write guide from current store stats and tags."""
-    stats = store.get_stats()
-    tags = store.get_tags()
+    stats = _h.store.get_stats()
+    tags = _h.store.get_tags()
 
     parts: list[str] = ["# Awareness Write Guide"]
 
@@ -243,10 +244,10 @@ async def catchup(hours: int = 24) -> str:
     """Compose a catchup summary of recently updated entries."""
     since = now_utc() - timedelta(hours=hours)
     # Pull all knowledge and filter by updated timestamp
-    all_entries = store.get_knowledge(include_history="true")
+    all_entries = _h.store.get_knowledge(include_history="true")
     recent = [e for e in all_entries if e.updated >= since]
     # Also check alerts
-    alerts = store.get_active_alerts()
+    alerts = _h.store.get_active_alerts()
     recent_alerts = [a for a in alerts if a.updated >= since]
 
     parts: list[str] = [f"# Catchup — last {hours} hours"]

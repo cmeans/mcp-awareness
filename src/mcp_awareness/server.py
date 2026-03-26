@@ -9,29 +9,27 @@ from __future__ import annotations
 
 import os
 import pathlib
-from typing import Literal
+import sys
+from types import ModuleType
+from typing import Any, Literal
 
 from mcp.server.fastmcp import FastMCP
 
-# Re-export shared state and helpers so tests (and external code) that import
-# from `mcp_awareness.server` continue to work without changes.
+from . import helpers as _helpers_mod
 from .helpers import (  # noqa: F401
     _generate_embedding,
     _get_embedding_provider,
     _log_reads,
     _timed,
     _validate_pagination,
-    store,
 )
-from .prompts import (  # noqa: F401
-    _sync_custom_prompts,
-    agent_instructions,
-    catchup,
-    project_context,
-    register_prompts,
-    system_status,
-    write_guide,
-)
+from .prompts import _sync_custom_prompts as _sync_custom_prompts_impl
+from .prompts import agent_instructions as agent_instructions
+from .prompts import catchup as catchup
+from .prompts import project_context as project_context
+from .prompts import register_prompts
+from .prompts import system_status as system_status
+from .prompts import write_guide as write_guide
 from .resources import (  # noqa: F401
     alerts_resource,
     briefing_resource,
@@ -75,6 +73,51 @@ from .tools import (  # noqa: F401
 )
 
 # ---------------------------------------------------------------------------
+# Shared state forwarding
+# ---------------------------------------------------------------------------
+# Tests monkeypatch ``server_mod.store`` and ``server_mod._embedding_provider``.
+# These live on the ``helpers`` module where all handler code reads them.
+# A module __getattr__/__setattr__ pair forwards reads and writes so that
+# ``server_mod.store = X`` is equivalent to ``helpers.store = X``.
+# ---------------------------------------------------------------------------
+
+_FORWARDED_ATTRS = {"store", "_embedding_provider"}
+
+
+def __getattr__(name: str) -> Any:
+    if name in _FORWARDED_ATTRS:
+        return getattr(_helpers_mod, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+# Module-level __setattr__ requires replacing the module in sys.modules
+# with a wrapper.  We use a thin subclass that intercepts attribute writes
+# for the forwarded names and delegates everything else.
+
+_real_module = sys.modules[__name__]
+
+
+class _ForwardingModule(ModuleType):
+    """Module wrapper that forwards writes of shared mutable state to helpers."""
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        if name in _FORWARDED_ATTRS:
+            setattr(_helpers_mod, name, value)
+        else:
+            super().__setattr__(name, value)
+
+    def __getattr__(self, name: str) -> Any:
+        if name in _FORWARDED_ATTRS:
+            return getattr(_helpers_mod, name)
+        return getattr(_real_module, name)
+
+
+_wrapper = _ForwardingModule(__name__)
+_wrapper.__dict__.update({k: v for k, v in _real_module.__dict__.items() if k != "__dict__"})
+_wrapper.__spec__ = _real_module.__spec__
+sys.modules[__name__] = _wrapper
+
+# ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
 
@@ -103,9 +146,14 @@ mcp = FastMCP(
 # Register handlers from submodules
 # ---------------------------------------------------------------------------
 
-register_resources(mcp, store)
-register_tools(mcp, store)
-register_prompts(mcp, store)
+register_resources(mcp, _helpers_mod.store)
+register_tools(mcp, _helpers_mod.store)
+register_prompts(mcp, _helpers_mod.store)
+
+
+def _sync_custom_prompts() -> None:
+    """Backward-compatible wrapper — tests call this with no arguments."""
+    _sync_custom_prompts_impl(mcp, _helpers_mod.store)
 
 
 # ---------------------------------------------------------------------------
@@ -115,7 +163,7 @@ register_prompts(mcp, store)
 
 def main() -> None:
     # Sync custom prompts from the store at server start (not at import time)
-    _sync_custom_prompts(mcp, store)
+    _sync_custom_prompts()
     try:
         _run()
     except KeyboardInterrupt:
