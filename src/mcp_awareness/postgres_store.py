@@ -473,9 +473,7 @@ class PostgresStore:
         if not entry_ids:
             return []
         placeholders = ", ".join(["%s"] * len(entry_ids))
-        return self._query_entries(
-            f"id IN ({placeholders})", tuple(entry_ids)
-        )
+        return self._query_entries(f"id IN ({placeholders})", tuple(entry_ids))
 
     def update_entry(self, entry_id: str, updates: dict[str, Any]) -> Entry | None:
         """Update an entry in place, appending previous values to changelog."""
