@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Catchup prompt now pushes `since` filter to SQL instead of loading all entries into Python
 
 ### Added
+- **Embedding round-trip tests**: compose → store → search pipeline, stale detection, filtered search
 - **Store protocol docstrings**: Concise one-line docstrings for all ~30 methods in the `Store` protocol, documenting the contract for backend implementors
 - `uv.lock` for reproducible dependency resolution across builds
 - **Branding assets**: 9 SVG logo variants (icon sizes 16–200px, light/dark, wordmark light/dark) and favicon.ico in `docs/branding/`
@@ -25,6 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - `backfill_embeddings` now batches embedding generation instead of making individual API calls per entry
 ### Changed
+- **README**: Remove stale "proof of concept" framing — project is deployed with 333+ tests and 12+ releases
 - Dockerfile uses `uv` for deterministic installs
 
 ## [0.11.2] - 2026-03-25
