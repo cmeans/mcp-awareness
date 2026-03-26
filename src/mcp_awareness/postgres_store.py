@@ -469,6 +469,13 @@ class PostgresStore:
         results = self._query_entries("id = %s", (entry_id,))
         return results[0] if results else None
 
+    def get_entries_by_ids(self, entry_ids: list[str]) -> list[Entry]:
+        """Get multiple entries by ID in a single query (active only)."""
+        if not entry_ids:
+            return []
+        placeholders = ", ".join(["%s"] * len(entry_ids))
+        return self._query_entries(f"id IN ({placeholders})", tuple(entry_ids))
+
     def update_entry(self, entry_id: str, updates: dict[str, Any]) -> Entry | None:
         """Update an entry in place, appending previous values to changelog."""
         entry = self.get_entry_by_id(entry_id)

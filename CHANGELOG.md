@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- `get_related` now fetches forward references in a single query instead of N individual lookups
 - Restoring soft-deleted entries now recovers original expiry instead of setting it to NULL
 ### Changed
 - Tag filtering in `get_entries` and `get_knowledge` now uses AND logic (match ALL tags) instead of OR, consistent with delete/restore operations

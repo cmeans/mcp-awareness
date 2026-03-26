@@ -102,6 +102,10 @@ class Store(Protocol):
         """Get a single active entry by ID, or None if not found or deleted."""
         ...
 
+    def get_entries_by_ids(self, entry_ids: list[str]) -> list[Entry]:
+        """Get multiple active entries by ID in a single query."""
+        ...
+
     def update_entry(self, entry_id: str, updates: dict[str, Any]) -> Entry | None:
         """Update a knowledge entry in place, appending previous values to changelog."""
         ...
