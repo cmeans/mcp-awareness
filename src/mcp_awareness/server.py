@@ -1294,9 +1294,10 @@ async def get_related(
         return json.dumps({"status": "error", "message": f"Entry not found: {entry_id}"})
 
     # Forward: entries this entry references
-    forward_ids: list[str] = entry.data.get("related_ids", [])
-    forward = [store.get_entry_by_id(rid) for rid in forward_ids if rid != entry_id]
-    forward = [e for e in forward if e is not None]
+    forward_ids: list[str] = [
+        rid for rid in entry.data.get("related_ids", []) if rid != entry_id
+    ]
+    forward = store.get_entries_by_ids(forward_ids) if forward_ids else []
 
     # Reverse: entries that reference this entry via JSONB containment
     reverse = store.get_referencing_entries(entry_id)
