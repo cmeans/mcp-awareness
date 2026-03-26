@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- Embedding vector dimension is now configurable via `AWARENESS_EMBEDDING_DIMENSIONS` in both the provider and the DDL (was hardcoded to 768 in the schema)
 - Background embedding now uses the connection pool via `store.upsert_embedding()` instead of duplicated SQL with a dedicated connection
 - Replace silent `except Exception: pass` blocks with `logger.debug` logging in server and store
 - `upsert_by_logical_key` race condition: concurrent writers can no longer create duplicate entries
@@ -21,6 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Tag filtering in `get_entries` and `get_knowledge` now uses AND logic (match ALL tags) instead of OR, consistent with delete/restore operations
 
 ### Added
+- **Tests for SecretPathMiddleware and HealthMiddleware ASGI classes**: extracted middleware to `middleware.py` and added 10 tests covering path rewriting, health endpoints, 404 responses, and scope passthrough
 - Concurrency tests for connection pool, background cleanup, and concurrent upserts
 - **Embedding round-trip tests**: compose → store → search pipeline, stale detection, filtered search
 - **Store protocol docstrings**: Concise one-line docstrings for all ~30 methods in the `Store` protocol, documenting the contract for backend implementors
@@ -30,7 +32,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Integration tests for server startup**: health endpoint, secret path middleware routing, and MCP endpoint — covers `_run()`, `_create_store()`, middleware instantiation, and transport config
 
 ### Fixed
+- All client-facing query tools now apply a default LIMIT (200) to prevent unbounded result sets
+- Added `limit` parameter to `get_unread` tool
 - `backfill_embeddings` now batches embedding generation instead of making individual API calls per entry
+
 ### Changed
 - **README**: Remove stale "proof of concept" framing — project is deployed with 333+ tests and 12+ releases
 - Dockerfile uses `uv` for deterministic installs

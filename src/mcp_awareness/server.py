@@ -43,6 +43,8 @@ VALID_ALERT_TYPES = {"threshold", "structural", "baseline"}
 VALID_URGENCY = {"low", "normal", "high"}
 
 
+DEFAULT_QUERY_LIMIT = 200
+
 _VALID_ENTRY_TYPES = [e.value for e in EntryType]
 
 
@@ -57,13 +59,18 @@ def _parse_entry_type(entry_type: str | None) -> tuple[EntryType | None, str | N
 
 
 def _validate_pagination(
-    limit: int | None, offset: int | None
+    limit: int | None, offset: int | None, *, default_limit: int = DEFAULT_QUERY_LIMIT
 ) -> tuple[int | None, int | None] | str:
-    """Validate and clamp pagination params. Returns (limit, offset) or error string."""
+    """Validate and clamp pagination params. Returns (limit, offset) or error string.
+
+    Applies default_limit when the caller omits limit to prevent unbounded queries.
+    """
     if limit is not None and limit < 0:
         return "limit must be non-negative"
     if offset is not None and offset < 0:
         return "offset must be non-negative"
+    if limit is None:
+        limit = default_limit
     return limit, offset
 
 
@@ -89,7 +96,7 @@ def _create_store() -> Store:
             "AWARENESS_DATABASE_URL is required. "
             "Example: postgresql://user:pass@localhost:5432/awareness"
         )
-    return PostgresStore(url)
+    return PostgresStore(url, embedding_dimensions=EMBEDDING_DIMENSIONS)
 
 
 class _LazyStore:
@@ -327,6 +334,10 @@ async def get_alerts(
     Use limit/offset for pagination (e.g., limit=10, offset=0 for first page).
     This tool always returns structured JSON. If you receive an unstructured
     error, the failure is in the transport or platform layer, not in awareness."""
+    pv = _validate_pagination(limit, offset)
+    if isinstance(pv, str):
+        return json.dumps({"error": pv})
+    limit, offset = pv
     if since is not None and not since:
         return json.dumps({"error": "since cannot be empty; omit or provide an ISO 8601 timestamp"})
     since_dt = ensure_dt(since) if since else None
@@ -937,6 +948,10 @@ async def get_deleted(
     since: ISO 8601 timestamp — only return entries deleted after this time.
     mode: omit for full entries, 'list' for metadata only.
     Use limit/offset for pagination."""
+    pv = _validate_pagination(limit, offset)
+    if isinstance(pv, str):
+        return json.dumps({"error": pv})
+    limit, offset = pv
     if since is not None and not since:
         return json.dumps({"error": "since cannot be empty; omit or provide an ISO 8601 timestamp"})
     since_dt = ensure_dt(since) if since else None
@@ -991,6 +1006,8 @@ async def get_reads(
     verify that knowledge is being used.
     All params optional. No params = recent reads across all entries.
     This tool always returns structured JSON."""
+    if limit is None:
+        limit = DEFAULT_QUERY_LIMIT
     since_dt = ensure_dt(since) if since else None
     reads = store.get_reads(entry_id=entry_id, since=since_dt, platform=platform, limit=limit)
     return json.dumps(reads, indent=2)
@@ -1009,6 +1026,8 @@ async def get_actions(
     The audit trail for knowledge-to-action causality.
     Filter by entry_id, time, platform, or tags.
     This tool always returns structured JSON."""
+    if limit is None:
+        limit = DEFAULT_QUERY_LIMIT
     since_dt = ensure_dt(since) if since else None
     actions = store.get_actions(
         entry_id=entry_id, since=since_dt, platform=platform, tags=tags, limit=limit
@@ -1018,15 +1037,18 @@ async def get_actions(
 
 @mcp.tool()
 @_timed
-async def get_unread(since: str | None = None) -> str:
+async def get_unread(since: str | None = None, limit: int | None = None) -> str:
     """Get entries with zero reads — cleanup candidates and dead knowledge.
     since: optional — only consider reads after this timestamp, so
     'unread in the last 30 days' is possible even if something was read
     6 months ago.
+    limit: max entries to return (default 200).
     Returns entry metadata (list mode format).
     This tool always returns structured JSON."""
+    if limit is None:
+        limit = DEFAULT_QUERY_LIMIT
     since_dt = ensure_dt(since) if since else None
-    entries = store.get_unread(since=since_dt)
+    entries = store.get_unread(since=since_dt, limit=limit)
     return json.dumps([e.to_list_dict() for e in entries], indent=2)
 
 
@@ -1042,6 +1064,8 @@ async def get_activity(
     Useful for inter-agent coordination ('what did other agents access?')
     and auditing.
     This tool always returns structured JSON."""
+    if limit is None:
+        limit = DEFAULT_QUERY_LIMIT
     since_dt = ensure_dt(since) if since else None
     activity = store.get_activity(since=since_dt, platform=platform, limit=limit)
     return json.dumps(activity, indent=2)
@@ -1116,6 +1140,8 @@ async def get_intentions(
     Valid states: 'pending', 'fired', 'active', 'completed', 'snoozed', 'cancelled'.
     mode: omit for full entries, 'list' for metadata only.
     This tool always returns structured JSON."""
+    if limit is None:
+        limit = DEFAULT_QUERY_LIMIT
     entries = store.get_intentions(state=state, source=source, tags=tags, limit=limit)
     if mode == "list":
         return json.dumps([e.to_list_dict() for e in entries], indent=2)
@@ -1658,38 +1684,11 @@ def main() -> None:
 def _run() -> None:
     if TRANSPORT == "streamable-http" and MOUNT_PATH:
         import uvicorn
-        from starlette.responses import JSONResponse, Response
-        from starlette.types import ASGIApp, Receive, Scope, Send
+
+        from mcp_awareness.middleware import SecretPathMiddleware
 
         inner_app = mcp.streamable_http_app()
-
-        class SecretPathMiddleware:
-            """Rewrite /SECRET/mcp → /mcp, serve /SECRET/health, reject everything else."""
-
-            def __init__(self, app: ASGIApp, prefix: str) -> None:
-                self.app = app
-                self.prefix = prefix.rstrip("/")
-
-            async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-                if scope["type"] in ("http", "websocket"):
-                    path: str = scope.get("path", "")
-                    # Health endpoint — served at /SECRET/health
-                    if path == f"{self.prefix}/health":
-                        health_resp = JSONResponse(_health_response())
-                        await health_resp(scope, receive, send)
-                        return
-                    if path.startswith(self.prefix):
-                        scope = dict(scope)
-                        scope["path"] = path[len(self.prefix) :] or "/"
-                        await self.app(scope, receive, send)
-                        return
-                    # Not the secret path — 404
-                    not_found = Response("Not Found", status_code=404)
-                    await not_found(scope, receive, send)
-                    return
-                await self.app(scope, receive, send)
-
-        app = SecretPathMiddleware(inner_app, MOUNT_PATH)
+        app = SecretPathMiddleware(inner_app, MOUNT_PATH, _health_response)
 
         config = uvicorn.Config(app, host=HOST, port=PORT)
         server = uvicorn.Server(config)
@@ -1699,25 +1698,11 @@ def _run() -> None:
         anyio.run(server.serve)
     elif TRANSPORT == "streamable-http":
         import uvicorn
-        from starlette.responses import JSONResponse
-        from starlette.types import ASGIApp, Receive, Scope, Send
+
+        from mcp_awareness.middleware import HealthMiddleware
 
         inner_app = mcp.streamable_http_app()
-
-        class HealthMiddleware:
-            """Serve /health, pass everything else to the MCP app."""
-
-            def __init__(self, app: ASGIApp) -> None:
-                self.app = app
-
-            async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-                if scope["type"] == "http" and scope.get("path") == "/health":
-                    health_resp = JSONResponse(_health_response())
-                    await health_resp(scope, receive, send)
-                    return
-                await self.app(scope, receive, send)
-
-        health_app = HealthMiddleware(inner_app)
+        health_app = HealthMiddleware(inner_app, _health_response)
 
         config = uvicorn.Config(health_app, host=HOST, port=PORT)
         server = uvicorn.Server(config)
