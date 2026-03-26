@@ -216,8 +216,7 @@ class TestRunTransportWiring:
             captured_app.append(app)
             return MagicMock()
 
-        with patch("uvicorn.Config", side_effect=fake_config), \
-             patch("anyio.run"):
+        with patch("uvicorn.Config", side_effect=fake_config), patch("anyio.run"):
             server_mod._run()
 
         assert len(captured_app) == 1
@@ -241,21 +240,16 @@ class TestRunTransportWiring:
             captured_app.append(app)
             return MagicMock()
 
-        with patch("uvicorn.Config", side_effect=fake_config), \
-             patch("anyio.run"):
+        with patch("uvicorn.Config", side_effect=fake_config), patch("anyio.run"):
             server_mod._run()
 
         assert len(captured_app) == 1
         assert isinstance(captured_app[0], HealthMiddleware)
 
-    def test_stdio_transport_calls_mcp_run(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_stdio_transport_calls_mcp_run(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Non-HTTP transport calls mcp.run(transport=...)."""
         monkeypatch.setattr(server_mod, "TRANSPORT", "stdio")
         called_with: list[str] = []
-        monkeypatch.setattr(
-            server_mod.mcp, "run", lambda transport: called_with.append(transport)
-        )
+        monkeypatch.setattr(server_mod.mcp, "run", lambda transport: called_with.append(transport))
         server_mod._run()
         assert called_with == ["stdio"]
