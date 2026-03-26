@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import json
 from typing import Any
+from unittest.mock import MagicMock, patch
 
 import pytest
 
+from mcp_awareness import server as server_mod
 from mcp_awareness.middleware import HealthMiddleware, SecretPathMiddleware
 
 
@@ -186,3 +188,74 @@ class TestHealthMiddleware:
         await app(scope, lambda: None, lambda msg: None)  # type: ignore[arg-type, return-value]
         assert len(calls) == 1
         assert calls[0]["type"] == "lifespan"
+
+
+# ---------------------------------------------------------------------------
+# _run() transport wiring tests
+# ---------------------------------------------------------------------------
+
+
+class TestRunTransportWiring:
+    """Tests for _run() to verify middleware is wired correctly per transport."""
+
+    def test_http_with_mount_path_uses_secret_path_middleware(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """streamable-http + MOUNT_PATH wires SecretPathMiddleware."""
+        monkeypatch.setattr(server_mod, "TRANSPORT", "streamable-http")
+        monkeypatch.setattr(server_mod, "MOUNT_PATH", "/secret")
+        monkeypatch.setattr(server_mod, "HOST", "0.0.0.0")
+        monkeypatch.setattr(server_mod, "PORT", 8080)
+
+        mock_app = MagicMock()
+        monkeypatch.setattr(server_mod.mcp, "streamable_http_app", lambda: mock_app)
+
+        captured_app: list[Any] = []
+
+        def fake_config(app: Any, **kwargs: Any) -> MagicMock:
+            captured_app.append(app)
+            return MagicMock()
+
+        with patch("uvicorn.Config", side_effect=fake_config), \
+             patch("anyio.run"):
+            server_mod._run()
+
+        assert len(captured_app) == 1
+        assert isinstance(captured_app[0], SecretPathMiddleware)
+
+    def test_http_without_mount_path_uses_health_middleware(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """streamable-http without MOUNT_PATH wires HealthMiddleware."""
+        monkeypatch.setattr(server_mod, "TRANSPORT", "streamable-http")
+        monkeypatch.setattr(server_mod, "MOUNT_PATH", "")
+        monkeypatch.setattr(server_mod, "HOST", "0.0.0.0")
+        monkeypatch.setattr(server_mod, "PORT", 8080)
+
+        mock_app = MagicMock()
+        monkeypatch.setattr(server_mod.mcp, "streamable_http_app", lambda: mock_app)
+
+        captured_app: list[Any] = []
+
+        def fake_config(app: Any, **kwargs: Any) -> MagicMock:
+            captured_app.append(app)
+            return MagicMock()
+
+        with patch("uvicorn.Config", side_effect=fake_config), \
+             patch("anyio.run"):
+            server_mod._run()
+
+        assert len(captured_app) == 1
+        assert isinstance(captured_app[0], HealthMiddleware)
+
+    def test_stdio_transport_calls_mcp_run(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Non-HTTP transport calls mcp.run(transport=...)."""
+        monkeypatch.setattr(server_mod, "TRANSPORT", "stdio")
+        called_with: list[str] = []
+        monkeypatch.setattr(
+            server_mod.mcp, "run", lambda transport: called_with.append(transport)
+        )
+        server_mod._run()
+        assert called_with == ["stdio"]
