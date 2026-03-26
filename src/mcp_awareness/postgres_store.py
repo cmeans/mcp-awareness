@@ -27,7 +27,11 @@ TRASH_RETENTION_DAYS = 30
 
 class PostgresStore:
     def __init__(
-        self, dsn: str, min_pool: int = 2, max_pool: int = 5, embedding_dimensions: int = 768,
+        self,
+        dsn: str,
+        min_pool: int = 2,
+        max_pool: int = 5,
+        embedding_dimensions: int = 768,
     ) -> None:
         self.dsn = dsn
         self._embedding_dimensions = embedding_dimensions
