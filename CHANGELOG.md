@@ -20,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - **Tests for SecretPathMiddleware and HealthMiddleware ASGI classes**: extracted middleware to `middleware.py` and added 10 tests covering path rewriting, health endpoints, 404 responses, and scope passthrough
+- Concurrency tests for connection pool, background cleanup, and concurrent upserts
 - **Embedding round-trip tests**: compose → store → search pipeline, stale detection, filtered search
 - **Store protocol docstrings**: Concise one-line docstrings for all ~30 methods in the `Store` protocol, documenting the contract for backend implementors
 - `uv.lock` for reproducible dependency resolution across builds
