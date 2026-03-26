@@ -102,15 +102,13 @@ class Store(Protocol):
         """Get a single active entry by ID, or None if not found or deleted."""
         ...
 
-<<<<<<< HEAD
-    def get_entries_by_ids(self, entry_ids: list[str]) -> list[Entry]: ...
+    def get_entries_by_ids(self, entry_ids: list[str]) -> list[Entry]:
+        """Get multiple active entries by ID in a single query."""
+        ...
 
-    def update_entry(self, entry_id: str, updates: dict[str, Any]) -> Entry | None: ...
-=======
     def update_entry(self, entry_id: str, updates: dict[str, Any]) -> Entry | None:
         """Update a knowledge entry in place, appending previous values to changelog."""
         ...
->>>>>>> origin/main
 
     def upsert_by_logical_key(
         self, source: str, logical_key: str, entry: Entry
