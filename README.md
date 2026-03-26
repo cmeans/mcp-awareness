@@ -1,10 +1,14 @@
-# mcp-awareness
+<p align="center">
+  <img src="docs/branding/awareness-logo-wordmark.svg" alt="awareness" width="400">
+</p>
 
-[![CI](https://github.com/cmeans/mcp-awareness/actions/workflows/ci.yml/badge.svg)](https://github.com/cmeans/mcp-awareness/actions/workflows/ci.yml)
-[![codecov](https://codecov.io/gh/cmeans/mcp-awareness/branch/main/graph/badge.svg)](https://codecov.io/gh/cmeans/mcp-awareness)
-[![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/downloads/)
-[![License](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
-[![Docker](https://img.shields.io/badge/docker-ghcr.io-blue)](https://ghcr.io/cmeans/mcp-awareness)
+<p align="center">
+  <a href="https://github.com/cmeans/mcp-awareness/actions/workflows/ci.yml"><img src="https://github.com/cmeans/mcp-awareness/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://codecov.io/gh/cmeans/mcp-awareness"><img src="https://codecov.io/gh/cmeans/mcp-awareness/branch/main/graph/badge.svg" alt="codecov"></a>
+  <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/python-3.10%2B-blue" alt="Python 3.10+"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-blue" alt="License"></a>
+  <a href="https://ghcr.io/cmeans/mcp-awareness"><img src="https://img.shields.io/badge/docker-ghcr.io-blue" alt="Docker"></a>
+</p>
 
 > **Your AI's memory shouldn't be locked to one app. It should follow you everywhere.**
 
