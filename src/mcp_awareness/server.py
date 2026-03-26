@@ -11,6 +11,7 @@ import concurrent.futures
 import functools
 import json
 import os
+import pathlib
 import re
 import time
 from collections.abc import Callable
@@ -207,24 +208,14 @@ def _timed(fn: Callable[..., Any]) -> Callable[..., Any]:
     return wrapper
 
 
+_INSTRUCTIONS_PATH = pathlib.Path(__file__).parent / "instructions.md"
+_INSTRUCTIONS = _INSTRUCTIONS_PATH.read_text(encoding="utf-8").strip()
+
 mcp = FastMCP(
     name="mcp-awareness",
     host=HOST,
     port=PORT,
-    instructions=(
-        "This server provides ambient awareness across monitored systems. "
-        "At conversation start, read awareness://briefing. If attention_needed "
-        "is true, mention the suggested_mention or compose your own from the "
-        "source headlines. If the user asks for details, drill into the "
-        "referenced resources. Don't read anything else unless asked or unless "
-        "the briefing indicates an issue. Group alerts by source if multiple "
-        "systems have issues. One sentence for warnings, short paragraph for "
-        "critical. Don't re-check unless asked. When you learn something worth "
-        "keeping, use remember for permanent facts, add_context for temporal "
-        "events, and learn_pattern ONLY for if/then rules (when X, expect Y). "
-        "When the user asks to suppress alerts, use suppress_alert — not a "
-        "memory edit."
-    ),
+    instructions=_INSTRUCTIONS,
 )
 
 
