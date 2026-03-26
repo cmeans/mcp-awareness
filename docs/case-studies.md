@@ -9,7 +9,7 @@ Real-world examples of awareness in practice — what worked, what broke, and wh
 
 ### Patterns over events — OS update analysis
 
-**Discovered by:** Claude on claude.ai
+**Platform:** Claude on claude.ai
 **When:** January–March 2026
 **Principle:** Store knowledge that transfers, not event logs
 
@@ -50,10 +50,10 @@ Three reasons:
 
 ### Feature discovery through friction — logical_key upsert
 
-**Discovered by:** Claude Desktop
-**Implemented by:** Claude Code
+**Discovered with:** Claude Desktop
+**Implemented with:** Claude Code
 **When:** March 2026 ([PR #18](https://github.com/cmeans/mcp-awareness/pull/18))
-**Principle:** The friction agents encounter drives the features they propose
+**Principle:** The friction encountered in daily use drives the features that get built
 
 Claude Desktop ran a code review of the mcp-awareness codebase and tried to update an existing review entry. It couldn't — `update_entry` requires a UUID, and Desktop didn't know the UUID from the entry Claude.ai had created in a different session.
 
@@ -74,7 +74,7 @@ One user, three platforms, one feature — discovered through friction, designed
 
 ### Prompt tuning through data audit
 
-**Discovered by:** Claude on claude.ai
+**Platform:** Claude on claude.ai
 **When:** March 2026
 **Principle:** Audit your data, not just your code
 
@@ -95,9 +95,9 @@ The quality of a knowledge store depends on the quality of what goes in. Agent p
 
 ### Cross-platform planning
 
-**Drafted by:** Claude on Android (claude.ai mobile)
-**Refined by:** Claude Desktop
-**Implemented by:** Claude Code
+**Drafted with:** Claude on Android (claude.ai mobile)
+**Refined with:** Claude Desktop
+**Implemented with:** Claude Code
 **When:** March 2026
 **Principle:** Context follows you, not the other way around
 
@@ -118,7 +118,7 @@ This is the core value proposition in action. One user, three platforms, three c
 
 ### Agent-driven code review
 
-**Performed by:** Claude Desktop
+**Platform:** Claude Desktop
 **When:** March 2026
 **Principle:** Your best beta testers are your own agents
 
@@ -137,7 +137,7 @@ The agent consuming the API is uniquely positioned to surface friction — it ex
 
 ### Query discipline — the 356K blowout
 
-**Discovered by:** Claude Code
+**Platform:** Claude Code
 **When:** March 2026 ([PR #54](https://github.com/cmeans/mcp-awareness/pull/54))
 **Principle:** Teach clients how to query, not just what to query
 
@@ -160,8 +160,8 @@ The server can't control how clients query, but it can teach them. By embedding 
 
 ### Aspirational README audit — catching our own overpromises
 
-**Discovered by:** Claude Code (Dev role)
-**Reviewed by:** Claude Code (QA role)
+**Platform:** Claude Code (Dev role)
+**Reviewed with:** Claude Code (QA role)
 **When:** March 2026 ([PR #53](https://github.com/cmeans/mcp-awareness/pull/53))
 **Principle:** Ground your documentation in what works today
 

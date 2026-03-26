@@ -23,7 +23,7 @@
 
 <img src="docs/images/android-briefing-demo.png" alt="Claude on Android surfacing an awareness briefing" width="220" align="right">
 
-This morning, a plan was drafted on Claude Android during a commute. Claude Desktop picked it up and gave engineering feedback. Claude Code implemented and deployed the changes — updating shared project status so every platform knows what happened. No copy-paste. No "remember what we discussed." The knowledge just flows.
+This morning, you drafted a plan with Claude on your phone during a commute. Back at your desk, Claude Desktop already had the context — you refined the engineering approach together. You moved to Claude Code for implementation and deployment, updating shared project status so every platform knows what happened. No copy-paste. No "remember what we discussed." The knowledge just follows you.
 
 Tell one AI about your infrastructure, your preferences, or a design decision — and every AI knows it. Correct a mistake on your phone, and your desktop assistant never repeats it. That cross-platform continuity works today.
 
@@ -74,7 +74,7 @@ Create a todo, reminder, or planned action from any platform. Intentions have a 
 
 ### Knowledge that outlives you
 
-Over time, your awareness store becomes a living estate document — financial accounts, insurance details, medical info, system access, family contacts. Not because you sat down to document it, but because it accumulated as a side effect of living your life with an AI. If you weren't here tomorrow, someone could find what they need.
+Over time, your awareness store becomes a living estate document — financial accounts, insurance details, medical info, system access, family contacts. Not because you sat down to write a manual, but because you asked your AI to remember important details as you mentioned them. If you weren't here tomorrow, someone could find what they need.
 
 ### Ambient awareness
 
@@ -361,9 +361,9 @@ Awareness fills that gap — a self-hosted store where knowledge from disconnect
 
 **The product is silence.** The most important briefing is `attention_needed: false` — confirmation that everything was checked and nothing needs you. An attention firewall, not another notification source.
 
-**Knowledge becomes ambient.** It accumulates through daily use, not documentation. A living estate document that's always current because it maintained itself as a side effect of living your life with an agent. A house that remembers when the furnace was serviced. A decision trail that preserves the reasoning at the moment you made the choice.
+**Knowledge becomes ambient.** It accumulates through daily use, not documentation. A living estate document that's always current because you and your agents maintain it together as a natural part of working. A house that remembers when the furnace was serviced. A decision trail that preserves the reasoning at the moment you made the choice.
 
-**Goals, not reminders.** Intentions are already a decision-support system. "Pick up milk" isn't a notification — it's a goal that agents evaluate against real-world circumstances. As signal sources come online (GPS, calendar, vision), intentions will fire based on location, time, and context — then self-resolve through multi-edge correlation without user intervention.
+**Goals, not reminders.** Intentions are already a decision-support system. "Pick up milk" isn't a notification — it's a goal that your agent evaluates against real-world circumstances. As signal sources come online (GPS, calendar, vision), intentions will fire based on location, time, and context — with your agent surfacing recommendations and you deciding what to act on.
 
 **Personal → family → team → community.** One person today. A shared household store next. Team knowledge that accumulates through work. Community institutional memory for organizations with zero software budget.
 
