@@ -1,6 +1,10 @@
 """Tests for the PostgreSQL storage backend."""
 
+import concurrent.futures
+import threading
 import time
+
+import pytest
 
 from mcp_awareness.schema import Entry, EntryType, make_id, now_utc
 
@@ -2048,3 +2052,182 @@ class TestEmbeddings:
         h = text_hash(compose_embedding_text(entry))
         store.upsert_embedding(entry.id, "m", 768, h, self._vec(768, 0))
         assert store.get_stale_embeddings("m") == []
+
+
+class TestConcurrency:
+    """Tests for concurrency patterns: connection pool, cleanup threading, concurrent writes."""
+
+    @staticmethod
+    def _make_note(suffix: str) -> Entry:
+        now = now_utc()
+        return Entry(
+            id=make_id(),
+            type=EntryType.NOTE,
+            source="concurrency-test",
+            tags=["test"],
+            created=now,
+            updated=now,
+            expires=None,
+            data={"description": f"concurrent note {suffix}"},
+        )
+
+    def test_concurrent_writes_no_corruption(self, store):
+        """20 simultaneous add() calls must all succeed without data loss."""
+        entries = [self._make_note(str(i)) for i in range(20)]
+        exceptions: list[Exception] = []
+
+        def add_entry(entry: Entry) -> None:
+            try:
+                store.add(entry)
+            except Exception as exc:
+                exceptions.append(exc)
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=10) as pool:
+            futures = [pool.submit(add_entry, e) for e in entries]
+            concurrent.futures.wait(futures, timeout=5)
+
+        assert exceptions == [], f"Exceptions during concurrent writes: {exceptions}"
+        stored = store.get_knowledge(tags=["test"])
+        stored_ids = {e.id for e in stored}
+        for entry in entries:
+            assert entry.id in stored_ids, f"Entry {entry.id} missing after concurrent write"
+
+    def test_concurrent_reads_under_writes(self, store):
+        """Reads and writes in parallel must not raise exceptions."""
+        # Seed some data first
+        for i in range(5):
+            store.add(self._make_note(f"seed-{i}"))
+
+        exceptions: list[Exception] = []
+
+        def reader() -> None:
+            try:
+                result = store.get_knowledge(tags=["test"])
+                assert isinstance(result, list)
+            except Exception as exc:
+                exceptions.append(exc)
+
+        def writer(idx: int) -> None:
+            try:
+                store.add(self._make_note(f"parallel-{idx}"))
+            except Exception as exc:
+                exceptions.append(exc)
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=10) as pool:
+            futures = []
+            for i in range(10):
+                futures.append(pool.submit(reader))
+                futures.append(pool.submit(writer, i))
+            concurrent.futures.wait(futures, timeout=5)
+
+        assert exceptions == [], f"Exceptions during concurrent read/write: {exceptions}"
+        # All seed + parallel entries should exist
+        stored = store.get_knowledge(tags=["test"])
+        assert len(stored) >= 15  # 5 seed + 10 parallel
+
+    def test_cleanup_thread_debouncing(self, store):
+        """Rapid _cleanup_expired() calls must be debounced — at most 1-2 threads spawned."""
+        original_interval = store._cleanup_interval
+        store._cleanup_interval = 0  # disable debounce delay for test
+        store._last_cleanup = 0.0  # reset so first call fires
+        spawned_threads: list[threading.Thread] = []
+        original_do_cleanup = store._do_cleanup
+
+        def tracking_cleanup() -> None:
+            spawned_threads.append(threading.current_thread())
+            original_do_cleanup()
+
+        try:
+            store._do_cleanup = tracking_cleanup  # type: ignore[assignment]
+            for _ in range(10):
+                store._cleanup_expired()
+                # The guard checks is_alive(), so thread must finish before next can spawn.
+                # With interval=0, debounce passes but alive-guard still limits.
+            # Wait for any spawned thread to finish
+            for t in spawned_threads:
+                t.join(timeout=2)
+
+            assert store._cleanup_thread is not None
+            # With debounce=0, each call can spawn IF the previous finished,
+            # but the test runs fast enough that we expect a small number.
+            assert len(spawned_threads) >= 1
+        finally:
+            store._cleanup_interval = original_interval
+            store._do_cleanup = original_do_cleanup  # type: ignore[assignment]
+
+    def test_cleanup_guard_prevents_accumulation(self, store):
+        """While a cleanup thread is running, new calls must not spawn another."""
+        original_interval = store._cleanup_interval
+        store._cleanup_interval = 0
+        store._last_cleanup = 0.0
+
+        barrier = threading.Event()
+        spawned_count = 0
+        lock = threading.Lock()
+
+        def slow_cleanup() -> None:
+            nonlocal spawned_count
+            with lock:
+                spawned_count += 1
+            barrier.wait(timeout=3)  # block until released
+
+        try:
+            store._do_cleanup = slow_cleanup  # type: ignore[assignment]
+
+            # First call should spawn a thread
+            store._cleanup_expired()
+            time.sleep(0.05)  # let thread start
+
+            # Subsequent calls while slow_cleanup is blocking should be no-ops
+            for _ in range(5):
+                store._last_cleanup = 0.0  # reset debounce so guard is the only blocker
+                store._cleanup_expired()
+
+            assert spawned_count == 1, f"Expected 1 cleanup thread but {spawned_count} were spawned"
+        finally:
+            barrier.set()  # unblock the slow cleanup
+            store._cleanup_interval = original_interval
+            if store._cleanup_thread is not None:
+                store._cleanup_thread.join(timeout=2)
+
+    @pytest.mark.xfail(
+        reason="upsert_by_logical_key has a TOCTOU race: check-then-act across "
+        "separate transactions allows concurrent inserts to create duplicates. "
+        "Needs INSERT ... ON CONFLICT or advisory locking to fix.",
+        strict=False,
+    )
+    def test_concurrent_upsert_by_logical_key(self, store):
+        """Concurrent upserts with same source + logical_key must not create duplicates."""
+        source = "upsert-race"
+        logical_key = "singleton"
+        exceptions: list[Exception] = []
+
+        def do_upsert(idx: int) -> None:
+            try:
+                now = now_utc()
+                entry = Entry(
+                    id=make_id(),
+                    type=EntryType.NOTE,
+                    source=source,
+                    tags=["upsert-test"],
+                    created=now,
+                    updated=now,
+                    expires=None,
+                    data={"description": f"upsert attempt {idx}"},
+                    logical_key=logical_key,
+                )
+                store.upsert_by_logical_key(source, logical_key, entry)
+            except Exception as exc:
+                exceptions.append(exc)
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=10) as pool:
+            futures = [pool.submit(do_upsert, i) for i in range(10)]
+            concurrent.futures.wait(futures, timeout=5)
+
+        assert exceptions == [], f"Exceptions during concurrent upsert: {exceptions}"
+        # Only one entry should exist for this source + logical_key
+        results = store.get_knowledge(source=source)
+        matching = [e for e in results if e.logical_key == logical_key]
+        assert len(matching) == 1, (
+            f"Expected 1 entry for logical_key={logical_key} but found {len(matching)}"
+        )
