@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - Background embedding now uses the connection pool via `store.upsert_embedding()` instead of duplicated SQL with a dedicated connection
+- `upsert_by_logical_key` race condition: concurrent writers can no longer create duplicate entries
+- Logical key unique index now excludes soft-deleted entries, allowing re-creation after delete
 - Invalid `entry_type` parameter now returns structured error instead of unhandled ValueError
 - `get_related` now fetches forward references in a single query instead of N individual lookups
 - Restoring soft-deleted entries now recovers original expiry instead of setting it to NULL
