@@ -793,6 +793,28 @@ class TestRestoreEntryTool:
         assert data["status"] == "not_found"
         assert data["restored"] == 0
 
+    @pytest.mark.anyio
+    async def test_restore_by_tags(self) -> None:
+        """Restore soft-deleted entries by tag."""
+        result = await server_mod.remember(
+            source="test", tags=["restore-tag"], description="taggable"
+        )
+        entry_id = json.loads(result)["id"]
+        await server_mod.delete_entry(entry_id=entry_id)
+        restore_result = await server_mod.restore_entry(tags=["restore-tag"])
+        data = json.loads(restore_result)
+        assert data["status"] == "ok"
+        assert data["restored"] >= 1
+        assert data["tags"] == ["restore-tag"]
+
+    @pytest.mark.anyio
+    async def test_restore_no_args(self) -> None:
+        """Restore with no entry_id or tags returns error."""
+        result = await server_mod.restore_entry()
+        data = json.loads(result)
+        assert data["status"] == "error"
+        assert "Provide entry_id or tags" in data["message"]
+
 
 class TestGetDeletedTool:
     @pytest.mark.anyio
@@ -1261,6 +1283,18 @@ class TestPrompts:
         assert core_pos < writing_pos
 
     @pytest.mark.anyio
+    async def test_agent_instructions_non_matching_format(self) -> None:
+        """Entries without 'Entry N (Name):' pattern fall through to raw description."""
+        await server_mod.remember(
+            source="awareness-prompt",
+            tags=["memory-prompt"],
+            description="Just a plain instruction without the standard format.",
+        )
+        result = await server_mod.agent_instructions()
+        assert "# Awareness Agent Instructions" in result
+        assert "Just a plain instruction" in result
+
+    @pytest.mark.anyio
     async def test_project_context_empty(self) -> None:
         result = await server_mod.project_context(repo_name="nonexistent")
         assert "No knowledge or alerts found" in result
@@ -1275,6 +1309,35 @@ class TestPrompts:
         result = await server_mod.project_context(repo_name="my-repo")
         assert "# Project Context: my-repo" in result
         assert "Architecture uses 4-file layout" in result
+
+    @pytest.mark.anyio
+    async def test_project_context_with_alerts(self) -> None:
+        """Project context includes active alerts for the repo tag."""
+        await server_mod.report_alert(
+            source="ci",
+            tags=["my-repo"],
+            alert_id="build-fail",
+            level="critical",
+            alert_type="threshold",
+            message="Build failed on main",
+        )
+        result = await server_mod.project_context(repo_name="my-repo")
+        assert "Active Alerts" in result
+        assert "critical" in result
+        assert "Build failed on main" in result
+
+    @pytest.mark.anyio
+    async def test_project_context_truncates_long_descriptions(self) -> None:
+        """Descriptions longer than 200 chars are truncated."""
+        long_desc = "A" * 250
+        await server_mod.remember(
+            source="test-project",
+            tags=["long-repo"],
+            description=long_desc,
+        )
+        result = await server_mod.project_context(repo_name="long-repo")
+        assert "A" * 200 + "..." in result
+        assert "A" * 201 not in result.replace("...", "")
 
     @pytest.mark.anyio
     async def test_system_status_empty(self) -> None:
@@ -1293,6 +1356,47 @@ class TestPrompts:
         assert "cpu: 45" in result
 
     @pytest.mark.anyio
+    async def test_system_status_with_description(self) -> None:
+        """Status entries with a description field in data show it in the output."""
+        _store().upsert_status(
+            "test-nas-desc",
+            ["infra"],
+            {"metrics": {"cpu": 10}, "description": "All systems nominal", "ttl_sec": 120},
+        )
+        result = await server_mod.system_status(source="test-nas-desc")
+        assert "All systems nominal" in result
+
+    @pytest.mark.anyio
+    async def test_system_status_with_alerts_and_patterns(self) -> None:
+        """System status includes alerts and known patterns for the source."""
+        await server_mod.report_status(
+            source="test-sys",
+            tags=["infra"],
+            metrics={"disk": 90},
+        )
+        await server_mod.report_alert(
+            source="test-sys",
+            tags=["infra"],
+            alert_id="disk-full",
+            level="warning",
+            alert_type="threshold",
+            message="Disk usage above 90%",
+        )
+        await server_mod.learn_pattern(
+            source="test-sys",
+            tags=["infra"],
+            description="disk pattern",
+            conditions={"metric": "disk", "threshold": 90},
+            effect="performance degrades",
+        )
+        result = await server_mod.system_status(source="test-sys")
+        assert "Active Alerts" in result
+        assert "warning" in result
+        assert "Disk usage above 90%" in result
+        assert "Known Patterns" in result
+        assert "performance degrades" in result
+
+    @pytest.mark.anyio
     async def test_write_guide(self) -> None:
         await server_mod.remember(
             source="test-src", tags=["alpha", "beta"], description="test note"
@@ -1301,6 +1405,18 @@ class TestPrompts:
         assert "# Awareness Write Guide" in result
         assert "test-src" in result
         assert "alpha" in result
+
+    @pytest.mark.anyio
+    async def test_write_guide_many_tags(self) -> None:
+        """Write guide caps tag list at 30 and shows overflow count."""
+        for i in range(35):
+            await server_mod.remember(
+                source=f"src-{i}",
+                tags=[f"tag-{i:03d}"],
+                description=f"note {i}",
+            )
+        result = await server_mod.write_guide()
+        assert "and 5 more" in result
 
     @pytest.mark.anyio
     async def test_catchup_empty(self) -> None:
@@ -1313,6 +1429,30 @@ class TestPrompts:
         result = await server_mod.catchup(hours=24)
         assert "recent note" in result
         assert "[new]" in result
+
+    @pytest.mark.anyio
+    async def test_catchup_with_alerts(self) -> None:
+        """Catchup shows recent alerts."""
+        await server_mod.report_alert(
+            source="ci",
+            tags=["test"],
+            alert_id="catchup-alert",
+            level="critical",
+            alert_type="threshold",
+            message="Deploy failed",
+        )
+        result = await server_mod.catchup(hours=24)
+        assert "New/Updated Alerts" in result
+        assert "critical" in result
+        assert "Deploy failed" in result
+
+    @pytest.mark.anyio
+    async def test_catchup_truncates_long_descriptions(self) -> None:
+        """Catchup truncates knowledge descriptions over 150 chars."""
+        long_desc = "B" * 200
+        await server_mod.remember(source="test-src", tags=["t"], description=long_desc)
+        result = await server_mod.catchup(hours=24)
+        assert "B" * 150 + "..." in result
 
 
 class TestCustomPrompts:

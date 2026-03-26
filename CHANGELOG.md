@@ -24,6 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Tag filtering in `get_entries` and `get_knowledge` now uses AND logic (match ALL tags) instead of OR, consistent with delete/restore operations
 
 ### Added
+- **Coverage tests for prompt and restore branches**: 10 tests covering agent_instructions fallback, project_context alerts/truncation, system_status description/alerts/patterns, write_guide tag overflow, catchup alerts/truncation, restore_entry by tags and no-args
 - **Tests for SecretPathMiddleware and HealthMiddleware ASGI classes**: extracted middleware to `middleware.py` and added 10 tests covering path rewriting, health endpoints, 404 responses, and scope passthrough
 - Concurrency tests for connection pool, background cleanup, and concurrent upserts
 - **Embedding round-trip tests**: compose → store → search pipeline, stale detection, filtered search
