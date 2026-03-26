@@ -1,6 +1,6 @@
 # Case Studies
 
-Real-world examples of awareness in practice — what worked, what broke, and what we learned. Each case study is attributed to the agent and platform that drove the discovery.
+Real-world examples of awareness in practice — what worked, what broke, and what we learned. Each case study is attributed to the agent and platform involved, but every step was human-directed: the user asked the questions, made the decisions, reviewed the output, and approved the results. The agents are tools, not autonomous actors.
 
 ---
 
@@ -57,13 +57,13 @@ Three reasons:
 
 Claude Desktop ran a code review of the mcp-awareness codebase and tried to update an existing review entry. It couldn't — `update_entry` requires a UUID, and Desktop didn't know the UUID from the entry Claude.ai had created in a different session.
 
-The workaround was creating a duplicate with a "supersedes" note. Desktop recognized this as exactly the kind of data pollution awareness should prevent, designed a solution (`logical_key` upsert), and stored the full proposal in awareness.
+The workaround was creating a duplicate with a "supersedes" note. Through discussion, Desktop helped the user design a solution (`logical_key` upsert), and the proposal was stored in awareness.
 
-Claude Code discovered the proposal in the shared store, implemented it, and shipped it — all without any copy-paste or "remember what we discussed."
+When the user moved to Claude Code, the proposal was already in the shared store — no copy-paste needed. The user directed implementation, reviewed the code, and shipped it.
 
 #### Why it matters
 
-Three agents, three platforms, one feature — discovered through friction, designed by the agent that hit the problem, implemented by the agent best suited for coding. The shared knowledge store was both the communication channel and the subject of the improvement.
+One user, three platforms, one feature — discovered through friction, designed collaboratively with the agent that hit the problem, implemented with the agent best suited for coding. The shared knowledge store was both the communication channel and the subject of the improvement.
 
 </details>
 
@@ -80,11 +80,11 @@ Three agents, three platforms, one feature — discovered through friction, desi
 
 The first audit of stored data found 53 out of 56 `learn_pattern` entries had empty conditions/effects — they should have been notes. Tag drift was rampant: `infrastructure` vs `infra`, `torrent` vs `torrents`. Source naming was chaotic: `chris-personal`, `chris-career`, `chris-health` instead of one `personal` source with domain tags.
 
-Each finding led to a prompt update. The prompts got more explicit, the naming conventions got documented, and the next round of data was cleaner.
+The user reviewed each finding and directed prompt updates. The prompts got more explicit, the naming conventions got documented, and the next round of data was cleaner.
 
 #### Why it matters
 
-The quality of a knowledge store depends on the quality of what goes in. Agent prompts are the input filter. Auditing the data revealed prompt gaps that would have been invisible from code review alone.
+The quality of a knowledge store depends on the quality of what goes in. Agent prompts are the input filter. Auditing the data — with the agent surfacing the patterns and the user deciding what to fix — revealed prompt gaps that would have been invisible from code review alone.
 
 </details>
 
@@ -101,13 +101,13 @@ The quality of a knowledge store depends on the quality of what goes in. Agent p
 **When:** March 2026
 **Principle:** Context follows you, not the other way around
 
-A health data integration plan was drafted on Claude mobile during a commute, stored in awareness, and picked up by Claude Desktop for engineering feedback that shaped the project roadmap. Claude Code then implemented the changes, tested them, and deployed — updating the shared project status so every platform knows what happened.
+The user drafted a health data integration plan with Claude on mobile during a commute, storing it in awareness. Back at the desk, Claude Desktop already had the context and helped refine the engineering approach. The user then moved to Claude Code for implementation, testing, and deployment — updating shared project status so every platform knows what happened.
 
-No copy-paste. No "remember what we discussed." The knowledge just followed.
+No copy-paste. No "remember what we discussed." The knowledge just followed the user.
 
 #### Why it matters
 
-This is the core value proposition in action. Three platforms, three contexts (commute, desk, terminal), one continuous thread of work. The awareness store replaced the human as the message bus.
+This is the core value proposition in action. One user, three platforms, three contexts (commute, desk, terminal), one continuous thread of work. The awareness store carried the context so the user didn't have to.
 
 </details>
 
@@ -122,11 +122,11 @@ This is the core value proposition in action. Three platforms, three contexts (c
 **When:** March 2026
 **Principle:** Your best beta testers are your own agents
 
-Claude Desktop reviewed the awareness tools as a consumer and gave engineering feedback: filtered queries needed to reduce token cost, error messages were opaque, tag matching had data model inconsistencies. Every suggestion was actionable, and most shipped within hours.
+The user asked Claude Desktop to review the awareness tools as a consumer. The feedback was specific: filtered queries needed to reduce token cost, error messages were opaque, tag matching had data model inconsistencies. The user evaluated each suggestion and directed the fixes — most shipped within hours.
 
 #### Why it matters
 
-The agent consuming the API is uniquely positioned to evaluate it — it experiences the friction that human code review misses. Desktop's feedback led to query optimizations, better error messages, and data model fixes that improved the experience for every connected agent.
+The agent consuming the API is uniquely positioned to surface friction — it experiences the rough edges that human code review misses. But the user decides what's actionable. Desktop's feedback, filtered through the user's judgment, led to query optimizations, better error messages, and data model fixes that improved the experience for every connected agent.
 
 </details>
 
@@ -141,9 +141,9 @@ The agent consuming the API is uniquely positioned to evaluate it — it experie
 **When:** March 2026 ([PR #54](https://github.com/cmeans/mcp-awareness/pull/54))
 **Principle:** Teach clients how to query, not just what to query
 
-During a routine QA review, Claude Code called `get_knowledge` with a broad tag filter and no `limit`. The result: 356,751 characters — exceeding the tool output limit and forcing the response to be saved to a temp file.
+During a routine QA review, Claude Code called `get_knowledge` with a broad tag filter and no `limit`. The result: 356,751 characters — exceeding the tool output limit and forcing the response to be saved to a temp file. The user spotted the problem, diagnosed the root cause, and directed the fix.
 
-The fix was two-fold:
+The solution was two-fold:
 1. **Query discipline guidance** added to the MCP server instructions — all clients now receive guidance to use `mode='list'` first, always set `limit`, use `hint` for relevance ranking, and narrow with specific tags.
 2. **String externalization** — the instructions were moved from an inline Python string to `instructions.md`, establishing content/code separation for maintainability and future i18n.
 
@@ -165,11 +165,11 @@ The server can't control how clients query, but it can teach them. By embedding 
 **When:** March 2026 ([PR #53](https://github.com/cmeans/mcp-awareness/pull/53))
 **Principle:** Ground your documentation in what works today
 
-During a PR review, Claude Code (in its Developer role) flagged three README claims that described capabilities not yet built: a doctor appointment scenario requiring calendar/transit/weather/geofence integration, an intentions example requiring GPS-based geofencing, and a "today" summary listing unbuilt edge capabilities.
+During a PR review, the user asked Claude Code (in its Developer role) to review the README for technical accuracy. It flagged three claims that described capabilities not yet built: a doctor appointment scenario requiring calendar/transit/weather/geofence integration, an intentions example requiring GPS-based geofencing, and a "today" summary listing unbuilt edge capabilities.
 
-Claude Code (in its QA role) independently confirmed the findings and noted a CHANGELOG categorization nit.
+The user confirmed these were valid concerns and directed the fixes. Claude Code (in its QA role) independently verified the changes and noted a CHANGELOG categorization nit, which the user also had corrected.
 
-The fix replaced aspirational scenarios with grounded examples of what actually works, while keeping the vision in the Vision section where it belongs.
+The result replaced aspirational scenarios with grounded examples of what actually works, while keeping the vision in the Vision section where it belongs.
 
 #### Why it matters
 

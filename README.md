@@ -394,9 +394,9 @@ Read the full vision: **[What Knowledge Becomes When It's Ambient](docs/vision.m
 
 ## How it's built
 
-This project is built using the thing it builds. Multiple AI instances across platforms collaborate through awareness itself, and the friction they encounter drives the features they propose.
+This project is built using the thing it builds. The developer works across multiple AI platforms — Claude Desktop, Claude Code, Claude on Android — and the friction encountered in daily use drives the features that get built. The agents are tools; the human directs every decision.
 
-Claude Desktop discovered a data pollution problem, designed the `logical_key` upsert solution, and stored it in awareness. Claude Code found the proposal and shipped it. Claude on Android drafted a plan during a commute that Claude Desktop refined and Claude Code implemented. Claude Code caught aspirational README claims; Claude Code in its QA role independently confirmed them.
+Claude Desktop surfaced a data pollution problem; the user directed the fix through Claude Code. A plan drafted on mobile during a commute was waiting in awareness when the user sat down at the desk. Claude Code flagged aspirational README claims; the user confirmed and corrected them.
 
 Each interaction generated a case study. Read them all: **[Case Studies — Awareness in Practice](docs/case-studies.md)**
 
