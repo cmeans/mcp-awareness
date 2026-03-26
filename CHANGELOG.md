@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - Embedding vector dimension is now configurable via `AWARENESS_EMBEDDING_DIMENSIONS` in both the provider and the DDL (was hardcoded to 768 in the schema)
+- Background embedding now uses the connection pool via `store.upsert_embedding()` instead of duplicated SQL with a dedicated connection
+- Replace silent `except Exception: pass` blocks with `logger.debug` logging in server and store
 - `upsert_by_logical_key` race condition: concurrent writers can no longer create duplicate entries
 - Logical key unique index now excludes soft-deleted entries, allowing re-creation after delete
 - Invalid `entry_type` parameter now returns structured error instead of unhandled ValueError
