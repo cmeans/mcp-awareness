@@ -59,6 +59,9 @@ class PostgresStore:
                 CREATE INDEX IF NOT EXISTS idx_entries_source ON entries(source);
                 CREATE INDEX IF NOT EXISTS idx_entries_type_source ON entries(type, source);
                 CREATE INDEX IF NOT EXISTS idx_entries_tags_gin ON entries USING GIN (tags);
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_entries_source_logical_key
+                    ON entries(source, logical_key)
+                    WHERE logical_key IS NOT NULL AND deleted IS NULL;
 
                 CREATE TABLE IF NOT EXISTS reads (
                     id       SERIAL PRIMARY KEY,
@@ -517,26 +520,56 @@ class PostgresStore:
     def upsert_by_logical_key(
         self, source: str, logical_key: str, entry: Entry
     ) -> tuple[Entry, bool]:
-        """Upsert by source + logical_key. Returns (entry, created)."""
-        existing = self._query_entries("source = %s AND logical_key = %s", (source, logical_key))
-        if existing:
-            old = existing[0]
-            updates: dict[str, Any] = {}
-            if entry.tags != old.tags:
-                updates["tags"] = entry.tags
-            for field in ("description", "content", "content_type"):
-                new_val = entry.data.get(field)
-                old_val = old.data.get(field)
-                if new_val is not None and new_val != old_val:
-                    updates[field] = new_val
-            if updates:
-                result = self.update_entry(old.id, updates)
-                return (result or old, False)
-            return (old, False)
-        self._cleanup_expired()
+        """Upsert by source + logical_key. Returns (entry, created).
+
+        Uses a single connection with INSERT ... ON CONFLICT to avoid race
+        conditions when concurrent writers target the same logical_key.
+        """
         with self._pool.connection() as conn, conn.cursor() as cur:
-            self._insert_entry(cur, entry)
-        return (entry, True)
+            # Attempt insert; on conflict, fetch the existing row's id
+            cur.execute(
+                """INSERT INTO entries
+                   (id, type, source, created, updated, expires, tags, data, logical_key)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s::jsonb, %s::jsonb, %s)
+                   ON CONFLICT (source, logical_key) WHERE logical_key IS NOT NULL
+                       AND deleted IS NULL
+                   DO UPDATE SET id = entries.id
+                   RETURNING (xmax = 0) AS inserted""",
+                (
+                    entry.id,
+                    entry.type.value if isinstance(entry.type, EntryType) else entry.type,
+                    entry.source,
+                    entry.created,
+                    entry.updated,
+                    entry.expires,
+                    json.dumps(entry.tags),
+                    json.dumps(entry.data),
+                    entry.logical_key,
+                ),
+            )
+            row = cur.fetchone()
+            assert row is not None
+            inserted: bool = row["inserted"]
+
+        if inserted:
+            self._cleanup_expired()
+            return (entry, True)
+
+        # Existing entry — compute diff and update if needed
+        existing = self._query_entries("source = %s AND logical_key = %s", (source, logical_key))
+        old = existing[0]
+        updates: dict[str, Any] = {}
+        if entry.tags != old.tags:
+            updates["tags"] = entry.tags
+        for field in ("description", "content", "content_type"):
+            new_val = entry.data.get(field)
+            old_val = old.data.get(field)
+            if new_val is not None and new_val != old_val:
+                updates[field] = new_val
+        if updates:
+            result = self.update_entry(old.id, updates)
+            return (result or old, False)
+        return (old, False)
 
     def get_stats(self) -> dict[str, Any]:
         """Get entry counts by type, list of sources, and total count."""
