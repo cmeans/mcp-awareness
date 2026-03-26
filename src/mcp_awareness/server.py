@@ -1245,9 +1245,7 @@ async def backfill_embeddings(
             vectors = []
         for entry, h, vec in zip(missing, hashes, vectors, strict=False):
             try:
-                store.upsert_embedding(
-                    entry.id, provider.model_name, provider.dimensions, h, vec
-                )
+                store.upsert_embedding(entry.id, provider.model_name, provider.dimensions, h, vec)
                 new_count += 1
             except Exception:  # pragma: no cover
                 continue
@@ -1264,9 +1262,7 @@ async def backfill_embeddings(
             vectors = []
         for entry, h, vec in zip(stale, hashes, vectors, strict=False):
             try:
-                store.upsert_embedding(
-                    entry.id, provider.model_name, provider.dimensions, h, vec
-                )
+                store.upsert_embedding(entry.id, provider.model_name, provider.dimensions, h, vec)
                 refreshed_count += 1
             except Exception:  # pragma: no cover
                 continue
