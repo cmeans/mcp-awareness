@@ -1080,6 +1080,18 @@ class TestLogicalKeyUpsert:
         assert changelog[0]["changed"]["description"] == "original"
 
     @pytest.mark.anyio
+    async def test_logical_key_upsert_updates_tags(self) -> None:
+        await server_mod.remember(
+            source="project", tags=["v1-tag"], description="initial", logical_key="tag-test"
+        )
+        await server_mod.remember(
+            source="project", tags=["v2-tag"], description="initial", logical_key="tag-test"
+        )
+        entries = json.loads(await server_mod.get_knowledge(entry_type="note"))
+        assert len(entries) == 1
+        assert entries[0]["tags"] == ["v2-tag"]
+
+    @pytest.mark.anyio
     async def test_different_logical_keys_no_conflict(self) -> None:
         await server_mod.remember(
             source="project", tags=["a"], description="one", logical_key="key-1"
