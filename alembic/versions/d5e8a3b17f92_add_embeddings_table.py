@@ -6,6 +6,7 @@ Create Date: 2026-03-23 22:00:00.000000
 
 """
 
+import os
 from typing import Sequence, Union
 
 from alembic import op
@@ -19,14 +20,15 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     """Create embeddings table with HNSW vector index."""
-    op.execute("""
+    dim = os.environ.get("AWARENESS_EMBEDDING_DIMENSIONS", "768")
+    op.execute(f"""
         CREATE TABLE IF NOT EXISTS embeddings (
             id          SERIAL PRIMARY KEY,
             entry_id    TEXT NOT NULL REFERENCES entries(id) ON DELETE CASCADE,
             model       TEXT NOT NULL,
             dimensions  INTEGER NOT NULL,
             text_hash   TEXT NOT NULL,
-            embedding   VECTOR(768) NOT NULL,
+            embedding   VECTOR({dim}) NOT NULL,
             created     TIMESTAMPTZ NOT NULL DEFAULT now(),
             UNIQUE (entry_id, model)
         );
