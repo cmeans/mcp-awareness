@@ -8,13 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- Invalid `entry_type` parameter now returns structured error instead of unhandled ValueError
 - `get_related` now fetches forward references in a single query instead of N individual lookups
 - Restoring soft-deleted entries now recovers original expiry instead of setting it to NULL
+- Catchup prompt now pushes `since` filter to SQL instead of loading all entries into Python
+
 ### Changed
 - Tag filtering in `get_entries` and `get_knowledge` now uses AND logic (match ALL tags) instead of OR, consistent with delete/restore operations
-
-### Fixed
-- Catchup prompt now pushes `since` filter to SQL instead of loading all entries into Python
 
 ### Added
 - **Embedding round-trip tests**: compose → store → search pipeline, stale detection, filtered search
