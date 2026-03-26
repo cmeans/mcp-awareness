@@ -1519,12 +1519,8 @@ async def write_guide() -> str:
 async def catchup(hours: int = 24) -> str:
     """Compose a catchup summary of recently updated entries."""
     since = now_utc() - timedelta(hours=hours)
-    # Pull all knowledge and filter by updated timestamp
-    all_entries = store.get_knowledge(include_history="true")
-    recent = [e for e in all_entries if e.updated >= since]
-    # Also check alerts
-    alerts = store.get_active_alerts()
-    recent_alerts = [a for a in alerts if a.updated >= since]
+    recent = store.get_knowledge(include_history="true", since=since)
+    recent_alerts = store.get_active_alerts(since=since)
 
     parts: list[str] = [f"# Catchup — last {hours} hours"]
 
