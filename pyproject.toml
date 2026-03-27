@@ -87,3 +87,15 @@ ignore_missing_imports = true
 [[tool.mypy.overrides]]
 module = ["alembic.*", "sqlalchemy.*"]
 ignore_missing_imports = true
+
+# The tools/resources/prompts modules use a circular import pattern
+# (from . import server as _srv) to access mutable state through the server
+# module at call time.  mypy cannot resolve attribute types on the partially-
+# initialized module object, so we suppress has-type for these three files.
+[[tool.mypy.overrides]]
+module = ["mcp_awareness.tools", "mcp_awareness.resources", "mcp_awareness.prompts"]
+disable_error_code = ["has-type", "untyped-decorator"]
+
+# --- Coverage ---
+[tool.coverage.run]
+omit = ["src/mcp_awareness/__main__.py"]
