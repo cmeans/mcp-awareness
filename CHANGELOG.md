@@ -7,23 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Fixed
-- Remove dead `if __name__ == "__main__"` block from `server.py` (caused circular import) and add `__main__.py` so `python -m mcp_awareness` works correctly
-- Embedding vector dimension is now configurable via `AWARENESS_EMBEDDING_DIMENSIONS` in both the provider and the DDL (was hardcoded to 768 in the schema)
-- Background embedding now uses the connection pool via `store.upsert_embedding()` instead of duplicated SQL with a dedicated connection
-- Replace silent `except Exception: pass` blocks with `logger.debug` logging in server and store
-- `upsert_by_logical_key` race condition: concurrent writers can no longer create duplicate entries
-- Logical key unique index now excludes soft-deleted entries, allowing re-creation after delete
-- Invalid `entry_type` parameter now returns structured error instead of unhandled ValueError
-- `get_related` now fetches forward references in a single query instead of N individual lookups
-- Restoring soft-deleted entries now recovers original expiry instead of setting it to NULL
-- Catchup prompt now pushes `since` filter to SQL instead of loading all entries into Python
-
-### Changed
-- **Split `server.py` into focused modules**: Extracted tool handlers (`tools.py`), resource handlers (`resources.py`), prompt handlers (`prompts.py`), and shared helpers (`helpers.py`) from the 1,718-line `server.py` for maintainability
-- Tag filtering in `get_entries` and `get_knowledge` now uses AND logic (match ALL tags) instead of OR, consistent with delete/restore operations
+## [0.12.0] - 2026-03-26
 
 ### Added
+- **`__main__.py` entry point**: `python -m mcp_awareness` now works correctly
 - **Coverage tests for prompt and restore branches**: 10 tests covering agent_instructions fallback, project_context alerts/truncation, system_status description/alerts/patterns, write_guide tag overflow, catchup alerts/truncation, restore_entry by tags and no-args
 - **Tests for SecretPathMiddleware and HealthMiddleware ASGI classes**: extracted middleware to `middleware.py` and added 10 tests covering path rewriting, health endpoints, 404 responses, and scope passthrough
 - Concurrency tests for connection pool, background cleanup, and concurrent upserts
@@ -34,14 +21,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **README logo header**: Wordmark hero replaces plain `# mcp-awareness` heading, centered badge row
 - **Integration tests for server startup**: health endpoint, secret path middleware routing, and MCP endpoint — covers `_run()`, `_create_store()`, middleware instantiation, and transport config
 
+### Changed
+- **Split `server.py` into focused modules**: Extracted tool handlers (`tools.py`), resource handlers (`resources.py`), prompt handlers (`prompts.py`), and shared helpers (`helpers.py`) from the 1,718-line `server.py` for maintainability
+- Tag filtering in `get_entries` and `get_knowledge` now uses AND logic (match ALL tags) instead of OR, consistent with delete/restore operations
+- **README**: Remove stale "proof of concept" framing — project is deployed with 333+ tests and 12+ releases
+- Dockerfile uses `uv` for deterministic installs
+
 ### Fixed
+- Remove dead `if __name__ == "__main__"` block from `server.py` (caused circular import)
+- Embedding vector dimension is now configurable via `AWARENESS_EMBEDDING_DIMENSIONS` in both the provider and the DDL (was hardcoded to 768 in the schema)
+- Background embedding now uses the connection pool via `store.upsert_embedding()` instead of duplicated SQL with a dedicated connection
+- Replace silent `except Exception: pass` blocks with `logger.debug` logging in server and store
+- `upsert_by_logical_key` race condition: concurrent writers can no longer create duplicate entries
+- Logical key unique index now excludes soft-deleted entries, allowing re-creation after delete
+- Invalid `entry_type` parameter now returns structured error instead of unhandled ValueError
+- `get_related` now fetches forward references in a single query instead of N individual lookups
+- Restoring soft-deleted entries now recovers original expiry instead of setting it to NULL
+- Catchup prompt now pushes `since` filter to SQL instead of loading all entries into Python
 - All client-facing query tools now apply a default LIMIT (200) to prevent unbounded result sets
 - Added `limit` parameter to `get_unread` tool
 - `backfill_embeddings` now batches embedding generation instead of making individual API calls per entry
-
-### Changed
-- **README**: Remove stale "proof of concept" framing — project is deployed with 333+ tests and 12+ releases
-- Dockerfile uses `uv` for deterministic installs
 
 ## [0.11.2] - 2026-03-25
 
@@ -327,7 +326,8 @@ Initial implementation.
 - **Dockerfile** for container deployment
 - Design docs: core spec and collation layer
 
-[Unreleased]: https://github.com/cmeans/mcp-awareness/compare/v0.11.2...HEAD
+[Unreleased]: https://github.com/cmeans/mcp-awareness/compare/v0.12.0...HEAD
+[0.12.0]: https://github.com/cmeans/mcp-awareness/compare/v0.11.2...v0.12.0
 [0.11.2]: https://github.com/cmeans/mcp-awareness/compare/v0.11.1...v0.11.2
 [0.11.1]: https://github.com/cmeans/mcp-awareness/compare/v0.11.0...v0.11.1
 [0.11.0]: https://github.com/cmeans/mcp-awareness/compare/v0.10.0...v0.11.0
