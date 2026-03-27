@@ -24,7 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - **Split `server.py` into focused modules**: Extracted tool handlers (`tools.py`), resource handlers (`resources.py`), prompt handlers (`prompts.py`), and shared helpers (`helpers.py`) from the 1,718-line `server.py` for maintainability
 - Tag filtering in `get_entries` and `get_knowledge` now uses AND logic (match ALL tags) instead of OR, consistent with delete/restore operations
-- **README**: Remove stale "proof of concept" framing — project is deployed with 333+ tests and 12+ releases
+- **README**: Remove stale "proof of concept" framing — project is production-deployed
 - Dockerfile uses `uv` for deterministic installs
 
 ### Fixed
