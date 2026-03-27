@@ -95,3 +95,7 @@ ignore_missing_imports = true
 [[tool.mypy.overrides]]
 module = ["mcp_awareness.tools", "mcp_awareness.resources", "mcp_awareness.prompts"]
 disable_error_code = ["has-type", "untyped-decorator"]
+
+# --- Coverage ---
+[tool.coverage.run]
+omit = ["src/mcp_awareness/__main__.py"]
