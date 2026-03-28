@@ -2,11 +2,40 @@
 
 All data in mcp-awareness is stored in a single `entries` table using a common envelope pattern. Every record — whether it's a system status report, an alert, a piece of knowledge, or a preference — shares the same columns. The `type` field determines the semantics, and the `data` column holds type-specific fields.
 
+## Table: `users`
+
+| Column | Type | Nullable | Description |
+|--------|------|----------|-------------|
+| `id` | TEXT | No | Primary key. Owner identifier (e.g., `"cmeans"`, `"alice"`). |
+| `email` | TEXT | Yes | Email address as provided by the user (for display, contact). |
+| `canonical_email` | TEXT | Yes | Normalized email for uniqueness checks. UNIQUE constraint. See normalization rules below. |
+| `email_verified` | BOOLEAN | No | Whether the email has been verified. Default: `FALSE`. |
+| `phone` | TEXT | Yes | Phone number in E.164 format (e.g., `"+14155551234"`). NOT unique — shared lines exist. |
+| `phone_verified` | BOOLEAN | No | Whether the phone has been verified. Default: `FALSE`. |
+| `password_hash` | TEXT | Yes | argon2id hash. Nullable — OAuth-only users skip this. |
+| `display_name` | TEXT | Yes | Human-readable name. |
+| `timezone` | TEXT | Yes | IANA timezone (e.g., `"America/Chicago"`). Default: `"UTC"`. Used for notification scheduling. |
+| `preferences` | JSONB | No | Extensible user settings (notification prefs, etc.). Default: `{}`. |
+| `created` | TIMESTAMPTZ | No | When the user was created. Default: `now()`. |
+| `updated` | TIMESTAMPTZ | No | Last update timestamp. Default: `now()`. |
+| `deleted` | TIMESTAMPTZ | Yes | Soft deletion timestamp. `NULL` means active. |
+
+### Email normalization (`canonical_email`)
+
+The `canonical_email` column is computed on write to prevent trivial multi-account abuse:
+1. Lowercase the entire address
+2. Strip `+tag` from the local part (e.g., `user+test@gmail.com` → `user@gmail.com`) — universal, de facto standard
+3. Strip dots from the local part for `gmail.com` / `googlemail.com` only (e.g., `u.s.e.r@gmail.com` → `user@gmail.com`)
+4. Normalize `googlemail.com` → `gmail.com`
+
+The UNIQUE constraint is on `canonical_email`, not `email`. Users see and use their original email; normalization is invisible.
+
 ## Table: `entries`
 
 | Column | Type | Nullable | Description |
 |--------|------|----------|-------------|
 | `id` | TEXT | No | Primary key. UUID v4, generated via `uuid.uuid4()`. |
+| `owner_id` | TEXT | No | Owner identifier. References the user who owns this entry. All queries are scoped by `owner_id`. |
 | `type` | TEXT | No | Entry type. One of: `status`, `alert`, `pattern`, `suppression`, `context`, `preference`, `note`, `intention`. |
 | `source` | TEXT | No | Origin identifier. Describes the subject, not the owner (e.g., `"personal"`, `"synology-nas"`, `"mcp-awareness-project"`). |
 | `created` | TIMESTAMPTZ | No | UTC timestamp. Set once when the entry is first created. |
@@ -21,11 +50,12 @@ All data in mcp-awareness is stored in a single `entries` table using a common e
 
 | Index | Columns | Type | Purpose |
 |-------|---------|------|---------|
-| `idx_entries_type` | `type` | B-tree | Filter by entry type |
-| `idx_entries_source` | `source` | B-tree | Filter by source |
-| `idx_entries_type_source` | `type`, `source` | B-tree | Combined filter (e.g., all alerts for a source) |
+| `idx_entries_owner` | `owner_id` | B-tree | Filter by owner |
+| `idx_entries_owner_type` | `owner_id`, `type` | B-tree | Filter by owner + entry type |
+| `idx_entries_owner_source` | `owner_id`, `source` | B-tree | Filter by owner + source |
+| `idx_entries_owner_type_source` | `owner_id`, `type`, `source` | B-tree | Combined filter (e.g., all alerts for an owner's source) |
 | `idx_entries_tags_gin` | `tags` | GIN | Fast tag containment queries |
-| `idx_entries_source_logical_key` | `source`, `logical_key` | Unique (partial) | Upsert deduplication (WHERE logical_key IS NOT NULL) |
+| `idx_entries_source_logical_key` | `owner_id`, `source`, `logical_key` | Unique (partial) | Upsert deduplication (WHERE logical_key IS NOT NULL AND deleted IS NULL) |
 
 ## Entry types
 
@@ -154,6 +184,7 @@ Auto-populated when entries are accessed via `get_knowledge` and `get_alerts`. F
 | Column | Type | Nullable | Description |
 |--------|------|----------|-------------|
 | `id` | SERIAL | No | Auto-incrementing primary key. |
+| `owner_id` | TEXT | No | Owner identifier. Denormalized from the entry for direct query scoping and RLS. |
 | `entry_id` | TEXT | No | References `entries(id)` with `ON DELETE CASCADE`. |
 | `timestamp` | TIMESTAMPTZ | No | When the read occurred. Default: `now()`. |
 | `platform` | TEXT | Yes | Which platform performed the read (e.g., `"claude-code"`). |
@@ -163,6 +194,7 @@ Auto-populated when entries are accessed via `get_knowledge` and `get_alerts`. F
 
 | Index | Columns | Type | Purpose |
 |-------|---------|------|---------|
+| `idx_reads_owner` | `owner_id` | B-tree | Filter by owner |
 | `idx_reads_entry` | `entry_id` | B-tree | Look up reads for a specific entry |
 | `idx_reads_timestamp` | `timestamp` | B-tree | Time-range queries |
 
@@ -173,6 +205,7 @@ Agent-reported records of concrete actions taken because of an entry. Permanent 
 | Column | Type | Nullable | Description |
 |--------|------|----------|-------------|
 | `id` | SERIAL | No | Auto-incrementing primary key. |
+| `owner_id` | TEXT | No | Owner identifier. Denormalized from the entry for direct query scoping and RLS. |
 | `entry_id` | TEXT | No | References `entries(id)` with `ON DELETE CASCADE`. |
 | `timestamp` | TIMESTAMPTZ | No | When the action was recorded. Default: `now()`. |
 | `platform` | TEXT | Yes | Which platform reported the action (e.g., `"claude-code"`). |
@@ -184,6 +217,7 @@ Agent-reported records of concrete actions taken because of an entry. Permanent 
 
 | Index | Columns | Type | Purpose |
 |-------|---------|------|---------|
+| `idx_actions_owner` | `owner_id` | B-tree | Filter by owner |
 | `idx_actions_entry` | `entry_id` | B-tree | Look up actions for a specific entry |
 | `idx_actions_timestamp` | `timestamp` | B-tree | Time-range queries |
 | `idx_actions_tags_gin` | `tags` | GIN | Fast tag containment queries |
@@ -195,6 +229,7 @@ Stores vector embeddings for semantic search. One embedding per entry per model.
 | Column | Type | Nullable | Default | Description |
 |--------|------|----------|---------|-------------|
 | `id` | `SERIAL` | NO | auto | Row ID |
+| `owner_id` | `TEXT` | NO | — | Owner identifier. Denormalized for direct query scoping and RLS. |
 | `entry_id` | `TEXT` | NO | — | FK → `entries.id` (`ON DELETE CASCADE`) |
 | `model` | `TEXT` | NO | — | Embedding model name (e.g., `nomic-embed-text`) |
 | `dimensions` | `INTEGER` | NO | — | Vector dimension count (e.g., 768) |
@@ -208,6 +243,7 @@ Stores vector embeddings for semantic search. One embedding per entry per model.
 
 | Index | Columns | Type | Purpose |
 |-------|---------|------|---------|
+| `idx_embeddings_owner` | `owner_id` | B-tree | Filter by owner |
 | `idx_embeddings_entry` | `entry_id` | B-tree | Look up embeddings for a specific entry |
 | `idx_embeddings_vector_hnsw` | `embedding` | HNSW (`vector_cosine_ops`) | Fast approximate nearest neighbor search |
 
@@ -265,4 +301,4 @@ The PostgreSQL backend is designed for a clean migration path to AWS RDS:
 
 ---
 
-*[mcp-awareness](https://github.com/cmeans/mcp-awareness) is open source under the [Apache 2.0 License](../LICENSE). Copyright (c) 2026 Chris Means.*
+*Part of the [Awareness](https://github.com/cmeans/mcp-awareness) ecosystem. Copyright (c) 2026 Chris Means.*
