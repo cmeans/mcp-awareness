@@ -11,8 +11,6 @@ dependencies = [
     "psycopg_pool>=3.2",
     "alembic>=1.13",
     "sqlalchemy>=2.0",
-    "argon2-cffi>=23.1",
-    "phonenumbers>=8.13",
 ]
 
 [project.scripts]

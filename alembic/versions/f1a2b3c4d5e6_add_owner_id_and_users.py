@@ -43,6 +43,8 @@ except Exception:
     _fallback_user = "system"
 
 DEFAULT_OWNER = os.environ.get("AWARENESS_DEFAULT_OWNER", _fallback_user)
+# Escape single quotes for safe SQL interpolation (e.g., O'Brien)
+_escaped = DEFAULT_OWNER.replace("'", "''")
 
 
 def upgrade() -> None:
@@ -65,35 +67,33 @@ def upgrade() -> None:
         )
     """)
 
-    # --- 2. Add owner_id to entries (nullable first, then backfill, then NOT NULL) ---
+    # --- 2. Add owner_id to entries (nullable first, then backfill, then NOT NULL + DEFAULT) ---
     op.execute("ALTER TABLE entries ADD COLUMN IF NOT EXISTS owner_id TEXT")
-    op.execute(f"UPDATE entries SET owner_id = '{DEFAULT_OWNER}' WHERE owner_id IS NULL")
+    op.execute(f"UPDATE entries SET owner_id = '{_escaped}' WHERE owner_id IS NULL")
     op.execute("ALTER TABLE entries ALTER COLUMN owner_id SET NOT NULL")
+    op.execute(f"ALTER TABLE entries ALTER COLUMN owner_id SET DEFAULT '{_escaped}'")
 
     # --- 3. Add owner_id to reads ---
     op.execute("ALTER TABLE reads ADD COLUMN IF NOT EXISTS owner_id TEXT")
-    op.execute(f"""
-        UPDATE reads SET owner_id = '{DEFAULT_OWNER}' WHERE owner_id IS NULL
-    """)
+    op.execute(f"UPDATE reads SET owner_id = '{_escaped}' WHERE owner_id IS NULL")
     op.execute("ALTER TABLE reads ALTER COLUMN owner_id SET NOT NULL")
+    op.execute(f"ALTER TABLE reads ALTER COLUMN owner_id SET DEFAULT '{_escaped}'")
 
     # --- 4. Add owner_id to actions ---
     op.execute("ALTER TABLE actions ADD COLUMN IF NOT EXISTS owner_id TEXT")
-    op.execute(f"""
-        UPDATE actions SET owner_id = '{DEFAULT_OWNER}' WHERE owner_id IS NULL
-    """)
+    op.execute(f"UPDATE actions SET owner_id = '{_escaped}' WHERE owner_id IS NULL")
     op.execute("ALTER TABLE actions ALTER COLUMN owner_id SET NOT NULL")
+    op.execute(f"ALTER TABLE actions ALTER COLUMN owner_id SET DEFAULT '{_escaped}'")
 
     # --- 5. Add owner_id to embeddings ---
     op.execute("ALTER TABLE embeddings ADD COLUMN IF NOT EXISTS owner_id TEXT")
-    op.execute(f"""
-        UPDATE embeddings SET owner_id = '{DEFAULT_OWNER}' WHERE owner_id IS NULL
-    """)
+    op.execute(f"UPDATE embeddings SET owner_id = '{_escaped}' WHERE owner_id IS NULL")
     op.execute("ALTER TABLE embeddings ALTER COLUMN owner_id SET NOT NULL")
+    op.execute(f"ALTER TABLE embeddings ALTER COLUMN owner_id SET DEFAULT '{_escaped}'")
 
     # --- 6. Insert default user ---
     op.execute(f"""
-        INSERT INTO users (id) VALUES ('{DEFAULT_OWNER}')
+        INSERT INTO users (id) VALUES ('{_escaped}')
         ON CONFLICT (id) DO NOTHING
     """)
 
