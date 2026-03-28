@@ -28,6 +28,8 @@ from mcp_awareness.collator import (
 )
 from mcp_awareness.schema import Entry, EntryType, make_id, now_utc
 
+TEST_OWNER = "test-owner"
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -375,23 +377,24 @@ class TestGenerateBriefing:
     # store fixture comes from conftest.py (testcontainers Postgres)
 
     def test_empty_store(self, store):
-        briefing = generate_briefing(store)
+        briefing = generate_briefing(store, TEST_OWNER)
         assert briefing["attention_needed"] is False
         assert briefing["active_alerts"] == 0
         assert briefing["sources"] == {}
 
     def test_all_clear(self, store):
-        store.upsert_status("nas", ["infra"], {"metrics": {"cpu": 50}, "ttl_sec": 3600})
-        store.upsert_status("ci", ["cicd"], {"metrics": {}, "ttl_sec": 3600})
-        briefing = generate_briefing(store)
+        store.upsert_status(TEST_OWNER, "nas", ["infra"], {"metrics": {"cpu": 50}, "ttl_sec": 3600})
+        store.upsert_status(TEST_OWNER, "ci", ["cicd"], {"metrics": {}, "ttl_sec": 3600})
+        briefing = generate_briefing(store, TEST_OWNER)
         assert briefing["attention_needed"] is False
         assert len(briefing["sources"]) == 2
         assert all(s["status"] == "ok" for s in briefing["sources"].values())
         assert "All clear" in briefing["summary"]
 
     def test_active_alert_triggers_attention(self, store):
-        store.upsert_status("nas", ["infra"], {"metrics": {}, "ttl_sec": 3600})
+        store.upsert_status(TEST_OWNER, "nas", ["infra"], {"metrics": {}, "ttl_sec": 3600})
         store.upsert_alert(
+            TEST_OWNER,
             "nas",
             ["infra"],
             "cpu-1",
@@ -403,7 +406,7 @@ class TestGenerateBriefing:
                 "resolved": False,
             },
         )
-        briefing = generate_briefing(store)
+        briefing = generate_briefing(store, TEST_OWNER)
         assert briefing["attention_needed"] is True
         assert briefing["active_alerts"] == 1
         assert briefing["sources"]["nas"]["status"] == "warning"
@@ -411,8 +414,9 @@ class TestGenerateBriefing:
         assert "suggested_mention" in briefing
 
     def test_critical_alert_status(self, store):
-        store.upsert_status("nas", ["infra"], {"metrics": {}, "ttl_sec": 3600})
+        store.upsert_status(TEST_OWNER, "nas", ["infra"], {"metrics": {}, "ttl_sec": 3600})
         store.upsert_alert(
+            TEST_OWNER,
             "nas",
             ["infra"],
             "cpu-1",
@@ -424,12 +428,13 @@ class TestGenerateBriefing:
                 "resolved": False,
             },
         )
-        briefing = generate_briefing(store)
+        briefing = generate_briefing(store, TEST_OWNER)
         assert briefing["sources"]["nas"]["status"] == "critical"
 
     def test_suppressed_alert_filtered(self, store):
-        store.upsert_status("nas", ["infra"], {"metrics": {}, "ttl_sec": 3600})
+        store.upsert_status(TEST_OWNER, "nas", ["infra"], {"metrics": {}, "ttl_sec": 3600})
         store.upsert_alert(
+            TEST_OWNER,
             "nas",
             ["infra"],
             "cpu-1",
@@ -445,6 +450,7 @@ class TestGenerateBriefing:
         now = datetime.now(timezone.utc)
         expires = now + timedelta(hours=1)
         store.add(
+            TEST_OWNER,
             Entry(
                 id=make_id(),
                 type=EntryType.SUPPRESSION,
@@ -458,16 +464,17 @@ class TestGenerateBriefing:
                     "suppress_level": "warning",
                     "escalation_override": True,
                 },
-            )
+            ),
         )
-        briefing = generate_briefing(store)
+        briefing = generate_briefing(store, TEST_OWNER)
         assert briefing["attention_needed"] is False
         assert briefing["active_alerts"] == 0
         assert briefing["sources"]["nas"]["status"] == "ok"
 
     def test_escalated_alert_breaks_through_suppression(self, store):
-        store.upsert_status("nas", ["infra"], {"metrics": {}, "ttl_sec": 3600})
+        store.upsert_status(TEST_OWNER, "nas", ["infra"], {"metrics": {}, "ttl_sec": 3600})
         store.upsert_alert(
+            TEST_OWNER,
             "nas",
             ["infra"],
             "cpu-1",
@@ -483,6 +490,7 @@ class TestGenerateBriefing:
         now = datetime.now(timezone.utc)
         expires = now + timedelta(hours=1)
         store.add(
+            TEST_OWNER,
             Entry(
                 id=make_id(),
                 type=EntryType.SUPPRESSION,
@@ -496,15 +504,16 @@ class TestGenerateBriefing:
                     "suppress_level": "warning",
                     "escalation_override": True,
                 },
-            )
+            ),
         )
-        briefing = generate_briefing(store)
+        briefing = generate_briefing(store, TEST_OWNER)
         assert briefing["attention_needed"] is True
         assert briefing["active_alerts"] == 1
 
     def test_pattern_filters_alert(self, store):
-        store.upsert_status("nas", ["infra"], {"metrics": {}, "ttl_sec": 3600})
+        store.upsert_status(TEST_OWNER, "nas", ["infra"], {"metrics": {}, "ttl_sec": 3600})
         store.upsert_alert(
+            TEST_OWNER,
             "nas",
             ["infra"],
             "qbt-stopped",
@@ -518,6 +527,7 @@ class TestGenerateBriefing:
         )
         now = now_utc()
         store.add(
+            TEST_OWNER,
             Entry(
                 id=make_id(),
                 type=EntryType.PATTERN,
@@ -532,29 +542,30 @@ class TestGenerateBriefing:
                     "effect": "suppress qbt-stopped",
                     "learned_from": "test",
                 },
-            )
+            ),
         )
-        briefing = generate_briefing(store)
+        briefing = generate_briefing(store, TEST_OWNER)
         assert briefing["attention_needed"] is False
         assert briefing["active_alerts"] == 0
 
     def test_stale_source_detection(self, store):
         old = datetime.now(timezone.utc) - timedelta(seconds=300)
-        store.upsert_status("nas", ["infra"], {"metrics": {}, "ttl_sec": 120})
+        store.upsert_status(TEST_OWNER, "nas", ["infra"], {"metrics": {}, "ttl_sec": 120})
         with store._pool.connection() as conn, conn.cursor() as cur:
             cur.execute(
                 "UPDATE entries SET updated = %s, created = %s"
                 " WHERE type = 'status' AND source = 'nas'",
                 (old, old),
             )
-        briefing = generate_briefing(store)
+        briefing = generate_briefing(store, TEST_OWNER)
         assert briefing["attention_needed"] is True
         assert briefing["sources"]["nas"]["status"] == "stale"
         assert "not reported" in briefing["sources"]["nas"]["headline"]
 
     def test_resolved_alert_not_counted(self, store):
-        store.upsert_status("nas", ["infra"], {"metrics": {}, "ttl_sec": 3600})
+        store.upsert_status(TEST_OWNER, "nas", ["infra"], {"metrics": {}, "ttl_sec": 3600})
         store.upsert_alert(
+            TEST_OWNER,
             "nas",
             ["infra"],
             "cpu-1",
@@ -566,14 +577,15 @@ class TestGenerateBriefing:
                 "resolved": True,
             },
         )
-        briefing = generate_briefing(store)
+        briefing = generate_briefing(store, TEST_OWNER)
         assert briefing["attention_needed"] is False
         assert briefing["active_alerts"] == 0
 
     def test_multiple_sources(self, store):
-        store.upsert_status("nas", ["infra"], {"metrics": {}, "ttl_sec": 3600})
-        store.upsert_status("ci", ["cicd"], {"metrics": {}, "ttl_sec": 3600})
+        store.upsert_status(TEST_OWNER, "nas", ["infra"], {"metrics": {}, "ttl_sec": 3600})
+        store.upsert_status(TEST_OWNER, "ci", ["cicd"], {"metrics": {}, "ttl_sec": 3600})
         store.upsert_alert(
+            TEST_OWNER,
             "nas",
             ["infra"],
             "a1",
@@ -586,6 +598,7 @@ class TestGenerateBriefing:
             },
         )
         store.upsert_alert(
+            TEST_OWNER,
             "ci",
             ["cicd"],
             "a2",
@@ -597,7 +610,7 @@ class TestGenerateBriefing:
                 "resolved": False,
             },
         )
-        briefing = generate_briefing(store)
+        briefing = generate_briefing(store, TEST_OWNER)
         assert briefing["active_alerts"] == 2
         assert briefing["sources"]["nas"]["status"] == "warning"
         assert briefing["sources"]["ci"]["status"] == "critical"
@@ -608,6 +621,7 @@ class TestGenerateBriefing:
         expires = now + timedelta(hours=1)
         for i in range(3):
             store.add(
+                TEST_OWNER,
                 Entry(
                     id=make_id(),
                     type=EntryType.SUPPRESSION,
@@ -617,15 +631,16 @@ class TestGenerateBriefing:
                     updated=now,
                     expires=expires,
                     data={"metric": f"m{i}", "suppress_level": "warning"},
-                )
+                ),
             )
-        store.upsert_status("nas", ["infra"], {"metrics": {}, "ttl_sec": 3600})
-        briefing = generate_briefing(store)
+        store.upsert_status(TEST_OWNER, "nas", ["infra"], {"metrics": {}, "ttl_sec": 3600})
+        briefing = generate_briefing(store, TEST_OWNER)
         assert briefing["active_suppressions"] == 3
 
     def test_drill_down_reference(self, store):
-        store.upsert_status("nas", ["infra"], {"metrics": {}, "ttl_sec": 3600})
+        store.upsert_status(TEST_OWNER, "nas", ["infra"], {"metrics": {}, "ttl_sec": 3600})
         store.upsert_alert(
+            TEST_OWNER,
             "nas",
             ["infra"],
             "a1",
@@ -637,7 +652,7 @@ class TestGenerateBriefing:
                 "resolved": False,
             },
         )
-        briefing = generate_briefing(store)
+        briefing = generate_briefing(store, TEST_OWNER)
         assert briefing["sources"]["nas"]["drill_down"] == "awareness://alerts/nas"
 
     # ------------------------------------------------------------------
@@ -646,7 +661,7 @@ class TestGenerateBriefing:
 
     def test_evaluation_present_empty_store(self, store):
         """Evaluation trace is always present, even with no data."""
-        briefing = generate_briefing(store)
+        briefing = generate_briefing(store, TEST_OWNER)
         ev = briefing["evaluation"]
         assert ev["alerts_checked"] == 0
         assert ev["suppressed"] == 0
@@ -656,20 +671,22 @@ class TestGenerateBriefing:
 
     def test_evaluation_counts_alerts(self, store):
         """Evaluation counts all alerts checked and surfaced."""
-        store.upsert_status("nas", ["infra"], {"metrics": {}, "ttl_sec": 3600})
+        store.upsert_status(TEST_OWNER, "nas", ["infra"], {"metrics": {}, "ttl_sec": 3600})
         store.upsert_alert(
+            TEST_OWNER,
             "nas",
             ["infra"],
             "a1",
             {"alert_id": "a1", "level": "warning", "message": "test", "resolved": False},
         )
         store.upsert_alert(
+            TEST_OWNER,
             "nas",
             ["infra"],
             "a2",
             {"alert_id": "a2", "level": "critical", "message": "test2", "resolved": False},
         )
-        briefing = generate_briefing(store)
+        briefing = generate_briefing(store, TEST_OWNER)
         ev = briefing["evaluation"]
         assert ev["alerts_checked"] == 2
         assert ev["surfaced"] == 2
@@ -682,8 +699,9 @@ class TestGenerateBriefing:
 
         from mcp_awareness.schema import Entry, EntryType, make_id, now_utc
 
-        store.upsert_status("nas", ["infra"], {"metrics": {}, "ttl_sec": 3600})
+        store.upsert_status(TEST_OWNER, "nas", ["infra"], {"metrics": {}, "ttl_sec": 3600})
         store.upsert_alert(
+            TEST_OWNER,
             "nas",
             ["infra"],
             "a1",
@@ -692,6 +710,7 @@ class TestGenerateBriefing:
         # Add a suppression that matches
         now = now_utc()
         store.add(
+            TEST_OWNER,
             Entry(
                 id=make_id(),
                 type=EntryType.SUPPRESSION,
@@ -701,9 +720,9 @@ class TestGenerateBriefing:
                 updated=now,
                 expires=now + timedelta(hours=1),
                 data={"suppress_level": "warning", "escalation_override": True, "reason": "test"},
-            )
+            ),
         )
-        briefing = generate_briefing(store)
+        briefing = generate_briefing(store, TEST_OWNER)
         ev = briefing["evaluation"]
         assert ev["alerts_checked"] == 1
         assert ev["suppressed"] == 1
@@ -713,8 +732,9 @@ class TestGenerateBriefing:
         """Evaluation tracks alerts dismissed by pattern matching."""
         from mcp_awareness.schema import Entry, EntryType, make_id, now_utc
 
-        store.upsert_status("nas", ["infra"], {"metrics": {}, "ttl_sec": 3600})
+        store.upsert_status(TEST_OWNER, "nas", ["infra"], {"metrics": {}, "ttl_sec": 3600})
         store.upsert_alert(
+            TEST_OWNER,
             "nas",
             ["infra"],
             "cpu-spike",
@@ -730,6 +750,7 @@ class TestGenerateBriefing:
         # Add a pattern that matches this alert
         now = now_utc()
         store.add(
+            TEST_OWNER,
             Entry(
                 id=make_id(),
                 type=EntryType.PATTERN,
@@ -744,9 +765,9 @@ class TestGenerateBriefing:
                     "effect": "CPU spike during backup",
                     "learned_from": "test",
                 },
-            )
+            ),
         )
-        briefing = generate_briefing(store)
+        briefing = generate_briefing(store, TEST_OWNER)
         ev = briefing["evaluation"]
         assert ev["alerts_checked"] == 1
         assert ev["pattern_matched"] == 1
@@ -756,8 +777,9 @@ class TestGenerateBriefing:
         """Alerts from stale sources are not counted in alerts_checked."""
         from datetime import datetime, timedelta, timezone
 
-        store.upsert_status("nas", ["infra"], {"metrics": {}, "ttl_sec": 120})
+        store.upsert_status(TEST_OWNER, "nas", ["infra"], {"metrics": {}, "ttl_sec": 120})
         store.upsert_alert(
+            TEST_OWNER,
             "nas",
             ["infra"],
             "a1",
@@ -771,7 +793,7 @@ class TestGenerateBriefing:
                 " WHERE type = 'status' AND source = 'nas'",
                 (old, old),
             )
-        briefing = generate_briefing(store)
+        briefing = generate_briefing(store, TEST_OWNER)
         ev = briefing["evaluation"]
         assert ev["stale_sources"] == 1
         # Alerts from stale sources are skipped, not evaluated
@@ -782,7 +804,7 @@ class TestGenerateBriefing:
         """Evaluation tracks stale sources."""
         from datetime import datetime, timedelta, timezone
 
-        store.upsert_status("nas", ["infra"], {"metrics": {}, "ttl_sec": 120})
+        store.upsert_status(TEST_OWNER, "nas", ["infra"], {"metrics": {}, "ttl_sec": 120})
         # Backdate to make it stale
         old = datetime.now(timezone.utc) - timedelta(seconds=300)
         with store._pool.connection() as conn, conn.cursor() as cur:
@@ -791,7 +813,7 @@ class TestGenerateBriefing:
                 " WHERE type = 'status' AND source = 'nas'",
                 (old, old),
             )
-        briefing = generate_briefing(store)
+        briefing = generate_briefing(store, TEST_OWNER)
         ev = briefing["evaluation"]
         assert ev["stale_sources"] == 1
 
@@ -805,6 +827,7 @@ class TestGenerateBriefing:
 
         past = now_utc() - timedelta(hours=1)
         store.add(
+            TEST_OWNER,
             Entry(
                 id=make_id(),
                 type=EntryType.INTENTION,
@@ -818,9 +841,9 @@ class TestGenerateBriefing:
                     "state": "pending",
                     "deliver_at": past.isoformat(),
                 },
-            )
+            ),
         )
-        briefing = generate_briefing(store)
+        briefing = generate_briefing(store, TEST_OWNER)
         assert briefing["attention_needed"] is True
         assert len(briefing.get("fired_intentions", [])) == 1
         assert briefing["fired_intentions"][0]["goal"] == "Pick up milk"
@@ -831,7 +854,7 @@ class TestGenerateBriefing:
 
     def test_briefing_no_intentions_when_none_pending(self, store):
         """Briefing doesn't include intentions when none exist."""
-        briefing = generate_briefing(store)
+        briefing = generate_briefing(store, TEST_OWNER)
         assert briefing.get("fired_intentions") is None
         assert briefing["pending_intentions"] == 0
         assert briefing["evaluation"]["intentions_pending"] == 0
@@ -843,6 +866,7 @@ class TestGenerateBriefing:
 
         future = now_utc() + timedelta(hours=1)
         store.add(
+            TEST_OWNER,
             Entry(
                 id=make_id(),
                 type=EntryType.INTENTION,
@@ -856,9 +880,9 @@ class TestGenerateBriefing:
                     "state": "pending",
                     "deliver_at": future.isoformat(),
                 },
-            )
+            ),
         )
-        briefing = generate_briefing(store)
+        briefing = generate_briefing(store, TEST_OWNER)
         assert briefing.get("fired_intentions") is None
         assert briefing["pending_intentions"] == 1
         assert briefing["evaluation"]["intentions_fired"] == 0

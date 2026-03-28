@@ -45,7 +45,7 @@ async def briefing_resource() -> str:
     patterns and suppressions. If attention_needed is false, nothing to mention.
     If true, use suggested_mention or compose from source headlines.
     Drill into other resources only if briefing indicates issues or user asks."""
-    return json.dumps(generate_briefing(_srv.store), indent=2)
+    return json.dumps(generate_briefing(_srv.store, _srv._owner_id()), indent=2)
 
 
 @_srv.mcp.resource("awareness://alerts")
@@ -56,7 +56,7 @@ async def alerts_resource() -> str:
     If non-empty, briefly inform user before responding to their question.
     One sentence for warnings, short paragraph for critical.
     Group by source if multiple systems have issues."""
-    alerts = _srv.store.get_active_alerts()
+    alerts = _srv.store.get_active_alerts(_srv._owner_id())
     return json.dumps([a.to_dict() for a in alerts], indent=2)
 
 
@@ -65,7 +65,7 @@ async def alerts_resource() -> str:
 async def source_alerts_resource(source: str) -> str:
     """Active alerts from a specific source. Drill-down from briefing.
     Read this when the briefing references a drill_down for this source."""
-    alerts = _srv.store.get_active_alerts(source)
+    alerts = _srv.store.get_active_alerts(_srv._owner_id(), source)
     return json.dumps([a.to_dict() for a in alerts], indent=2)
 
 
@@ -75,7 +75,7 @@ async def source_status_resource(source: str) -> str:
     """Full status from a specific source including metrics and inventory.
     Drill-down resource — read when briefing indicates issues with this source
     or when user asks about a specific system."""
-    entry = _srv.store.get_latest_status(source)
+    entry = _srv.store.get_latest_status(_srv._owner_id(), source)
     if entry:
         return json.dumps(entry.to_dict(), indent=2)
     return json.dumps({"error": f"No status found for source: {source}"})
@@ -88,7 +88,7 @@ async def knowledge_resource() -> str:
     Knowledge belongs to the system, not any specific agent.
     Drill-down resource — read when you need context about a system's
     normal behavior or operational patterns."""
-    entries = _srv.store.get_knowledge()
+    entries = _srv.store.get_knowledge(_srv._owner_id())
     return json.dumps([e.to_dict() for e in entries], indent=2)
 
 
@@ -98,5 +98,5 @@ async def suppressions_resource() -> str:
     """Active alert suppressions with expiry times and escalation settings.
     Drill-down resource — the briefing already applies suppressions.
     Read this to show the user what's currently being suppressed."""
-    entries = _srv.store.get_active_suppressions()
+    entries = _srv.store.get_active_suppressions(_srv._owner_id())
     return json.dumps([e.to_dict() for e in entries], indent=2)

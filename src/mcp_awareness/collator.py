@@ -253,7 +253,7 @@ def compose_mention(briefing: dict[str, Any]) -> str:
     return " ".join(parts)
 
 
-def generate_briefing(store: Store) -> dict[str, Any]:
+def generate_briefing(store: Store, owner_id: str) -> dict[str, Any]:
     """Generate a compact briefing from the raw store.
 
     This is the core collation logic. It:
@@ -280,10 +280,10 @@ def generate_briefing(store: Store) -> dict[str, Any]:
     eval_pattern_matched = 0
     eval_stale_sources = 0
 
-    for source in store.get_sources():
-        status = store.get_latest_status(source)
-        alerts = store.get_active_alerts(source)
-        suppressions = store.get_active_suppressions(source)
+    for source in store.get_sources(owner_id):
+        status = store.get_latest_status(owner_id, source)
+        alerts = store.get_active_alerts(owner_id, source)
+        suppressions = store.get_active_suppressions(owner_id, source)
 
         # Check for stale sources (TTL expired) — alerts from stale sources
         # are not evaluated (suppression/pattern filtering is skipped)
@@ -308,7 +308,7 @@ def generate_briefing(store: Store) -> dict[str, Any]:
         eval_suppressed += pre_suppression - len(active_alerts)
 
         # Apply learned patterns — filter out expected anomalies
-        patterns = store.get_patterns(source)
+        patterns = store.get_patterns(owner_id, source)
         pre_pattern = len(active_alerts)
         active_alerts = [a for a in active_alerts if not matches_pattern(a, patterns)]
         eval_pattern_matched += pre_pattern - len(active_alerts)
@@ -338,10 +338,10 @@ def generate_briefing(store: Store) -> dict[str, Any]:
 
         briefing["sources"][source] = source_entry
 
-    briefing["active_suppressions"] = store.count_active_suppressions()
+    briefing["active_suppressions"] = store.count_active_suppressions(owner_id)
 
     # Evaluate time-based intentions — fire pending intentions whose deliver_at has passed
-    fired_intentions = store.get_fired_intentions()
+    fired_intentions = store.get_fired_intentions(owner_id)
     if fired_intentions:
         briefing["fired_intentions"] = [
             {
@@ -355,7 +355,7 @@ def generate_briefing(store: Store) -> dict[str, Any]:
         briefing["attention_needed"] = True
 
     # Count pending intentions, excluding those already fired (avoid double-counting)
-    all_pending = store.get_intentions(state="pending")
+    all_pending = store.get_intentions(owner_id, state="pending")
     fired_ids = {i.id for i in fired_intentions}
     pending_not_fired = [i for i in all_pending if i.id not in fired_ids]
     briefing["pending_intentions"] = len(pending_not_fired)

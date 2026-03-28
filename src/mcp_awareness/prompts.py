@@ -59,7 +59,7 @@ def _extract_entry_number(desc: str) -> int:
 async def agent_instructions() -> str:
     """Compose agent instructions from awareness-prompt entries in the store."""
     _srv._sync_custom_prompts()
-    entries = _srv.store.get_knowledge(tags=["memory-prompt"])
+    entries = _srv.store.get_knowledge(_srv._owner_id(), tags=["memory-prompt"])
     # Sort by entry number (Entry 1, Entry 2, etc.)
     entries.sort(key=lambda e: _extract_entry_number(e.data.get("description", "")))
 
@@ -94,8 +94,8 @@ async def agent_instructions() -> str:
 @_timed
 async def project_context(repo_name: str) -> str:
     """Compose a project briefing from all knowledge tagged with repo_name."""
-    entries = _srv.store.get_knowledge(tags=[repo_name])
-    alerts = _srv.store.get_active_alerts()
+    entries = _srv.store.get_knowledge(_srv._owner_id(), tags=[repo_name])
+    alerts = _srv.store.get_active_alerts(_srv._owner_id())
     alerts = [a for a in alerts if repo_name in a.tags]
 
     parts: list[str] = [f"# Project Context: {repo_name}"]
@@ -140,9 +140,10 @@ async def project_context(repo_name: str) -> str:
 @_timed
 async def system_status(source: str) -> str:
     """Compose a system status narrative from status, alerts, and patterns."""
-    status = _srv.store.get_latest_status(source)
-    alerts = _srv.store.get_active_alerts(source=source)
-    patterns = _srv.store.get_patterns(source=source)
+    oid = _srv._owner_id()
+    status = _srv.store.get_latest_status(oid, source)
+    alerts = _srv.store.get_active_alerts(oid, source=source)
+    patterns = _srv.store.get_patterns(oid, source=source)
 
     parts: list[str] = [f"# System Status: {source}"]
 
@@ -190,8 +191,9 @@ async def system_status(source: str) -> str:
 @_timed
 async def write_guide() -> str:
     """Compose a write guide from current store stats and tags."""
-    stats = _srv.store.get_stats()
-    tags = _srv.store.get_tags()
+    oid = _srv._owner_id()
+    stats = _srv.store.get_stats(oid)
+    tags = _srv.store.get_tags(oid)
 
     parts: list[str] = ["# Awareness Write Guide"]
 
@@ -239,8 +241,9 @@ async def write_guide() -> str:
 async def catchup(hours: int = 24) -> str:
     """Compose a catchup summary of recently updated entries."""
     since = now_utc() - timedelta(hours=hours)
-    recent = _srv.store.get_knowledge(include_history="true", since=since)
-    recent_alerts = _srv.store.get_active_alerts(since=since)
+    oid = _srv._owner_id()
+    recent = _srv.store.get_knowledge(oid, include_history="true", since=since)
+    recent_alerts = _srv.store.get_active_alerts(oid, since=since)
 
     parts: list[str] = [f"# Catchup — last {hours} hours"]
 

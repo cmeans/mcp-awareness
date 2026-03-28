@@ -63,7 +63,7 @@ async def get_briefing() -> str:
     Pre-filtered through patterns and suppressions — no further processing needed.
     This tool always returns structured JSON. If you receive an unstructured
     error, the failure is in the transport or platform layer, not in awareness."""
-    return json.dumps(generate_briefing(_srv.store), indent=2)
+    return json.dumps(generate_briefing(_srv.store, _srv._owner_id()), indent=2)
 
 
 @_srv.mcp.tool()
@@ -90,7 +90,9 @@ async def get_alerts(
     if since is not None and not since:
         return json.dumps({"error": "since cannot be empty; omit or provide an ISO 8601 timestamp"})
     since_dt = ensure_dt(since) if since else None
-    alerts = _srv.store.get_active_alerts(source, since=since_dt, limit=limit, offset=offset)
+    alerts = _srv.store.get_active_alerts(
+        _srv._owner_id(), source, since=since_dt, limit=limit, offset=offset
+    )
     _srv._log_reads(alerts, "get_alerts")
     if mode == "list":
         return json.dumps([a.to_list_dict() for a in alerts], indent=2)
@@ -105,7 +107,7 @@ async def get_status(source: str) -> str:
     about a specific system. This tool always returns structured JSON.
     If you receive an unstructured error, the failure is in the transport
     or platform layer, not in awareness."""
-    entry = _srv.store.get_latest_status(source)
+    entry = _srv.store.get_latest_status(_srv._owner_id(), source)
     if entry:
         return json.dumps(entry.to_dict(), indent=2)
     return json.dumps({"error": f"No status found for source: {source}"})
@@ -172,6 +174,7 @@ async def get_knowledge(
     if et_err:
         return json.dumps({"error": et_err})
     entries = _srv.store.get_knowledge(
+        _srv._owner_id(),
         tags=tags,
         include_history=include_history,
         since=since_dt,
@@ -197,6 +200,7 @@ async def get_knowledge(
                 if hint_vec:
                     hint_et = et
                     scored = _srv.store.semantic_search(
+                        _srv._owner_id(),
                         embedding=hint_vec[0],
                         model=provider.model_name,
                         source=source,
@@ -214,7 +218,7 @@ async def get_knowledge(
                 logger.debug("Hint re-ranking failed", exc_info=True)
 
     if mode == "list":
-        read_counts = _srv.store.get_read_counts([e.id for e in entries])
+        read_counts = _srv.store.get_read_counts(_srv._owner_id(), [e.id for e in entries])
         result = []
         for e in entries:
             d = e.to_list_dict()
@@ -240,7 +244,7 @@ async def get_suppressions() -> str:
     """Get active alert suppressions with expiry times and escalation settings.
     The briefing already applies suppressions — call this to show the user
     what's currently being suppressed."""
-    entries = _srv.store.get_active_suppressions()
+    entries = _srv.store.get_active_suppressions(_srv._owner_id())
     return json.dumps([e.to_dict() for e in entries], indent=2)
 
 
@@ -264,7 +268,7 @@ async def report_status(
     data: dict[str, Any] = {"metrics": metrics, "ttl_sec": ttl_sec}
     if inventory:
         data["inventory"] = inventory
-    entry = _srv.store.upsert_status(source, tags, data)
+    entry = _srv.store.upsert_status(_srv._owner_id(), source, tags, data)
     _srv._generate_embedding(entry)
     return json.dumps({"status": "ok", "id": entry.id, "source": source})
 
@@ -308,7 +312,7 @@ async def report_alert(
         data["details"] = details
     if diagnostics:
         data["diagnostics"] = diagnostics
-    entry = _srv.store.upsert_alert(source, tags, alert_id, data)
+    entry = _srv.store.upsert_alert(_srv._owner_id(), source, tags, alert_id, data)
     _srv._generate_embedding(entry)
     action = "resolved" if resolved else "reported"
     return json.dumps({"status": "ok", "id": entry.id, "action": action, "alert_id": alert_id})
@@ -350,7 +354,7 @@ async def learn_pattern(
             "learned_from": learned_from,
         },
     )
-    _srv.store.add(entry)
+    _srv.store.add(_srv._owner_id(), entry)
     _srv._generate_embedding(entry)
     return json.dumps({"status": "ok", "id": entry.id, "description": description})
 
@@ -404,13 +408,15 @@ async def remember(
         logical_key=logical_key,
     )
     if logical_key:
-        result, created = _srv.store.upsert_by_logical_key(source, logical_key, entry)
+        result, created = _srv.store.upsert_by_logical_key(
+            _srv._owner_id(), source, logical_key, entry
+        )
         _srv._generate_embedding(result)
         action = "created" if created else "updated"
         return json.dumps(
             {"status": "ok", "id": result.id, "action": action, "description": description}
         )
-    _srv.store.add(entry)
+    _srv.store.add(_srv._owner_id(), entry)
     _srv._generate_embedding(entry)
     return json.dumps({"status": "ok", "id": entry.id, "description": description})
 
@@ -448,7 +454,7 @@ async def update_entry(
         updates["content_type"] = content_type
     if not updates:
         return json.dumps({"status": "error", "message": "No fields to update"})
-    result = _srv.store.update_entry(entry_id, updates)
+    result = _srv.store.update_entry(_srv._owner_id(), entry_id, updates)
     if result is None:
         return json.dumps(
             {
@@ -467,7 +473,7 @@ async def get_stats() -> str:
     Call before get_knowledge to decide whether to pull everything or filter.
     This tool always returns structured JSON. If you receive an unstructured
     error, the failure is in the transport or platform layer, not in awareness."""
-    return json.dumps(_srv.store.get_stats(), indent=2)
+    return json.dumps(_srv.store.get_stats(_srv._owner_id()), indent=2)
 
 
 @_srv.mcp.tool()
@@ -478,7 +484,7 @@ async def get_tags() -> str:
     tag drift (e.g., 'infrastructure' vs 'infra'). This tool always returns
     structured JSON. If you receive an unstructured error, the failure is in
     the transport or platform layer, not in awareness."""
-    return json.dumps(_srv.store.get_tags(), indent=2)
+    return json.dumps(_srv.store.get_tags(_srv._owner_id()), indent=2)
 
 
 @_srv.mcp.tool()
@@ -519,7 +525,7 @@ async def suppress_alert(
             "reason": reason,
         },
     )
-    _srv.store.add(entry)
+    _srv.store.add(_srv._owner_id(), entry)
     return json.dumps({"status": "ok", "id": entry.id, "expires": to_iso(expires)})
 
 
@@ -552,7 +558,7 @@ async def add_context(
         expires=expires,
         data={"description": description},
     )
-    _srv.store.add(entry)
+    _srv.store.add(_srv._owner_id(), entry)
     _srv._generate_embedding(entry)
     return json.dumps({"status": "ok", "id": entry.id, "expires": to_iso(expires)})
 
@@ -569,6 +575,7 @@ async def set_preference(
     or check_frequency='first_turn_only'. These are portable —
     any agent on any platform reads the same preferences."""
     _srv.store.upsert_preference(
+        _srv._owner_id(),
         key=key,
         scope=scope,
         tags=[],
@@ -598,7 +605,7 @@ async def delete_entry(
     Returns JSON with status and count. If you receive an unstructured
     error, the failure is in the transport or platform layer, not in awareness."""
     if entry_id:
-        trashed = _srv.store.soft_delete_by_id(entry_id)
+        trashed = _srv.store.soft_delete_by_id(_srv._owner_id(), entry_id)
         return json.dumps(
             {
                 "status": "ok",
@@ -610,7 +617,7 @@ async def delete_entry(
     if tags:
         if not confirm:
             # Use AND logic to match soft_delete_by_tags behavior
-            all_entries = _srv.store.get_entries(tags=tags)
+            all_entries = _srv.store.get_entries(_srv._owner_id(), tags=tags)
             tag_set = set(tags)
             matching = [e for e in all_entries if tag_set.issubset(set(e.tags))]
             return json.dumps(
@@ -621,7 +628,7 @@ async def delete_entry(
                     "message": "Set confirm=True to move to trash. Show the user this count first.",
                 }
             )
-        count = _srv.store.soft_delete_by_tags(tags)
+        count = _srv.store.soft_delete_by_tags(_srv._owner_id(), tags)
         return json.dumps(
             {
                 "status": "ok",
@@ -636,7 +643,7 @@ async def delete_entry(
     if et_err:
         return json.dumps({"status": "error", "message": et_err})
     if not confirm:
-        entries = _srv.store.get_entries(entry_type=et, source=source)
+        entries = _srv.store.get_entries(_srv._owner_id(), entry_type=et, source=source)
         return json.dumps(
             {
                 "status": "dry_run",
@@ -646,7 +653,7 @@ async def delete_entry(
                 "message": "Set confirm=True to move to trash. Show the user this count first.",
             }
         )
-    count = _srv.store.soft_delete_by_source(source, et)
+    count = _srv.store.soft_delete_by_source(_srv._owner_id(), source, et)
     return json.dumps(
         {
             "status": "ok",
@@ -669,7 +676,7 @@ async def restore_entry(
     - By tags: restore all trashed entries matching ALL given tags (AND logic).
     Call get_deleted first to see what's in the trash."""
     if entry_id:
-        restored = _srv.store.restore_by_id(entry_id)
+        restored = _srv.store.restore_by_id(_srv._owner_id(), entry_id)
         return json.dumps(
             {
                 "status": "ok" if restored else "not_found",
@@ -678,7 +685,7 @@ async def restore_entry(
             }
         )
     if tags:
-        count = _srv.store.restore_by_tags(tags)
+        count = _srv.store.restore_by_tags(_srv._owner_id(), tags)
         return json.dumps({"status": "ok", "restored": count, "tags": tags})
     return json.dumps({"status": "error", "message": "Provide entry_id or tags"})
 
@@ -704,7 +711,7 @@ async def get_deleted(
     if since is not None and not since:
         return json.dumps({"error": "since cannot be empty; omit or provide an ISO 8601 timestamp"})
     since_dt = ensure_dt(since) if since else None
-    entries = _srv.store.get_deleted(since=since_dt, limit=limit, offset=offset)
+    entries = _srv.store.get_deleted(_srv._owner_id(), since=since_dt, limit=limit, offset=offset)
     if mode == "list":
         return json.dumps([e.to_list_dict() for e in entries], indent=2)
     return json.dumps([e.to_dict() for e in entries], indent=2)
@@ -735,7 +742,12 @@ async def acted_on(
     This tool always returns structured JSON. If you receive an unstructured
     error, the failure is in the transport or platform layer, not in awareness."""
     result = _srv.store.log_action(
-        entry_id=entry_id, action=action, platform=platform, detail=detail, tags=tags
+        _srv._owner_id(),
+        entry_id=entry_id,
+        action=action,
+        platform=platform,
+        detail=detail,
+        tags=tags,
     )
     if result.get("status") == "error":
         return json.dumps(result)
@@ -758,7 +770,9 @@ async def get_reads(
     if limit is None:
         limit = DEFAULT_QUERY_LIMIT
     since_dt = ensure_dt(since) if since else None
-    reads = _srv.store.get_reads(entry_id=entry_id, since=since_dt, platform=platform, limit=limit)
+    reads = _srv.store.get_reads(
+        _srv._owner_id(), entry_id=entry_id, since=since_dt, platform=platform, limit=limit
+    )
     return json.dumps(reads, indent=2)
 
 
@@ -779,7 +793,12 @@ async def get_actions(
         limit = DEFAULT_QUERY_LIMIT
     since_dt = ensure_dt(since) if since else None
     actions = _srv.store.get_actions(
-        entry_id=entry_id, since=since_dt, platform=platform, tags=tags, limit=limit
+        _srv._owner_id(),
+        entry_id=entry_id,
+        since=since_dt,
+        platform=platform,
+        tags=tags,
+        limit=limit,
     )
     return json.dumps(actions, indent=2)
 
@@ -797,7 +816,7 @@ async def get_unread(since: str | None = None, limit: int | None = None) -> str:
     if limit is None:
         limit = DEFAULT_QUERY_LIMIT
     since_dt = ensure_dt(since) if since else None
-    entries = _srv.store.get_unread(since=since_dt, limit=limit)
+    entries = _srv.store.get_unread(_srv._owner_id(), since=since_dt, limit=limit)
     return json.dumps([e.to_list_dict() for e in entries], indent=2)
 
 
@@ -816,7 +835,9 @@ async def get_activity(
     if limit is None:
         limit = DEFAULT_QUERY_LIMIT
     since_dt = ensure_dt(since) if since else None
-    activity = _srv.store.get_activity(since=since_dt, platform=platform, limit=limit)
+    activity = _srv.store.get_activity(
+        _srv._owner_id(), since=since_dt, platform=platform, limit=limit
+    )
     return json.dumps(activity, indent=2)
 
 
@@ -872,7 +893,7 @@ async def remind(
             "learned_from": learned_from,
         },
     )
-    _srv.store.add(entry)
+    _srv.store.add(_srv._owner_id(), entry)
     return json.dumps({"status": "ok", "id": entry.id, "state": "pending"}, indent=2)
 
 
@@ -891,7 +912,9 @@ async def get_intentions(
     This tool always returns structured JSON."""
     if limit is None:
         limit = DEFAULT_QUERY_LIMIT
-    entries = _srv.store.get_intentions(state=state, source=source, tags=tags, limit=limit)
+    entries = _srv.store.get_intentions(
+        _srv._owner_id(), state=state, source=source, tags=tags, limit=limit
+    )
     if mode == "list":
         return json.dumps([e.to_list_dict() for e in entries], indent=2)
     return json.dumps([e.to_dict() for e in entries], indent=2)
@@ -916,7 +939,7 @@ async def update_intention(
         return json.dumps(
             {"status": "error", "message": f"Invalid state: {state}. Valid: {INTENTION_STATES}"}
         )
-    result = _srv.store.update_intention_state(entry_id, state, reason)
+    result = _srv.store.update_intention_state(_srv._owner_id(), entry_id, state, reason)
     if result is None:
         return json.dumps({"status": "error", "message": "Intention not found"})
     return json.dumps({"status": "ok", "id": entry_id, "state": state, "reason": reason}, indent=2)
@@ -969,6 +992,7 @@ async def semantic_search(
     until_dt = parse_iso(until) if until else None
 
     results = _srv.store.semantic_search(
+        _srv._owner_id(),
         embedding=vectors[0],
         model=provider.model_name,
         entry_type=et,
@@ -1018,7 +1042,8 @@ async def backfill_embeddings(
         )
 
     # Phase 1: entries without embeddings
-    missing = _srv.store.get_entries_without_embeddings(provider.model_name, limit=limit)
+    oid = _srv._owner_id()
+    missing = _srv.store.get_entries_without_embeddings(oid, provider.model_name, limit=limit)
     new_count = 0
     if missing:
         texts = [compose_embedding_text(e) for e in missing]
@@ -1031,7 +1056,7 @@ async def backfill_embeddings(
         for entry, h, vec in zip(missing, hashes, vectors, strict=False):
             try:
                 _srv.store.upsert_embedding(
-                    entry.id, provider.model_name, provider.dimensions, h, vec
+                    oid, entry.id, provider.model_name, provider.dimensions, h, vec
                 )
                 new_count += 1
             except Exception:  # pragma: no cover
@@ -1039,7 +1064,7 @@ async def backfill_embeddings(
                 continue
 
     # Phase 2: stale embeddings (text changed since embedding)
-    stale = _srv.store.get_stale_embeddings(provider.model_name, limit=limit)
+    stale = _srv.store.get_stale_embeddings(oid, provider.model_name, limit=limit)
     refreshed_count = 0
     if stale:
         texts = [compose_embedding_text(e) for e in stale]
@@ -1052,14 +1077,14 @@ async def backfill_embeddings(
         for entry, h, vec in zip(stale, hashes, vectors, strict=False):
             try:
                 _srv.store.upsert_embedding(
-                    entry.id, provider.model_name, provider.dimensions, h, vec
+                    oid, entry.id, provider.model_name, provider.dimensions, h, vec
                 )
                 refreshed_count += 1
             except Exception:  # pragma: no cover
                 logger.debug("Backfill refresh upsert failed for entry %s", entry.id, exc_info=True)
                 continue
 
-    remaining = len(_srv.store.get_entries_without_embeddings(provider.model_name, limit=1))
+    remaining = len(_srv.store.get_entries_without_embeddings(oid, provider.model_name, limit=1))
     return json.dumps(
         {
             "status": "ok",
@@ -1083,16 +1108,17 @@ async def get_related(
     and intentions. Convention: store related_ids as a list of entry IDs
     in the data field when using remember or learn_pattern.
     mode: omit for full entries, 'list' for metadata only."""
-    entry = _srv.store.get_entry_by_id(entry_id)
+    oid = _srv._owner_id()
+    entry = _srv.store.get_entry_by_id(oid, entry_id)
     if entry is None:
         return json.dumps({"status": "error", "message": f"Entry not found: {entry_id}"})
 
     # Forward: entries this entry references
     forward_ids: list[str] = [rid for rid in entry.data.get("related_ids", []) if rid != entry_id]
-    forward = _srv.store.get_entries_by_ids(forward_ids) if forward_ids else []
+    forward = _srv.store.get_entries_by_ids(oid, forward_ids) if forward_ids else []
 
     # Reverse: entries that reference this entry via JSONB containment
-    reverse = _srv.store.get_referencing_entries(entry_id)
+    reverse = _srv.store.get_referencing_entries(oid, entry_id)
 
     # Deduplicate (an entry could be in both directions)
     seen = set()

@@ -22,50 +22,57 @@ import time
 
 from mcp_awareness.schema import Entry, EntryType, make_id, now_utc
 
+TEST_OWNER = "test-owner"
+
 # store fixture comes from conftest.py (testcontainers Postgres)
 
 
 def test_empty_store(store):
-    assert store.get_sources() == []
-    assert store.get_active_alerts() == []
-    assert store.get_knowledge() == []
+    assert store.get_sources(TEST_OWNER) == []
+    assert store.get_active_alerts(TEST_OWNER) == []
+    assert store.get_knowledge(TEST_OWNER) == []
 
 
 def test_upsert_status(store):
-    entry = store.upsert_status("nas", ["infra"], {"metrics": {"cpu": 50}, "ttl_sec": 120})
+    entry = store.upsert_status(
+        TEST_OWNER, "nas", ["infra"], {"metrics": {"cpu": 50}, "ttl_sec": 120}
+    )
     assert entry.type == EntryType.STATUS
     assert entry.source == "nas"
-    assert store.get_sources() == ["nas"]
+    assert store.get_sources(TEST_OWNER) == ["nas"]
 
 
 def test_upsert_status_replaces(store):
-    store.upsert_status("nas", ["infra"], {"metrics": {"cpu": 50}, "ttl_sec": 120})
-    store.upsert_status("nas", ["infra"], {"metrics": {"cpu": 70}, "ttl_sec": 120})
-    statuses = store.get_entries(entry_type=EntryType.STATUS, source="nas")
+    store.upsert_status(TEST_OWNER, "nas", ["infra"], {"metrics": {"cpu": 50}, "ttl_sec": 120})
+    store.upsert_status(TEST_OWNER, "nas", ["infra"], {"metrics": {"cpu": 70}, "ttl_sec": 120})
+    statuses = store.get_entries(TEST_OWNER, entry_type=EntryType.STATUS, source="nas")
     assert len(statuses) == 1
     assert statuses[0].data["metrics"]["cpu"] == 70
 
 
 def test_upsert_alert_new(store):
     entry = store.upsert_alert(
+        TEST_OWNER,
         "nas",
         ["infra"],
         "cpu-warn-1",
         {"alert_id": "cpu-warn-1", "level": "warning", "message": "CPU high", "resolved": False},
     )
     assert entry.type == EntryType.ALERT
-    alerts = store.get_active_alerts()
+    alerts = store.get_active_alerts(TEST_OWNER)
     assert len(alerts) == 1
 
 
 def test_upsert_alert_updates(store):
     store.upsert_alert(
+        TEST_OWNER,
         "nas",
         ["infra"],
         "cpu-warn-1",
         {"alert_id": "cpu-warn-1", "level": "warning", "message": "CPU high", "resolved": False},
     )
     store.upsert_alert(
+        TEST_OWNER,
         "nas",
         ["infra"],
         "cpu-warn-1",
@@ -76,7 +83,7 @@ def test_upsert_alert_updates(store):
             "resolved": False,
         },
     )
-    alerts = store.get_active_alerts()
+    alerts = store.get_active_alerts(TEST_OWNER)
     assert len(alerts) == 1
     assert alerts[0].data["level"] == "critical"
     assert alerts[0].data["message"] == "CPU very high"
@@ -84,30 +91,33 @@ def test_upsert_alert_updates(store):
 
 def test_resolved_alert_not_active(store):
     store.upsert_alert(
+        TEST_OWNER,
         "nas",
         ["infra"],
         "cpu-warn-1",
         {"alert_id": "cpu-warn-1", "level": "warning", "message": "CPU high", "resolved": True},
     )
-    assert store.get_active_alerts() == []
+    assert store.get_active_alerts(TEST_OWNER) == []
 
 
 def test_get_active_alerts_by_source(store):
     store.upsert_alert(
+        TEST_OWNER,
         "nas",
         ["infra"],
         "a1",
         {"alert_id": "a1", "level": "warning", "message": "NAS issue", "resolved": False},
     )
     store.upsert_alert(
+        TEST_OWNER,
         "ci",
         ["cicd"],
         "a2",
         {"alert_id": "a2", "level": "warning", "message": "CI issue", "resolved": False},
     )
-    assert len(store.get_active_alerts("nas")) == 1
-    assert len(store.get_active_alerts("ci")) == 1
-    assert len(store.get_active_alerts("other")) == 0
+    assert len(store.get_active_alerts(TEST_OWNER, "nas")) == 1
+    assert len(store.get_active_alerts(TEST_OWNER, "ci")) == 1
+    assert len(store.get_active_alerts(TEST_OWNER, "other")) == 0
 
 
 def test_add_and_get_patterns(store):
@@ -127,8 +137,8 @@ def test_add_and_get_patterns(store):
             "learned_from": "test",
         },
     )
-    store.add(entry)
-    patterns = store.get_patterns("nas")
+    store.add(TEST_OWNER, entry)
+    patterns = store.get_patterns(TEST_OWNER, "nas")
     assert len(patterns) == 1
     assert patterns[0].data["description"] == "test"
 
@@ -137,6 +147,7 @@ def test_get_patterns_filtered_by_source(store):
     now = now_utc()
     for src in ("nas", "ci"):
         store.add(
+            TEST_OWNER,
             Entry(
                 id=make_id(),
                 type=EntryType.PATTERN,
@@ -151,11 +162,11 @@ def test_get_patterns_filtered_by_source(store):
                     "effect": "",
                     "learned_from": "test",
                 },
-            )
+            ),
         )
-    assert len(store.get_patterns("nas")) == 1
-    assert len(store.get_patterns("ci")) == 1
-    assert len(store.get_patterns()) == 2
+    assert len(store.get_patterns(TEST_OWNER, "nas")) == 1
+    assert len(store.get_patterns(TEST_OWNER, "ci")) == 1
+    assert len(store.get_patterns(TEST_OWNER)) == 2
 
 
 def test_suppressions(store):
@@ -178,9 +189,9 @@ def test_suppressions(store):
             "reason": "test",
         },
     )
-    store.add(entry)
-    assert store.count_active_suppressions() == 1
-    assert len(store.get_active_suppressions("nas")) == 1
+    store.add(TEST_OWNER, entry)
+    assert store.count_active_suppressions(TEST_OWNER) == 1
+    assert len(store.get_active_suppressions(TEST_OWNER, "nas")) == 1
 
 
 def test_global_suppression_matches_any_source(store):
@@ -203,9 +214,9 @@ def test_global_suppression_matches_any_source(store):
             "reason": "global",
         },
     )
-    store.add(entry)
-    assert len(store.get_active_suppressions("nas")) == 1
-    assert len(store.get_active_suppressions("ci")) == 1
+    store.add(TEST_OWNER, entry)
+    assert len(store.get_active_suppressions(TEST_OWNER, "nas")) == 1
+    assert len(store.get_active_suppressions(TEST_OWNER, "ci")) == 1
 
 
 def test_expired_entries_cleaned(store):
@@ -222,7 +233,7 @@ def test_expired_entries_cleaned(store):
         expires=past,
         data={"metric": "cpu_pct", "suppress_level": "warning"},
     )
-    store.add(entry)
+    store.add(TEST_OWNER, entry)
     # Force cleanup to run on next write despite debounce
     store._last_cleanup = 0.0
     # Trigger cleanup via a write — cleanup runs in background
@@ -236,20 +247,21 @@ def test_expired_entries_cleaned(store):
         expires=None,
         data={"description": "trigger cleanup"},
     )
-    store.add(dummy)
+    store.add(TEST_OWNER, dummy)
     # Cleanup runs in a background thread — poll instead of fixed sleep
     # to avoid flaky failures on slow CI runners
     for _ in range(20):
         time.sleep(0.2)
-        if store.count_active_suppressions() == 0:
+        if store.count_active_suppressions(TEST_OWNER) == 0:
             break
-    assert store.count_active_suppressions() == 0
+    assert store.count_active_suppressions(TEST_OWNER) == 0
 
 
 def test_knowledge_includes_patterns_context_preferences(store):
     now = now_utc()
     for t in (EntryType.PATTERN, EntryType.CONTEXT, EntryType.PREFERENCE):
         store.add(
+            TEST_OWNER,
             Entry(
                 id=make_id(),
                 type=t,
@@ -259,14 +271,15 @@ def test_knowledge_includes_patterns_context_preferences(store):
                 updated=now,
                 expires=None,
                 data={},
-            )
+            ),
         )
-    assert len(store.get_knowledge()) == 3
+    assert len(store.get_knowledge(TEST_OWNER)) == 3
 
 
 def test_knowledge_filtered_by_tags(store):
     now = now_utc()
     store.add(
+        TEST_OWNER,
         Entry(
             id=make_id(),
             type=EntryType.PATTERN,
@@ -276,9 +289,10 @@ def test_knowledge_filtered_by_tags(store):
             updated=now,
             expires=None,
             data={},
-        )
+        ),
     )
     store.add(
+        TEST_OWNER,
         Entry(
             id=make_id(),
             type=EntryType.CONTEXT,
@@ -288,26 +302,28 @@ def test_knowledge_filtered_by_tags(store):
             updated=now,
             expires=None,
             data={},
-        )
+        ),
     )
-    assert len(store.get_knowledge(tags=["infra"])) == 1
-    assert len(store.get_knowledge(tags=["calendar"])) == 1
+    assert len(store.get_knowledge(TEST_OWNER, tags=["infra"])) == 1
+    assert len(store.get_knowledge(TEST_OWNER, tags=["calendar"])) == 1
 
 
 def test_upsert_preference_deduplicates(store):
     entry1 = store.upsert_preference(
+        TEST_OWNER,
         key="alert_verbosity",
         scope="global",
         tags=["prefs"],
         data={"key": "alert_verbosity", "value": "verbose", "scope": "global"},
     )
     entry2 = store.upsert_preference(
+        TEST_OWNER,
         key="alert_verbosity",
         scope="global",
         tags=["prefs"],
         data={"key": "alert_verbosity", "value": "one_sentence", "scope": "global"},
     )
-    prefs = store.get_entries(entry_type=EntryType.PREFERENCE)
+    prefs = store.get_entries(TEST_OWNER, entry_type=EntryType.PREFERENCE)
     assert len(prefs) == 1
     assert prefs[0].data["value"] == "one_sentence"
     assert entry1.id == entry2.id
@@ -315,7 +331,7 @@ def test_upsert_preference_deduplicates(store):
 
 def test_get_entries_by_ids_empty_list(store):
     """Calling get_entries_by_ids with an empty list returns [] immediately."""
-    assert store.get_entries_by_ids([]) == []
+    assert store.get_entries_by_ids(TEST_OWNER, []) == []
 
 
 def test_soft_delete_by_id(store):
@@ -330,21 +346,22 @@ def test_soft_delete_by_id(store):
         expires=None,
         data={"description": "test pattern"},
     )
-    store.add(entry)
-    assert len(store.get_patterns()) == 1
-    assert store.soft_delete_by_id(entry.id) is True
-    assert len(store.get_patterns()) == 0
-    assert len(store.get_deleted()) == 1
+    store.add(TEST_OWNER, entry)
+    assert len(store.get_patterns(TEST_OWNER)) == 1
+    assert store.soft_delete_by_id(TEST_OWNER, entry.id) is True
+    assert len(store.get_patterns(TEST_OWNER)) == 0
+    assert len(store.get_deleted(TEST_OWNER)) == 1
 
 
 def test_soft_delete_by_id_not_found(store):
-    assert store.soft_delete_by_id("nonexistent-id") is False
+    assert store.soft_delete_by_id(TEST_OWNER, "nonexistent-id") is False
 
 
 def test_soft_delete_by_source(store):
     now = now_utc()
     for i in range(3):
         store.add(
+            TEST_OWNER,
             Entry(
                 id=make_id(),
                 type=EntryType.PATTERN,
@@ -354,9 +371,10 @@ def test_soft_delete_by_source(store):
                 updated=now,
                 expires=None,
                 data={"description": f"pattern {i}"},
-            )
+            ),
         )
     store.add(
+        TEST_OWNER,
         Entry(
             id=make_id(),
             type=EntryType.PATTERN,
@@ -366,18 +384,19 @@ def test_soft_delete_by_source(store):
             updated=now,
             expires=None,
             data={"description": "ci pattern"},
-        )
+        ),
     )
-    trashed = store.soft_delete_by_source("nas")
+    trashed = store.soft_delete_by_source(TEST_OWNER, "nas")
     assert trashed == 3
-    assert len(store.get_patterns("nas")) == 0
-    assert len(store.get_patterns("ci")) == 1
-    assert len(store.get_deleted()) == 3
+    assert len(store.get_patterns(TEST_OWNER, "nas")) == 0
+    assert len(store.get_patterns(TEST_OWNER, "ci")) == 1
+    assert len(store.get_deleted(TEST_OWNER)) == 3
 
 
 def test_soft_delete_by_source_with_type_filter(store):
     now = now_utc()
     store.add(
+        TEST_OWNER,
         Entry(
             id=make_id(),
             type=EntryType.PATTERN,
@@ -387,12 +406,12 @@ def test_soft_delete_by_source_with_type_filter(store):
             updated=now,
             expires=None,
             data={"description": "pattern"},
-        )
+        ),
     )
-    store.upsert_status("nas", ["infra"], {"metrics": {"cpu": 50}, "ttl_sec": 120})
-    trashed = store.soft_delete_by_source("nas", EntryType.PATTERN)
+    store.upsert_status(TEST_OWNER, "nas", ["infra"], {"metrics": {"cpu": 50}, "ttl_sec": 120})
+    trashed = store.soft_delete_by_source(TEST_OWNER, "nas", EntryType.PATTERN)
     assert trashed == 1
-    assert store.get_latest_status("nas") is not None
+    assert store.get_latest_status(TEST_OWNER, "nas") is not None
 
 
 def test_restore_by_id(store):
@@ -407,16 +426,16 @@ def test_restore_by_id(store):
         expires=None,
         data={"description": "restorable"},
     )
-    store.add(entry)
-    store.soft_delete_by_id(entry.id)
-    assert len(store.get_patterns()) == 0
-    assert store.restore_by_id(entry.id) is True
-    assert len(store.get_patterns()) == 1
-    assert store.get_patterns()[0].data["description"] == "restorable"
+    store.add(TEST_OWNER, entry)
+    store.soft_delete_by_id(TEST_OWNER, entry.id)
+    assert len(store.get_patterns(TEST_OWNER)) == 0
+    assert store.restore_by_id(TEST_OWNER, entry.id) is True
+    assert len(store.get_patterns(TEST_OWNER)) == 1
+    assert store.get_patterns(TEST_OWNER)[0].data["description"] == "restorable"
 
 
 def test_restore_not_found(store):
-    assert store.restore_by_id("nonexistent") is False
+    assert store.restore_by_id(TEST_OWNER, "nonexistent") is False
 
 
 def test_soft_deleted_entries_auto_expire(store):
@@ -432,9 +451,9 @@ def test_soft_deleted_entries_auto_expire(store):
         expires=None,
         data={"description": "will expire"},
     )
-    store.add(entry)
-    store.soft_delete_by_id(entry.id)
-    assert len(store.get_deleted()) == 1
+    store.add(TEST_OWNER, entry)
+    store.soft_delete_by_id(TEST_OWNER, entry.id)
+    assert len(store.get_deleted(TEST_OWNER)) == 1
     # Backdate the expires timestamp to trigger cleanup
     with store._pool.connection() as conn, conn.cursor() as cur:
         cur.execute(
@@ -442,7 +461,7 @@ def test_soft_deleted_entries_auto_expire(store):
             ("2020-01-01T00:00:00+00:00", entry.id),
         )
     store._do_cleanup()
-    assert len(store.get_deleted()) == 0
+    assert len(store.get_deleted(TEST_OWNER)) == 0
 
 
 def test_double_soft_delete_is_noop(store):
@@ -457,15 +476,15 @@ def test_double_soft_delete_is_noop(store):
         expires=None,
         data={"description": "test"},
     )
-    store.add(entry)
-    assert store.soft_delete_by_id(entry.id) is True
-    assert store.soft_delete_by_id(entry.id) is False
+    store.add(TEST_OWNER, entry)
+    assert store.soft_delete_by_id(TEST_OWNER, entry.id) is True
+    assert store.soft_delete_by_id(TEST_OWNER, entry.id) is False
 
 
 def test_clear(store):
-    store.upsert_status("nas", [], {"metrics": {}, "ttl_sec": 60})
+    store.upsert_status(TEST_OWNER, "nas", [], {"metrics": {}, "ttl_sec": 60})
     store.clear()
-    assert store.get_sources() == []
+    assert store.get_sources(TEST_OWNER) == []
 
 
 # ------------------------------------------------------------------
@@ -477,6 +496,7 @@ def test_get_knowledge_pagination(store):
     """Limit and offset work on get_knowledge."""
     for i in range(5):
         store.add(
+            TEST_OWNER,
             Entry(
                 id=make_id(),
                 type=EntryType.NOTE,
@@ -486,13 +506,13 @@ def test_get_knowledge_pagination(store):
                 updated=now_utc(),
                 expires=None,
                 data={"description": f"note-{i}"},
-            )
+            ),
         )
-    all_entries = store.get_knowledge()
+    all_entries = store.get_knowledge(TEST_OWNER)
     assert len(all_entries) == 5
-    page = store.get_knowledge(limit=2)
+    page = store.get_knowledge(TEST_OWNER, limit=2)
     assert len(page) == 2
-    page2 = store.get_knowledge(limit=2, offset=2)
+    page2 = store.get_knowledge(TEST_OWNER, limit=2, offset=2)
     assert len(page2) == 2
 
 
@@ -500,15 +520,16 @@ def test_get_active_alerts_pagination(store):
     """Limit and offset work on get_active_alerts."""
     for i in range(4):
         store.upsert_alert(
+            TEST_OWNER,
             "src",
             ["t"],
             f"a{i}",
             {"alert_id": f"a{i}", "level": "warning", "message": f"m{i}", "resolved": False},
         )
-    assert len(store.get_active_alerts()) == 4
-    page = store.get_active_alerts(limit=2)
+    assert len(store.get_active_alerts(TEST_OWNER)) == 4
+    page = store.get_active_alerts(TEST_OWNER, limit=2)
     assert len(page) == 2
-    page2 = store.get_active_alerts(limit=2, offset=2)
+    page2 = store.get_active_alerts(TEST_OWNER, limit=2, offset=2)
     assert len(page2) == 2
 
 
@@ -516,6 +537,7 @@ def test_get_entries_pagination(store):
     """Limit and offset work on get_entries."""
     for i in range(3):
         store.add(
+            TEST_OWNER,
             Entry(
                 id=make_id(),
                 type=EntryType.NOTE,
@@ -525,16 +547,17 @@ def test_get_entries_pagination(store):
                 updated=now_utc(),
                 expires=None,
                 data={"description": f"note-{i}"},
-            )
+            ),
         )
-    assert len(store.get_entries(limit=2)) == 2
-    assert len(store.get_entries(limit=10, offset=2)) == 1
+    assert len(store.get_entries(TEST_OWNER, limit=2)) == 2
+    assert len(store.get_entries(TEST_OWNER, limit=10, offset=2)) == 1
 
 
 def test_get_deleted_pagination(store):
     """Limit and offset work on get_deleted."""
     for i in range(3):
         entry = store.add(
+            TEST_OWNER,
             Entry(
                 id=make_id(),
                 type=EntryType.NOTE,
@@ -544,12 +567,12 @@ def test_get_deleted_pagination(store):
                 updated=now_utc(),
                 expires=None,
                 data={"description": f"note-{i}"},
-            )
+            ),
         )
-        store.soft_delete_by_id(entry.id)
-    assert len(store.get_deleted()) == 3
-    assert len(store.get_deleted(limit=2)) == 2
-    assert len(store.get_deleted(limit=2, offset=2)) == 1
+        store.soft_delete_by_id(TEST_OWNER, entry.id)
+    assert len(store.get_deleted(TEST_OWNER)) == 3
+    assert len(store.get_deleted(TEST_OWNER, limit=2)) == 2
+    assert len(store.get_deleted(TEST_OWNER, limit=2, offset=2)) == 1
 
 
 # ------------------------------------------------------------------
@@ -576,36 +599,40 @@ def test_do_cleanup_logs_errors(store, capsys):
 def test_upsert_alert_different_sources_same_alert_id(store):
     """Two sources can have alerts with the same alert_id independently."""
     store.upsert_alert(
+        TEST_OWNER,
         "src-a",
         ["t"],
         "dup-id",
         {"alert_id": "dup-id", "level": "warning", "message": "A", "resolved": False},
     )
     store.upsert_alert(
+        TEST_OWNER,
         "src-b",
         ["t"],
         "dup-id",
         {"alert_id": "dup-id", "level": "critical", "message": "B", "resolved": False},
     )
-    alerts = store.get_active_alerts()
+    alerts = store.get_active_alerts(TEST_OWNER)
     assert len(alerts) == 2
 
 
 def test_upsert_preference_updates_existing(store):
     """upsert_preference updates in place via SQL lookup."""
     store.upsert_preference(
+        TEST_OWNER,
         "theme",
         "global",
         ["ui"],
         {"key": "theme", "scope": "global", "value": "dark"},
     )
     store.upsert_preference(
+        TEST_OWNER,
         "theme",
         "global",
         ["ui"],
         {"key": "theme", "scope": "global", "value": "light"},
     )
-    prefs = store.get_entries(entry_type=EntryType.PREFERENCE)
+    prefs = store.get_entries(TEST_OWNER, entry_type=EntryType.PREFERENCE)
     assert len(prefs) == 1
     assert prefs[0].data["value"] == "light"
 
@@ -618,6 +645,7 @@ def test_upsert_preference_updates_existing(store):
 def test_soft_delete_by_tags_and_logic(store):
     """Only entries matching ALL tags are deleted."""
     store.add(
+        TEST_OWNER,
         Entry(
             id=make_id(),
             type=EntryType.NOTE,
@@ -627,9 +655,10 @@ def test_soft_delete_by_tags_and_logic(store):
             updated=now_utc(),
             expires=None,
             data={"description": "both tags"},
-        )
+        ),
     )
     store.add(
+        TEST_OWNER,
         Entry(
             id=make_id(),
             type=EntryType.NOTE,
@@ -639,9 +668,10 @@ def test_soft_delete_by_tags_and_logic(store):
             updated=now_utc(),
             expires=None,
             data={"description": "only qa"},
-        )
+        ),
     )
     store.add(
+        TEST_OWNER,
         Entry(
             id=make_id(),
             type=EntryType.NOTE,
@@ -651,11 +681,11 @@ def test_soft_delete_by_tags_and_logic(store):
             updated=now_utc(),
             expires=None,
             data={"description": "only project"},
-        )
+        ),
     )
-    count = store.soft_delete_by_tags(["qa", "project"])
+    count = store.soft_delete_by_tags(TEST_OWNER, ["qa", "project"])
     assert count == 1
-    remaining = store.get_entries()
+    remaining = store.get_entries(TEST_OWNER)
     assert len(remaining) == 2
     descs = {e.data["description"] for e in remaining}
     assert descs == {"only qa", "only project"}
@@ -664,6 +694,7 @@ def test_soft_delete_by_tags_and_logic(store):
 def test_soft_delete_by_tags_empty(store):
     """Empty tag list deletes nothing."""
     store.add(
+        TEST_OWNER,
         Entry(
             id=make_id(),
             type=EntryType.NOTE,
@@ -673,16 +704,17 @@ def test_soft_delete_by_tags_empty(store):
             updated=now_utc(),
             expires=None,
             data={"description": "test"},
-        )
+        ),
     )
-    assert store.soft_delete_by_tags([]) == 0
-    assert len(store.get_entries()) == 1
+    assert store.soft_delete_by_tags(TEST_OWNER, []) == 0
+    assert len(store.get_entries(TEST_OWNER)) == 1
 
 
 def test_soft_delete_by_tags_single(store):
     """Single tag matches all entries with that tag."""
     for i in range(3):
         store.add(
+            TEST_OWNER,
             Entry(
                 id=make_id(),
                 type=EntryType.NOTE,
@@ -692,11 +724,11 @@ def test_soft_delete_by_tags_single(store):
                 updated=now_utc(),
                 expires=None,
                 data={"description": f"note-{i}"},
-            )
+            ),
         )
-    count = store.soft_delete_by_tags(["qa-test"])
+    count = store.soft_delete_by_tags(TEST_OWNER, ["qa-test"])
     assert count == 2
-    assert len(store.get_entries()) == 1
+    assert len(store.get_entries(TEST_OWNER)) == 1
 
 
 # ------------------------------------------------------------------
@@ -708,6 +740,7 @@ def test_restore_by_tags(store):
     """Restore trashed entries matching ALL tags."""
     for i in range(3):
         entry = store.add(
+            TEST_OWNER,
             Entry(
                 id=make_id(),
                 type=EntryType.NOTE,
@@ -717,19 +750,19 @@ def test_restore_by_tags(store):
                 updated=now_utc(),
                 expires=None,
                 data={"description": f"note-{i}"},
-            )
+            ),
         )
-        store.soft_delete_by_id(entry.id)
-    assert len(store.get_deleted()) == 3
-    restored = store.restore_by_tags(["qa-test", "batch"])
+        store.soft_delete_by_id(TEST_OWNER, entry.id)
+    assert len(store.get_deleted(TEST_OWNER)) == 3
+    restored = store.restore_by_tags(TEST_OWNER, ["qa-test", "batch"])
     assert restored == 2
-    assert len(store.get_entries()) == 2
-    assert len(store.get_deleted()) == 1
+    assert len(store.get_entries(TEST_OWNER)) == 2
+    assert len(store.get_deleted(TEST_OWNER)) == 1
 
 
 def test_restore_by_tags_empty(store):
     """Empty tag list restores nothing."""
-    assert store.restore_by_tags([]) == 0
+    assert store.restore_by_tags(TEST_OWNER, []) == 0
 
 
 # ------------------------------------------------------------------
@@ -746,6 +779,7 @@ def test_get_knowledge_since(store):
     cutoff = datetime.now(timezone.utc) - timedelta(hours=1)
 
     store.add(
+        TEST_OWNER,
         Entry(
             id=make_id(),
             type=EntryType.NOTE,
@@ -755,9 +789,10 @@ def test_get_knowledge_since(store):
             updated=old,
             expires=None,
             data={"description": "old note"},
-        )
+        ),
     )
     store.add(
+        TEST_OWNER,
         Entry(
             id=make_id(),
             type=EntryType.NOTE,
@@ -767,11 +802,11 @@ def test_get_knowledge_since(store):
             updated=recent,
             expires=None,
             data={"description": "recent note"},
-        )
+        ),
     )
-    all_entries = store.get_knowledge()
+    all_entries = store.get_knowledge(TEST_OWNER)
     assert len(all_entries) == 2
-    filtered = store.get_knowledge(since=cutoff)
+    filtered = store.get_knowledge(TEST_OWNER, since=cutoff)
     assert len(filtered) == 1
     assert filtered[0].data["description"] == "recent note"
 
@@ -785,6 +820,7 @@ def test_get_entries_since(store):
     cutoff = datetime.now(timezone.utc) - timedelta(hours=1)
 
     store.add(
+        TEST_OWNER,
         Entry(
             id=make_id(),
             type=EntryType.NOTE,
@@ -794,9 +830,10 @@ def test_get_entries_since(store):
             updated=old,
             expires=None,
             data={"description": "old"},
-        )
+        ),
     )
     store.add(
+        TEST_OWNER,
         Entry(
             id=make_id(),
             type=EntryType.NOTE,
@@ -806,9 +843,9 @@ def test_get_entries_since(store):
             updated=recent,
             expires=None,
             data={"description": "new"},
-        )
+        ),
     )
-    assert len(store.get_entries(since=cutoff)) == 1
+    assert len(store.get_entries(TEST_OWNER, since=cutoff)) == 1
 
 
 def test_get_active_alerts_since(store):
@@ -819,6 +856,7 @@ def test_get_active_alerts_since(store):
     cutoff = datetime.now(timezone.utc) - timedelta(hours=1)
 
     store.upsert_alert(
+        TEST_OWNER,
         "src",
         ["t"],
         "old-alert",
@@ -832,13 +870,14 @@ def test_get_active_alerts_since(store):
         )
 
     store.upsert_alert(
+        TEST_OWNER,
         "src",
         ["t"],
         "new-alert",
         {"alert_id": "new-alert", "level": "warning", "message": "new", "resolved": False},
     )
-    assert len(store.get_active_alerts()) == 2
-    assert len(store.get_active_alerts(since=cutoff)) == 1
+    assert len(store.get_active_alerts(TEST_OWNER)) == 2
+    assert len(store.get_active_alerts(TEST_OWNER, since=cutoff)) == 1
 
 
 def test_get_deleted_since(store):
@@ -849,6 +888,7 @@ def test_get_deleted_since(store):
     cutoff = datetime.now(timezone.utc) - timedelta(hours=1)
 
     entry1 = store.add(
+        TEST_OWNER,
         Entry(
             id=make_id(),
             type=EntryType.NOTE,
@@ -858,14 +898,15 @@ def test_get_deleted_since(store):
             updated=now_utc(),
             expires=None,
             data={"description": "old delete"},
-        )
+        ),
     )
-    store.soft_delete_by_id(entry1.id)
+    store.soft_delete_by_id(TEST_OWNER, entry1.id)
     # Backdate the deletion
     with store._pool.connection() as conn, conn.cursor() as cur:
         cur.execute("UPDATE entries SET deleted = %s WHERE id = %s", (old, entry1.id))
 
     entry2 = store.add(
+        TEST_OWNER,
         Entry(
             id=make_id(),
             type=EntryType.NOTE,
@@ -875,12 +916,12 @@ def test_get_deleted_since(store):
             updated=now_utc(),
             expires=None,
             data={"description": "recent delete"},
-        )
+        ),
     )
-    store.soft_delete_by_id(entry2.id)
+    store.soft_delete_by_id(TEST_OWNER, entry2.id)
 
-    assert len(store.get_deleted()) == 2
-    assert len(store.get_deleted(since=cutoff)) == 1
+    assert len(store.get_deleted(TEST_OWNER)) == 2
+    assert len(store.get_deleted(TEST_OWNER, since=cutoff)) == 1
 
 
 # ------------------------------------------------------------------
@@ -891,6 +932,7 @@ def test_get_deleted_since(store):
 def test_log_read_and_get_reads(store):
     """log_read records reads, get_reads retrieves them."""
     entry = store.add(
+        TEST_OWNER,
         Entry(
             id=make_id(),
             type=EntryType.NOTE,
@@ -900,11 +942,11 @@ def test_log_read_and_get_reads(store):
             updated=now_utc(),
             expires=None,
             data={"description": "readable"},
-        )
+        ),
     )
-    store.log_read([entry.id], tool_used="get_knowledge")
-    store.log_read([entry.id], tool_used="get_knowledge", platform="claude-code")
-    reads = store.get_reads(entry_id=entry.id)
+    store.log_read(TEST_OWNER, [entry.id], tool_used="get_knowledge")
+    store.log_read(TEST_OWNER, [entry.id], tool_used="get_knowledge", platform="claude-code")
+    reads = store.get_reads(TEST_OWNER, entry_id=entry.id)
     assert len(reads) == 2
     assert reads[0]["entry_id"] == entry.id
     assert reads[0]["tool_used"] == "get_knowledge"
@@ -912,13 +954,14 @@ def test_log_read_and_get_reads(store):
 
 def test_log_read_empty_list(store):
     """log_read with empty list is a no-op."""
-    store.log_read([], tool_used="test")
-    assert store.get_reads() == []
+    store.log_read(TEST_OWNER, [], tool_used="test")
+    assert store.get_reads(TEST_OWNER) == []
 
 
 def test_log_action_and_get_actions(store):
     """log_action records actions, get_actions retrieves them."""
     entry = store.add(
+        TEST_OWNER,
         Entry(
             id=make_id(),
             type=EntryType.NOTE,
@@ -928,9 +971,10 @@ def test_log_action_and_get_actions(store):
             updated=now_utc(),
             expires=None,
             data={"description": "actionable"},
-        )
+        ),
     )
     result = store.log_action(
+        TEST_OWNER,
         entry_id=entry.id,
         action="created GitHub issue #42",
         platform="claude-code",
@@ -939,7 +983,7 @@ def test_log_action_and_get_actions(store):
     assert result["action"] == "created GitHub issue #42"
     assert result["tags"] == ["project", "mcp-awareness"]  # copied from entry
 
-    actions = store.get_actions(entry_id=entry.id)
+    actions = store.get_actions(TEST_OWNER, entry_id=entry.id)
     assert len(actions) == 1
     assert actions[0]["action"] == "created GitHub issue #42"
     assert actions[0]["detail"] == "https://github.com/cmeans/mcp-awareness/issues/42"
@@ -948,6 +992,7 @@ def test_log_action_and_get_actions(store):
 def test_log_action_custom_tags(store):
     """log_action accepts custom tags instead of copying from entry."""
     entry = store.add(
+        TEST_OWNER,
         Entry(
             id=make_id(),
             type=EntryType.NOTE,
@@ -957,15 +1002,15 @@ def test_log_action_custom_tags(store):
             updated=now_utc(),
             expires=None,
             data={"description": "test"},
-        )
+        ),
     )
-    result = store.log_action(entry_id=entry.id, action="test", tags=["custom", "tags"])
+    result = store.log_action(TEST_OWNER, entry_id=entry.id, action="test", tags=["custom", "tags"])
     assert result["tags"] == ["custom", "tags"]
 
 
 def test_log_action_invalid_entry_id(store):
     """log_action returns error for nonexistent entry_id."""
-    result = store.log_action(entry_id="nonexistent-id", action="test")
+    result = store.log_action(TEST_OWNER, entry_id="nonexistent-id", action="test")
     assert result["status"] == "error"
     assert "not found" in result["message"].lower()
 
@@ -974,6 +1019,7 @@ def test_log_read_records_reads(store):
     """log_read inserts read records retrievable via get_reads."""
     now = now_utc()
     entry = store.add(
+        TEST_OWNER,
         Entry(
             id=make_id(),
             type=EntryType.NOTE,
@@ -983,10 +1029,10 @@ def test_log_read_records_reads(store):
             updated=now,
             expires=None,
             data={"description": "read tracking test"},
-        )
+        ),
     )
-    store.log_read([entry.id], tool_used="get_knowledge", platform="claude-code")
-    reads = store.get_reads(entry_id=entry.id)
+    store.log_read(TEST_OWNER, [entry.id], tool_used="get_knowledge", platform="claude-code")
+    reads = store.get_reads(TEST_OWNER, entry_id=entry.id)
     assert len(reads) >= 1
     assert reads[0]["entry_id"] == entry.id
     assert reads[0]["tool_used"] == "get_knowledge"
@@ -995,7 +1041,7 @@ def test_log_read_records_reads(store):
 
 def test_log_read_empty_list_is_noop(store):
     """log_read with empty list returns immediately without touching the DB."""
-    store.log_read([], tool_used="get_knowledge")  # should not raise
+    store.log_read(TEST_OWNER, [], tool_used="get_knowledge")  # should not raise
 
 
 def test_log_read_silences_pool_errors(store):
@@ -1004,6 +1050,7 @@ def test_log_read_silences_pool_errors(store):
 
     now = now_utc()
     entry = store.add(
+        TEST_OWNER,
         Entry(
             id=make_id(),
             type=EntryType.NOTE,
@@ -1013,16 +1060,17 @@ def test_log_read_silences_pool_errors(store):
             updated=now,
             expires=None,
             data={"description": "pool failure test"},
-        )
+        ),
     )
     with patch.object(store._pool, "connection", side_effect=RuntimeError("pool closed")):
         # Should not raise despite the pool being broken
-        store.log_read([entry.id], tool_used="get_knowledge")
+        store.log_read(TEST_OWNER, [entry.id], tool_used="get_knowledge")
 
 
 def test_get_actions_filter_by_tags(store):
     """get_actions can filter by tags."""
     entry = store.add(
+        TEST_OWNER,
         Entry(
             id=make_id(),
             type=EntryType.NOTE,
@@ -1032,12 +1080,14 @@ def test_get_actions_filter_by_tags(store):
             updated=now_utc(),
             expires=None,
             data={"description": "test"},
-        )
+        ),
     )
-    store.log_action(entry_id=entry.id, action="tagged action", tags=["project", "deploy"])
-    store.log_action(entry_id=entry.id, action="other action", tags=["personal"])
+    store.log_action(
+        TEST_OWNER, entry_id=entry.id, action="tagged action", tags=["project", "deploy"]
+    )
+    store.log_action(TEST_OWNER, entry_id=entry.id, action="other action", tags=["personal"])
 
-    project_actions = store.get_actions(tags=["project"])
+    project_actions = store.get_actions(TEST_OWNER, tags=["project"])
     assert len(project_actions) == 1
     assert project_actions[0]["action"] == "tagged action"
 
@@ -1045,6 +1095,7 @@ def test_get_actions_filter_by_tags(store):
 def test_get_unread(store):
     """get_unread returns entries with zero reads."""
     e1 = store.add(
+        TEST_OWNER,
         Entry(
             id=make_id(),
             type=EntryType.NOTE,
@@ -1054,9 +1105,10 @@ def test_get_unread(store):
             updated=now_utc(),
             expires=None,
             data={"description": "read entry"},
-        )
+        ),
     )
     store.add(
+        TEST_OWNER,
         Entry(
             id=make_id(),
             type=EntryType.NOTE,
@@ -1066,10 +1118,10 @@ def test_get_unread(store):
             updated=now_utc(),
             expires=None,
             data={"description": "unread entry"},
-        )
+        ),
     )
-    store.log_read([e1.id], tool_used="test")
-    unread = store.get_unread()
+    store.log_read(TEST_OWNER, [e1.id], tool_used="test")
+    unread = store.get_unread(TEST_OWNER)
     assert len(unread) == 1
     assert unread[0].data["description"] == "unread entry"
 
@@ -1077,6 +1129,7 @@ def test_get_unread(store):
 def test_get_activity(store):
     """get_activity returns combined reads + actions feed."""
     entry = store.add(
+        TEST_OWNER,
         Entry(
             id=make_id(),
             type=EntryType.NOTE,
@@ -1086,12 +1139,12 @@ def test_get_activity(store):
             updated=now_utc(),
             expires=None,
             data={"description": "test"},
-        )
+        ),
     )
-    store.log_read([entry.id], tool_used="get_knowledge")
-    store.log_action(entry_id=entry.id, action="used for context")
+    store.log_read(TEST_OWNER, [entry.id], tool_used="get_knowledge")
+    store.log_action(TEST_OWNER, entry_id=entry.id, action="used for context")
 
-    activity = store.get_activity()
+    activity = store.get_activity(TEST_OWNER)
     assert len(activity) == 2
     types = {a["event_type"] for a in activity}
     assert types == {"read", "action"}
@@ -1100,6 +1153,7 @@ def test_get_activity(store):
 def test_get_read_counts(store):
     """get_read_counts returns counts and last_read per entry."""
     e1 = store.add(
+        TEST_OWNER,
         Entry(
             id=make_id(),
             type=EntryType.NOTE,
@@ -1109,9 +1163,10 @@ def test_get_read_counts(store):
             updated=now_utc(),
             expires=None,
             data={"description": "popular"},
-        )
+        ),
     )
     e2 = store.add(
+        TEST_OWNER,
         Entry(
             id=make_id(),
             type=EntryType.NOTE,
@@ -1121,13 +1176,13 @@ def test_get_read_counts(store):
             updated=now_utc(),
             expires=None,
             data={"description": "unpopular"},
-        )
+        ),
     )
-    store.log_read([e1.id], tool_used="test")
-    store.log_read([e1.id], tool_used="test")
-    store.log_read([e1.id], tool_used="test")
+    store.log_read(TEST_OWNER, [e1.id], tool_used="test")
+    store.log_read(TEST_OWNER, [e1.id], tool_used="test")
+    store.log_read(TEST_OWNER, [e1.id], tool_used="test")
 
-    counts = store.get_read_counts([e1.id, e2.id])
+    counts = store.get_read_counts(TEST_OWNER, [e1.id, e2.id])
     assert counts[e1.id]["read_count"] == 3
     assert counts[e1.id]["last_read"] is not None
     assert e2.id not in counts  # no reads
@@ -1136,6 +1191,7 @@ def test_get_read_counts(store):
 def test_clear_removes_reads_and_actions(store):
     """clear() removes reads and actions along with entries."""
     entry = store.add(
+        TEST_OWNER,
         Entry(
             id=make_id(),
             type=EntryType.NOTE,
@@ -1145,13 +1201,13 @@ def test_clear_removes_reads_and_actions(store):
             updated=now_utc(),
             expires=None,
             data={"description": "test"},
-        )
+        ),
     )
-    store.log_read([entry.id], tool_used="test")
-    store.log_action(entry_id=entry.id, action="test")
+    store.log_read(TEST_OWNER, [entry.id], tool_used="test")
+    store.log_action(TEST_OWNER, entry_id=entry.id, action="test")
     store.clear()
-    assert store.get_reads() == []
-    assert store.get_actions() == []
+    assert store.get_reads(TEST_OWNER) == []
+    assert store.get_actions(TEST_OWNER) == []
 
 
 # ------------------------------------------------------------------
@@ -1180,8 +1236,8 @@ def test_create_and_get_intention(store):
             "learned_from": "test",
         },
     )
-    store.add(entry)
-    intentions = store.get_intentions()
+    store.add(TEST_OWNER, entry)
+    intentions = store.get_intentions(TEST_OWNER)
     assert len(intentions) == 1
     assert intentions[0].data["goal"] == "Pick up milk"
     assert intentions[0].data["state"] == "pending"
@@ -1192,6 +1248,7 @@ def test_get_intentions_filter_by_state(store):
     now = now_utc()
     for state in ("pending", "pending", "fired", "completed"):
         store.add(
+            TEST_OWNER,
             Entry(
                 id=make_id(),
                 type=EntryType.INTENTION,
@@ -1201,18 +1258,19 @@ def test_get_intentions_filter_by_state(store):
                 updated=now,
                 expires=None,
                 data={"goal": f"goal-{state}", "state": state},
-            )
+            ),
         )
-    assert len(store.get_intentions(state="pending")) == 2
-    assert len(store.get_intentions(state="fired")) == 1
-    assert len(store.get_intentions(state="completed")) == 1
-    assert len(store.get_intentions()) == 4
+    assert len(store.get_intentions(TEST_OWNER, state="pending")) == 2
+    assert len(store.get_intentions(TEST_OWNER, state="fired")) == 1
+    assert len(store.get_intentions(TEST_OWNER, state="completed")) == 1
+    assert len(store.get_intentions(TEST_OWNER)) == 4
 
 
 def test_get_intentions_filter_by_tags(store):
     """get_intentions filters by tags."""
     now = now_utc()
     store.add(
+        TEST_OWNER,
         Entry(
             id=make_id(),
             type=EntryType.INTENTION,
@@ -1222,9 +1280,10 @@ def test_get_intentions_filter_by_tags(store):
             updated=now,
             expires=None,
             data={"goal": "buy milk", "state": "pending"},
-        )
+        ),
     )
     store.add(
+        TEST_OWNER,
         Entry(
             id=make_id(),
             type=EntryType.INTENTION,
@@ -1234,10 +1293,10 @@ def test_get_intentions_filter_by_tags(store):
             updated=now,
             expires=None,
             data={"goal": "file report", "state": "pending"},
-        )
+        ),
     )
-    assert len(store.get_intentions(tags=["groceries"])) == 1
-    assert len(store.get_intentions(tags=["work"])) == 1
+    assert len(store.get_intentions(TEST_OWNER, tags=["groceries"])) == 1
+    assert len(store.get_intentions(TEST_OWNER, tags=["work"])) == 1
 
 
 def test_get_intentions_filter_by_source_and_limit(store):
@@ -1245,6 +1304,7 @@ def test_get_intentions_filter_by_source_and_limit(store):
     now = now_utc()
     for i in range(3):
         store.add(
+            TEST_OWNER,
             Entry(
                 id=make_id(),
                 type=EntryType.INTENTION,
@@ -1254,9 +1314,10 @@ def test_get_intentions_filter_by_source_and_limit(store):
                 updated=now,
                 expires=None,
                 data={"goal": f"personal-{i}", "state": "pending"},
-            )
+            ),
         )
     store.add(
+        TEST_OWNER,
         Entry(
             id=make_id(),
             type=EntryType.INTENTION,
@@ -1266,11 +1327,11 @@ def test_get_intentions_filter_by_source_and_limit(store):
             updated=now,
             expires=None,
             data={"goal": "work goal", "state": "pending"},
-        )
+        ),
     )
-    assert len(store.get_intentions(source="personal")) == 3
-    assert len(store.get_intentions(source="work")) == 1
-    assert len(store.get_intentions(limit=2)) == 2
+    assert len(store.get_intentions(TEST_OWNER, source="personal")) == 3
+    assert len(store.get_intentions(TEST_OWNER, source="work")) == 1
+    assert len(store.get_intentions(TEST_OWNER, limit=2)) == 2
 
 
 def test_update_intention_state(store):
@@ -1286,8 +1347,10 @@ def test_update_intention_state(store):
         expires=None,
         data={"goal": "test goal", "state": "pending"},
     )
-    store.add(entry)
-    result = store.update_intention_state(entry.id, "fired", reason="time-based trigger")
+    store.add(TEST_OWNER, entry)
+    result = store.update_intention_state(
+        TEST_OWNER, entry.id, "fired", reason="time-based trigger"
+    )
     assert result is not None
     assert result.data["state"] == "fired"
     assert result.data["state_reason"] == "time-based trigger"
@@ -1297,7 +1360,7 @@ def test_update_intention_state(store):
 
 def test_update_intention_state_not_found(store):
     """update_intention_state returns None for nonexistent entry."""
-    assert store.update_intention_state("nonexistent", "fired") is None
+    assert store.update_intention_state(TEST_OWNER, "nonexistent", "fired") is None
 
 
 def test_update_intention_state_wrong_type(store):
@@ -1313,8 +1376,8 @@ def test_update_intention_state_wrong_type(store):
         expires=None,
         data={"description": "not an intention"},
     )
-    store.add(entry)
-    assert store.update_intention_state(entry.id, "fired") is None
+    store.add(TEST_OWNER, entry)
+    assert store.update_intention_state(TEST_OWNER, entry.id, "fired") is None
 
 
 def test_get_fired_intentions(store):
@@ -1327,6 +1390,7 @@ def test_get_fired_intentions(store):
 
     # Past deliver_at — should fire
     store.add(
+        TEST_OWNER,
         Entry(
             id=make_id(),
             type=EntryType.INTENTION,
@@ -1336,10 +1400,11 @@ def test_get_fired_intentions(store):
             updated=now,
             expires=None,
             data={"goal": "overdue", "state": "pending", "deliver_at": past.isoformat()},
-        )
+        ),
     )
     # Future deliver_at — should not fire
     store.add(
+        TEST_OWNER,
         Entry(
             id=make_id(),
             type=EntryType.INTENTION,
@@ -1349,10 +1414,11 @@ def test_get_fired_intentions(store):
             updated=now,
             expires=None,
             data={"goal": "not yet", "state": "pending", "deliver_at": future.isoformat()},
-        )
+        ),
     )
     # No deliver_at — should not fire
     store.add(
+        TEST_OWNER,
         Entry(
             id=make_id(),
             type=EntryType.INTENTION,
@@ -1362,10 +1428,11 @@ def test_get_fired_intentions(store):
             updated=now,
             expires=None,
             data={"goal": "no time", "state": "pending", "deliver_at": None},
-        )
+        ),
     )
     # Already fired — should not appear
     store.add(
+        TEST_OWNER,
         Entry(
             id=make_id(),
             type=EntryType.INTENTION,
@@ -1375,10 +1442,10 @@ def test_get_fired_intentions(store):
             updated=now,
             expires=None,
             data={"goal": "already done", "state": "fired", "deliver_at": past.isoformat()},
-        )
+        ),
     )
 
-    fired = store.get_fired_intentions()
+    fired = store.get_fired_intentions(TEST_OWNER)
     assert len(fired) == 1
     assert fired[0].data["goal"] == "overdue"
 
@@ -1395,6 +1462,7 @@ def test_get_knowledge_default_sort_desc(store):
     now = now_utc()
     old = now - timedelta(hours=2)
     store.add(
+        TEST_OWNER,
         Entry(
             id=make_id(),
             type=EntryType.NOTE,
@@ -1404,9 +1472,10 @@ def test_get_knowledge_default_sort_desc(store):
             updated=old,
             expires=None,
             data={"description": "old note"},
-        )
+        ),
     )
     store.add(
+        TEST_OWNER,
         Entry(
             id=make_id(),
             type=EntryType.NOTE,
@@ -1416,9 +1485,9 @@ def test_get_knowledge_default_sort_desc(store):
             updated=now,
             expires=None,
             data={"description": "recent note"},
-        )
+        ),
     )
-    entries = store.get_knowledge(limit=1)
+    entries = store.get_knowledge(TEST_OWNER, limit=1)
     assert len(entries) == 1
     assert entries[0].data["description"] == "recent note"
 
@@ -1431,6 +1500,7 @@ def test_get_knowledge_until(store):
     old = now - timedelta(hours=2)
     cutoff = now - timedelta(hours=1)
     store.add(
+        TEST_OWNER,
         Entry(
             id=make_id(),
             type=EntryType.NOTE,
@@ -1440,9 +1510,10 @@ def test_get_knowledge_until(store):
             updated=old,
             expires=None,
             data={"description": "old note"},
-        )
+        ),
     )
     store.add(
+        TEST_OWNER,
         Entry(
             id=make_id(),
             type=EntryType.NOTE,
@@ -1452,9 +1523,9 @@ def test_get_knowledge_until(store):
             updated=now,
             expires=None,
             data={"description": "recent note"},
-        )
+        ),
     )
-    entries = store.get_knowledge(until=cutoff)
+    entries = store.get_knowledge(TEST_OWNER, until=cutoff)
     assert len(entries) == 1
     assert entries[0].data["description"] == "old note"
 
@@ -1463,6 +1534,7 @@ def test_get_knowledge_learned_from(store):
     """learned_from param filters by data->>'learned_from'."""
     now = now_utc()
     store.add(
+        TEST_OWNER,
         Entry(
             id=make_id(),
             type=EntryType.NOTE,
@@ -1472,9 +1544,10 @@ def test_get_knowledge_learned_from(store):
             updated=now,
             expires=None,
             data={"description": "from code", "learned_from": "claude-code"},
-        )
+        ),
     )
     store.add(
+        TEST_OWNER,
         Entry(
             id=make_id(),
             type=EntryType.NOTE,
@@ -1484,9 +1557,9 @@ def test_get_knowledge_learned_from(store):
             updated=now,
             expires=None,
             data={"description": "from desktop", "learned_from": "claude.ai"},
-        )
+        ),
     )
-    entries = store.get_knowledge(learned_from="claude-code")
+    entries = store.get_knowledge(TEST_OWNER, learned_from="claude-code")
     assert len(entries) == 1
     assert entries[0].data["description"] == "from code"
 
@@ -1494,18 +1567,20 @@ def test_get_knowledge_learned_from(store):
 def test_get_active_alerts_resolved_filtered_in_sql(store):
     """Resolved alerts are filtered in SQL, not post-fetch."""
     store.upsert_alert(
+        TEST_OWNER,
         "src",
         ["t"],
         "active",
         {"alert_id": "active", "level": "warning", "message": "active", "resolved": False},
     )
     store.upsert_alert(
+        TEST_OWNER,
         "src",
         ["t"],
         "resolved",
         {"alert_id": "resolved", "level": "warning", "message": "resolved", "resolved": True},
     )
-    alerts = store.get_active_alerts()
+    alerts = store.get_active_alerts(TEST_OWNER)
     assert len(alerts) == 1
     assert alerts[0].data["alert_id"] == "active"
 
@@ -1514,6 +1589,7 @@ def test_sql_pagination_limit_offset(store):
     """LIMIT/OFFSET pushed to SQL — verify with get_entries."""
     for i in range(5):
         store.add(
+            TEST_OWNER,
             Entry(
                 id=make_id(),
                 type=EntryType.NOTE,
@@ -1523,11 +1599,11 @@ def test_sql_pagination_limit_offset(store):
                 updated=now_utc(),
                 expires=None,
                 data={"description": f"note-{i}"},
-            )
+            ),
         )
-    page1 = store.get_entries(limit=2)
+    page1 = store.get_entries(TEST_OWNER, limit=2)
     assert len(page1) == 2
-    page2 = store.get_entries(limit=2, offset=2)
+    page2 = store.get_entries(TEST_OWNER, limit=2, offset=2)
     assert len(page2) == 2
     # Pages shouldn't overlap
     ids1 = {e.id for e in page1}
@@ -1549,11 +1625,11 @@ def test_get_knowledge_include_history_only_with_pagination(store):
             expires=None,
             data={"description": f"note-{i}"},
         )
-        store.add(entry)
-        store.update_entry(entry.id, {"description": f"updated-{i}"})
-    all_with_history = store.get_knowledge(include_history="only")
+        store.add(TEST_OWNER, entry)
+        store.update_entry(TEST_OWNER, entry.id, {"description": f"updated-{i}"})
+    all_with_history = store.get_knowledge(TEST_OWNER, include_history="only")
     assert len(all_with_history) == 3
-    page = store.get_knowledge(include_history="only", limit=2, offset=1)
+    page = store.get_knowledge(TEST_OWNER, include_history="only", limit=2, offset=1)
     assert len(page) == 2
 
 
@@ -1588,10 +1664,10 @@ def test_get_knowledge_created_after(store):
         expires=None,
         data={"description": "new note"},
     )
-    store.add(e1)
-    store.add(e2)
+    store.add(TEST_OWNER, e1)
+    store.add(TEST_OWNER, e2)
     cutoff = now_utc() - timedelta(hours=1)
-    results = store.get_knowledge(created_after=cutoff)
+    results = store.get_knowledge(TEST_OWNER, created_after=cutoff)
     assert len(results) == 1
     assert results[0].data["description"] == "new note"
 
@@ -1622,10 +1698,10 @@ def test_get_knowledge_created_before(store):
         expires=None,
         data={"description": "new note"},
     )
-    store.add(e1)
-    store.add(e2)
+    store.add(TEST_OWNER, e1)
+    store.add(TEST_OWNER, e2)
     cutoff = now_utc() - timedelta(hours=1)
-    results = store.get_knowledge(created_before=cutoff)
+    results = store.get_knowledge(TEST_OWNER, created_before=cutoff)
     assert len(results) == 1
     assert results[0].data["description"] == "old note"
 
@@ -1639,8 +1715,8 @@ def test_pool_serves_concurrent_requests(store):
     """Pool handles multiple sequential operations without connection issues."""
     # Rapid-fire operations that would serialize on a single connection
     for i in range(10):
-        store.upsert_status(f"src-{i}", ["t"], {"metrics": {}, "ttl_sec": 120})
-    sources = store.get_sources()
+        store.upsert_status(TEST_OWNER, f"src-{i}", ["t"], {"metrics": {}, "ttl_sec": 120})
+    sources = store.get_sources(TEST_OWNER)
     assert len(sources) == 10
 
 
@@ -1653,8 +1729,8 @@ def test_pool_recovers_from_errors(store):
     except Exception:
         pass  # Expected — table doesn't exist
     # Pool should still work — next connection is clean
-    store.upsert_status("after-error", ["t"], {"metrics": {}, "ttl_sec": 120})
-    assert "after-error" in store.get_sources()
+    store.upsert_status(TEST_OWNER, "after-error", ["t"], {"metrics": {}, "ttl_sec": 120})
+    assert "after-error" in store.get_sources(TEST_OWNER)
 
 
 # ---------------------------------------------------------------------------
@@ -1689,11 +1765,11 @@ class TestEmbeddings:
             expires=None,
             data={"description": "test note"},
         )
-        store.add(entry)
+        store.add(TEST_OWNER, entry)
         vec = self._vec(768, 0)
-        store.upsert_embedding(entry.id, "test-model", 768, "abc123", vec)
+        store.upsert_embedding(TEST_OWNER, entry.id, "test-model", 768, "abc123", vec)
         # Should be searchable
-        results = store.semantic_search(vec, "test-model", limit=5)
+        results = store.semantic_search(TEST_OWNER, vec, "test-model", limit=5)
         assert len(results) == 1
         found_entry, score = results[0]
         assert found_entry.id == entry.id
@@ -1712,11 +1788,11 @@ class TestEmbeddings:
             expires=None,
             data={"description": "test"},
         )
-        store.add(entry)
-        store.upsert_embedding(entry.id, "test-model", 768, "hash1", self._vec(768, 0))
-        store.upsert_embedding(entry.id, "test-model", 768, "hash2", self._vec(768, 1))
+        store.add(TEST_OWNER, entry)
+        store.upsert_embedding(TEST_OWNER, entry.id, "test-model", 768, "hash1", self._vec(768, 0))
+        store.upsert_embedding(TEST_OWNER, entry.id, "test-model", 768, "hash2", self._vec(768, 1))
         # Search along axis 1 should find it
-        results = store.semantic_search(self._vec(768, 1), "test-model", limit=5)
+        results = store.semantic_search(TEST_OWNER, self._vec(768, 1), "test-model", limit=5)
         assert len(results) == 1
         assert results[0][1] > 0.99
 
@@ -1735,11 +1811,11 @@ class TestEmbeddings:
                 expires=None,
                 data={"description": f"note-{i}"},
             )
-            store.add(entry)
-            store.upsert_embedding(entry.id, "m", 768, f"h{i}", self._vec(768, i))
+            store.add(TEST_OWNER, entry)
+            store.upsert_embedding(TEST_OWNER, entry.id, "m", 768, f"h{i}", self._vec(768, i))
             ids.append(entry.id)
         # Query along axis 0 — entry 0 should be first
-        results = store.semantic_search(self._vec(768, 0), "m", limit=3)
+        results = store.semantic_search(TEST_OWNER, self._vec(768, 0), "m", limit=3)
         assert results[0][0].id == ids[0]
         assert results[0][1] > results[1][1]
 
@@ -1766,13 +1842,13 @@ class TestEmbeddings:
             expires=None,
             data={"alert_id": "a1", "message": "alert", "level": "warning", "resolved": False},
         )
-        store.add(note)
-        store.add(alert)
+        store.add(TEST_OWNER, note)
+        store.add(TEST_OWNER, alert)
         vec = self._vec(768, 0)
-        store.upsert_embedding(note.id, "m", 768, "h1", vec)
-        store.upsert_embedding(alert.id, "m", 768, "h2", vec)
+        store.upsert_embedding(TEST_OWNER, note.id, "m", 768, "h1", vec)
+        store.upsert_embedding(TEST_OWNER, alert.id, "m", 768, "h2", vec)
         # Filter to notes only
-        results = store.semantic_search(vec, "m", entry_type=EntryType.NOTE)
+        results = store.semantic_search(TEST_OWNER, vec, "m", entry_type=EntryType.NOTE)
         assert len(results) == 1
         assert results[0][0].type == EntryType.NOTE
 
@@ -1799,12 +1875,12 @@ class TestEmbeddings:
             expires=None,
             data={"description": "personal note"},
         )
-        store.add(e1)
-        store.add(e2)
+        store.add(TEST_OWNER, e1)
+        store.add(TEST_OWNER, e2)
         vec = self._vec(768, 0)
-        store.upsert_embedding(e1.id, "m", 768, "h1", vec)
-        store.upsert_embedding(e2.id, "m", 768, "h2", vec)
-        results = store.semantic_search(vec, "m", source="nas")
+        store.upsert_embedding(TEST_OWNER, e1.id, "m", 768, "h1", vec)
+        store.upsert_embedding(TEST_OWNER, e2.id, "m", 768, "h2", vec)
+        results = store.semantic_search(TEST_OWNER, vec, "m", source="nas")
         assert len(results) == 1
         assert results[0][0].source == "nas"
 
@@ -1831,12 +1907,12 @@ class TestEmbeddings:
             expires=None,
             data={"description": "personal note"},
         )
-        store.add(e1)
-        store.add(e2)
+        store.add(TEST_OWNER, e1)
+        store.add(TEST_OWNER, e2)
         vec = self._vec(768, 0)
-        store.upsert_embedding(e1.id, "m", 768, "h1", vec)
-        store.upsert_embedding(e2.id, "m", 768, "h2", vec)
-        results = store.semantic_search(vec, "m", tags=["infra"])
+        store.upsert_embedding(TEST_OWNER, e1.id, "m", 768, "h1", vec)
+        store.upsert_embedding(TEST_OWNER, e2.id, "m", 768, "h2", vec)
+        results = store.semantic_search(TEST_OWNER, vec, "m", tags=["infra"])
         assert len(results) == 1
         assert "infra" in results[0][0].tags
 
@@ -1853,16 +1929,16 @@ class TestEmbeddings:
             expires=None,
             data={"description": "test"},
         )
-        store.add(entry)
+        store.add(TEST_OWNER, entry)
         vec = self._vec(768, 0)
-        store.upsert_embedding(entry.id, "m", 768, "h1", vec)
-        store.soft_delete_by_id(entry.id)
-        results = store.semantic_search(vec, "m")
+        store.upsert_embedding(TEST_OWNER, entry.id, "m", 768, "h1", vec)
+        store.soft_delete_by_id(TEST_OWNER, entry.id)
+        results = store.semantic_search(TEST_OWNER, vec, "m")
         assert len(results) == 0
 
     def test_semantic_search_empty_store(self, store):
         """Search on empty store returns empty list."""
-        results = store.semantic_search(self._vec(768, 0), "m")
+        results = store.semantic_search(TEST_OWNER, self._vec(768, 0), "m")
         assert results == []
 
     def test_get_entries_without_embeddings(self, store):
@@ -1888,10 +1964,10 @@ class TestEmbeddings:
             expires=None,
             data={"description": "no embedding"},
         )
-        store.add(e1)
-        store.add(e2)
-        store.upsert_embedding(e1.id, "m", 768, "h1", self._vec(768, 0))
-        missing = store.get_entries_without_embeddings("m")
+        store.add(TEST_OWNER, e1)
+        store.add(TEST_OWNER, e2)
+        store.upsert_embedding(TEST_OWNER, e1.id, "m", 768, "h1", self._vec(768, 0))
+        missing = store.get_entries_without_embeddings(TEST_OWNER, "m")
         assert len(missing) == 1
         assert missing[0].id == e2.id
 
@@ -1908,8 +1984,8 @@ class TestEmbeddings:
             expires=None,
             data={"metric": "cpu", "suppress_level": "warning"},
         )
-        store.add(sup)
-        missing = store.get_entries_without_embeddings("m")
+        store.add(TEST_OWNER, sup)
+        missing = store.get_entries_without_embeddings(TEST_OWNER, "m")
         assert all(e.type != EntryType.SUPPRESSION for e in missing)
 
     def test_cascade_delete_removes_embedding(self, store):
@@ -1925,10 +2001,10 @@ class TestEmbeddings:
             expires=None,
             data={"description": "test"},
         )
-        store.add(entry)
-        store.upsert_embedding(entry.id, "m", 768, "h1", self._vec(768, 0))
+        store.add(TEST_OWNER, entry)
+        store.upsert_embedding(TEST_OWNER, entry.id, "m", 768, "h1", self._vec(768, 0))
         store.clear()
-        results = store.semantic_search(self._vec(768, 0), "m")
+        results = store.semantic_search(TEST_OWNER, self._vec(768, 0), "m")
         assert results == []
 
     def test_semantic_search_limit(self, store):
@@ -1946,9 +2022,9 @@ class TestEmbeddings:
                 expires=None,
                 data={"description": f"note-{i}"},
             )
-            store.add(entry)
-            store.upsert_embedding(entry.id, "m", 768, f"h{i}", vec)
-        results = store.semantic_search(vec, "m", limit=2)
+            store.add(TEST_OWNER, entry)
+            store.upsert_embedding(TEST_OWNER, entry.id, "m", 768, f"h{i}", vec)
+        results = store.semantic_search(TEST_OWNER, vec, "m", limit=2)
         assert len(results) == 2
 
     def test_semantic_search_since_filter(self, store):
@@ -1977,13 +2053,13 @@ class TestEmbeddings:
             expires=None,
             data={"description": "new"},
         )
-        store.add(e1)
-        store.add(e2)
+        store.add(TEST_OWNER, e1)
+        store.add(TEST_OWNER, e2)
         vec = self._vec(768, 0)
-        store.upsert_embedding(e1.id, "m", 768, "h1", vec)
-        store.upsert_embedding(e2.id, "m", 768, "h2", vec)
+        store.upsert_embedding(TEST_OWNER, e1.id, "m", 768, "h1", vec)
+        store.upsert_embedding(TEST_OWNER, e2.id, "m", 768, "h2", vec)
         cutoff = now_utc() - timedelta(hours=1)
-        results = store.semantic_search(vec, "m", since=cutoff)
+        results = store.semantic_search(TEST_OWNER, vec, "m", since=cutoff)
         assert len(results) == 1
         assert results[0][0].data["description"] == "new"
 
@@ -2013,13 +2089,13 @@ class TestEmbeddings:
             expires=None,
             data={"description": "new"},
         )
-        store.add(e1)
-        store.add(e2)
+        store.add(TEST_OWNER, e1)
+        store.add(TEST_OWNER, e2)
         vec = self._vec(768, 0)
-        store.upsert_embedding(e1.id, "m", 768, "h1", vec)
-        store.upsert_embedding(e2.id, "m", 768, "h2", vec)
+        store.upsert_embedding(TEST_OWNER, e1.id, "m", 768, "h1", vec)
+        store.upsert_embedding(TEST_OWNER, e2.id, "m", 768, "h2", vec)
         cutoff = now_utc() - timedelta(hours=1)
-        results = store.semantic_search(vec, "m", until=cutoff)
+        results = store.semantic_search(TEST_OWNER, vec, "m", until=cutoff)
         assert len(results) == 1
         assert results[0][0].data["description"] == "old"
 
@@ -2036,19 +2112,19 @@ class TestEmbeddings:
             expires=None,
             data={"description": "original text"},
         )
-        store.add(entry)
+        store.add(TEST_OWNER, entry)
         vec = self._vec(768, 0)
         # Embed with hash of original text
         from mcp_awareness.embeddings import compose_embedding_text, text_hash
 
         original_hash = text_hash(compose_embedding_text(entry))
-        store.upsert_embedding(entry.id, "m", 768, original_hash, vec)
+        store.upsert_embedding(TEST_OWNER, entry.id, "m", 768, original_hash, vec)
         # No stale entries yet
-        assert store.get_stale_embeddings("m") == []
+        assert store.get_stale_embeddings(TEST_OWNER, "m") == []
         # Update the entry text
-        store.update_entry(entry.id, {"description": "changed text"})
+        store.update_entry(TEST_OWNER, entry.id, {"description": "changed text"})
         # Now it should be stale
-        stale = store.get_stale_embeddings("m")
+        stale = store.get_stale_embeddings(TEST_OWNER, "m")
         assert len(stale) == 1
         assert stale[0].id == entry.id
 
@@ -2065,12 +2141,12 @@ class TestEmbeddings:
             expires=None,
             data={"description": "stable text"},
         )
-        store.add(entry)
+        store.add(TEST_OWNER, entry)
         from mcp_awareness.embeddings import compose_embedding_text, text_hash
 
         h = text_hash(compose_embedding_text(entry))
-        store.upsert_embedding(entry.id, "m", 768, h, self._vec(768, 0))
-        assert store.get_stale_embeddings("m") == []
+        store.upsert_embedding(TEST_OWNER, entry.id, "m", 768, h, self._vec(768, 0))
+        assert store.get_stale_embeddings(TEST_OWNER, "m") == []
 
 
 class TestConcurrency:
@@ -2097,7 +2173,7 @@ class TestConcurrency:
 
         def add_entry(entry: Entry) -> None:
             try:
-                store.add(entry)
+                store.add(TEST_OWNER, entry)
             except Exception as exc:
                 exceptions.append(exc)
 
@@ -2106,7 +2182,7 @@ class TestConcurrency:
             concurrent.futures.wait(futures, timeout=5)
 
         assert exceptions == [], f"Exceptions during concurrent writes: {exceptions}"
-        stored = store.get_knowledge(tags=["test"])
+        stored = store.get_knowledge(TEST_OWNER, tags=["test"])
         stored_ids = {e.id for e in stored}
         for entry in entries:
             assert entry.id in stored_ids, f"Entry {entry.id} missing after concurrent write"
@@ -2115,20 +2191,20 @@ class TestConcurrency:
         """Reads and writes in parallel must not raise exceptions."""
         # Seed some data first
         for i in range(5):
-            store.add(self._make_note(f"seed-{i}"))
+            store.add(TEST_OWNER, self._make_note(f"seed-{i}"))
 
         exceptions: list[Exception] = []
 
         def reader() -> None:
             try:
-                result = store.get_knowledge(tags=["test"])
+                result = store.get_knowledge(TEST_OWNER, tags=["test"])
                 assert isinstance(result, list)
             except Exception as exc:
                 exceptions.append(exc)
 
         def writer(idx: int) -> None:
             try:
-                store.add(self._make_note(f"parallel-{idx}"))
+                store.add(TEST_OWNER, self._make_note(f"parallel-{idx}"))
             except Exception as exc:
                 exceptions.append(exc)
 
@@ -2141,7 +2217,7 @@ class TestConcurrency:
 
         assert exceptions == [], f"Exceptions during concurrent read/write: {exceptions}"
         # All seed + parallel entries should exist
-        stored = store.get_knowledge(tags=["test"])
+        stored = store.get_knowledge(TEST_OWNER, tags=["test"])
         assert len(stored) >= 15  # 5 seed + 10 parallel
 
     def test_cleanup_thread_debouncing(self, store):
@@ -2229,7 +2305,7 @@ class TestConcurrency:
                     data={"description": f"upsert attempt {idx}"},
                     logical_key=logical_key,
                 )
-                store.upsert_by_logical_key(source, logical_key, entry)
+                store.upsert_by_logical_key(TEST_OWNER, source, logical_key, entry)
             except Exception as exc:
                 exceptions.append(exc)
 
@@ -2239,7 +2315,7 @@ class TestConcurrency:
 
         assert exceptions == [], f"Exceptions during concurrent upsert: {exceptions}"
         # Only one entry should exist for this source + logical_key
-        results = store.get_knowledge(source=source)
+        results = store.get_knowledge(TEST_OWNER, source=source)
         matching = [e for e in results if e.logical_key == logical_key]
         assert len(matching) == 1, (
             f"Expected 1 entry for logical_key={logical_key} but found {len(matching)}"
@@ -2314,12 +2390,12 @@ class TestEmbeddingRoundTrip:
 
         # Store entries and embeddings on orthogonal axes
         for i, entry in enumerate(entries):
-            store.add(entry)
-            store.upsert_embedding(entry.id, "m", 768, hashes[i], self._vec(768, i))
+            store.add(TEST_OWNER, entry)
+            store.upsert_embedding(TEST_OWNER, entry.id, "m", 768, hashes[i], self._vec(768, i))
 
         # Search with each vector — should find its own entry first
         for i, entry in enumerate(entries):
-            results = store.semantic_search(self._vec(768, i), "m", limit=3)
+            results = store.semantic_search(TEST_OWNER, self._vec(768, i), "m", limit=3)
             assert len(results) == 3
             assert results[0][0].id == entry.id
             assert results[0][1] > 0.99  # cosine similarity with itself
@@ -2341,19 +2417,21 @@ class TestEmbeddingRoundTrip:
             expires=None,
             data={"description": "original description"},
         )
-        store.add(entry)
+        store.add(TEST_OWNER, entry)
 
         original_hash = text_hash(compose_embedding_text(entry))
-        store.upsert_embedding(entry.id, "m", 768, original_hash, self._vec(768, 0))
+        store.upsert_embedding(TEST_OWNER, entry.id, "m", 768, original_hash, self._vec(768, 0))
 
         # Not stale yet
-        assert store.get_stale_embeddings("m") == []
+        assert store.get_stale_embeddings(TEST_OWNER, "m") == []
 
         # Update the entry — changes the composed text
-        store.update_entry(entry.id, {"description": "completely different description"})
+        store.update_entry(
+            TEST_OWNER, entry.id, {"description": "completely different description"}
+        )
 
         # Now it should be stale
-        stale = store.get_stale_embeddings("m")
+        stale = store.get_stale_embeddings(TEST_OWNER, "m")
         assert len(stale) == 1
         assert stale[0].id == entry.id
 
@@ -2374,29 +2452,29 @@ class TestEmbeddingRoundTrip:
             expires=None,
             data={"description": "version one"},
         )
-        store.add(entry)
+        store.add(TEST_OWNER, entry)
 
         h1 = text_hash(compose_embedding_text(entry))
-        store.upsert_embedding(entry.id, "m", 768, h1, self._vec(768, 0))
-        assert store.get_stale_embeddings("m") == []
+        store.upsert_embedding(TEST_OWNER, entry.id, "m", 768, h1, self._vec(768, 0))
+        assert store.get_stale_embeddings(TEST_OWNER, "m") == []
 
         # Mutate entry
-        store.update_entry(entry.id, {"description": "version two"})
-        assert len(store.get_stale_embeddings("m")) == 1
+        store.update_entry(TEST_OWNER, entry.id, {"description": "version two"})
+        assert len(store.get_stale_embeddings(TEST_OWNER, "m")) == 1
 
         # Re-embed: fetch updated entry, recompose, re-hash, re-store
-        updated = store.get_entry_by_id(entry.id)
+        updated = store.get_entry_by_id(TEST_OWNER, entry.id)
         assert updated is not None
         new_text = compose_embedding_text(updated)
         h2 = text_hash(new_text)
         assert h2 != h1
-        store.upsert_embedding(entry.id, "m", 768, h2, self._vec(768, 1))
+        store.upsert_embedding(TEST_OWNER, entry.id, "m", 768, h2, self._vec(768, 1))
 
         # No longer stale
-        assert store.get_stale_embeddings("m") == []
+        assert store.get_stale_embeddings(TEST_OWNER, "m") == []
 
         # Still searchable
-        results = store.semantic_search(self._vec(768, 1), "m", limit=1)
+        results = store.semantic_search(TEST_OWNER, self._vec(768, 1), "m", limit=1)
         assert len(results) == 1
         assert results[0][0].id == entry.id
 
@@ -2444,26 +2522,28 @@ class TestEmbeddingRoundTrip:
         # Same vector for all — filters are what differentiate results
         vec = self._vec(768, 0)
         for i, e in enumerate([note_infra, note_personal, alert_infra]):
-            store.add(e)
-            store.upsert_embedding(e.id, "m", 768, f"h{i}", vec)
+            store.add(TEST_OWNER, e)
+            store.upsert_embedding(TEST_OWNER, e.id, "m", 768, f"h{i}", vec)
 
         # Source filter
-        results = store.semantic_search(vec, "m", source="nas")
+        results = store.semantic_search(TEST_OWNER, vec, "m", source="nas")
         assert len(results) == 2
         assert all(r[0].source == "nas" for r in results)
 
         # Tag filter
-        results = store.semantic_search(vec, "m", tags=["health"])
+        results = store.semantic_search(TEST_OWNER, vec, "m", tags=["health"])
         assert len(results) == 1
         assert results[0][0].id == note_personal.id
 
         # Entry type filter
-        results = store.semantic_search(vec, "m", entry_type=EntryType.ALERT)
+        results = store.semantic_search(TEST_OWNER, vec, "m", entry_type=EntryType.ALERT)
         assert len(results) == 1
         assert results[0][0].id == alert_infra.id
 
         # Combined: source + type
-        results = store.semantic_search(vec, "m", source="nas", entry_type=EntryType.NOTE)
+        results = store.semantic_search(
+            TEST_OWNER, vec, "m", source="nas", entry_type=EntryType.NOTE
+        )
         assert len(results) == 1
         assert results[0][0].id == note_infra.id
 
@@ -2532,3 +2612,56 @@ class TestEmbeddingRoundTrip:
             assert entry.source in text
             for tag in entry.tags:
                 assert tag in text
+
+
+# ------------------------------------------------------------------
+# Owner isolation tests
+# ------------------------------------------------------------------
+
+
+class TestOwnerIsolation:
+    def test_entries_isolated_by_owner(self, store):
+        """Entries from one owner are not visible to another."""
+        entry = Entry(
+            id=make_id(),
+            type=EntryType.NOTE,
+            source="test",
+            tags=["t"],
+            created=now_utc(),
+            updated=now_utc(),
+            expires=None,
+            data={"description": "alice's"},
+        )
+        store.add("alice", entry)
+        assert len(store.get_entries("alice")) == 1
+        assert len(store.get_entries("bob")) == 0
+
+    def test_stats_scoped_to_owner(self, store):
+        entry = Entry(
+            id=make_id(),
+            type=EntryType.NOTE,
+            source="test",
+            tags=["t"],
+            created=now_utc(),
+            updated=now_utc(),
+            expires=None,
+            data={"description": "x"},
+        )
+        store.add("alice", entry)
+        assert store.get_stats("alice")["total"] == 1
+        assert store.get_stats("bob")["total"] == 0
+
+    def test_soft_delete_isolated(self, store):
+        entry = Entry(
+            id=make_id(),
+            type=EntryType.NOTE,
+            source="test",
+            tags=["t"],
+            created=now_utc(),
+            updated=now_utc(),
+            expires=None,
+            data={"description": "x"},
+        )
+        store.add("alice", entry)
+        assert store.soft_delete_by_id("bob", entry.id) is False
+        assert store.soft_delete_by_id("alice", entry.id) is True
