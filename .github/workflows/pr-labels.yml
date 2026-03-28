@@ -1,0 +1,159 @@
+# mcp-awareness — ambient system awareness for AI agents
+# Copyright (C) 2026 Chris Means
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Affero General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU Affero General Public License for more details.
+#
+# You should have received a copy of the GNU Affero General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+name: PR Label Automation
+
+# NOTE: The workflow_run trigger references the CI workflow by name ("CI").
+# If the CI workflow in ci.yml is ever renamed, update the name here too.
+on:
+  pull_request:
+    branches: [main]
+    types: [synchronize, labeled]
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+
+permissions:
+  pull-requests: write
+
+jobs:
+  # When new commits are pushed to a PR, reset to Awaiting CI.
+  # Removes any QA/review labels that are now stale.
+  on-push:
+    if: github.event_name == 'pull_request' && github.event.action == 'synchronize'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Reset labels on new push
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+        run: |
+          PR=${{ github.event.pull_request.number }}
+          REPO=${{ github.repository }}
+
+          HAD_QA_ACTIVE=false
+          if echo "$PR_LABELS" | grep -q '"QA Active"'; then
+            HAD_QA_ACTIVE=true
+          fi
+
+          # Remove stale workflow labels (coalesced where possible)
+          REMOVE=""
+          for LABEL in "Ready for QA" "Ready for QA Signoff" "QA Approved" "QA Active" "QA Failed" "QA Invalidated"; do
+            if echo "$PR_LABELS" | grep -q "\"$LABEL\""; then
+              if [ -n "$REMOVE" ]; then
+                REMOVE="$REMOVE,$LABEL"
+              else
+                REMOVE="$LABEL"
+              fi
+            fi
+          done
+          if [ -n "$REMOVE" ]; then
+            gh pr edit "$PR" --repo "$REPO" --remove-label "$REMOVE"
+          fi
+
+          # Add Awaiting CI (unless already present)
+          if ! echo "$PR_LABELS" | grep -q '"Awaiting CI"'; then
+            gh pr edit "$PR" --repo "$REPO" --add-label "Awaiting CI"
+          fi
+
+          # If QA was actively reviewing, flag the invalidation
+          if [ "$HAD_QA_ACTIVE" = true ]; then
+            gh pr edit "$PR" --repo "$REPO" --add-label "QA Invalidated"
+            gh pr comment "$PR" --repo "$REPO" \
+              --body "New commits pushed while QA was active. QA review invalidated — resetting to Awaiting CI."
+          fi
+
+  # When CI completes successfully, move from Awaiting CI to Ready for QA.
+  # Only works for same-origin PRs — fork PRs must be promoted manually
+  # because the workflow_run pull_requests array is empty for forks.
+  on-ci-pass:
+    if: >-
+      github.event_name == 'workflow_run'
+      && github.event.workflow_run.conclusion == 'success'
+      && github.event.workflow_run.event == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Promote to Ready for QA
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          REPO=${{ github.repository }}
+
+          # Get the PR number from the workflow run
+          PR=$(gh api repos/$REPO/actions/runs/${{ github.event.workflow_run.id }}/pull_requests \
+            --jq '.[0].number // empty')
+
+          if [ -z "$PR" ]; then
+            echo "No PR associated with this workflow run (may be a fork PR)"
+            exit 0
+          fi
+
+          LABELS=$(gh pr view "$PR" --repo "$REPO" --json labels --jq '.labels[].name')
+
+          # Only promote if Awaiting CI is present
+          if echo "$LABELS" | grep -q "^Awaiting CI$"; then
+            # Also clean up QA Invalidated if it lingered from a previous push
+            REMOVE="Awaiting CI"
+            if echo "$LABELS" | grep -q "^QA Invalidated$"; then
+              REMOVE="Awaiting CI,QA Invalidated"
+            fi
+            gh pr edit "$PR" --repo "$REPO" --remove-label "$REMOVE"
+            gh pr edit "$PR" --repo "$REPO" --add-label "Ready for QA"
+          fi
+
+  # When a workflow label is added, clean up labels that no longer apply.
+  # Only runs for labels that have cleanup rules — skips irrelevant labels
+  # to avoid wasted runner invocations.
+  on-label:
+    if: >-
+      github.event_name == 'pull_request'
+      && github.event.action == 'labeled'
+      && contains(fromJSON('["QA Active","Dev Active","Ready for QA Signoff","QA Failed","QA Approved"]'), github.event.label.name)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Clean up stale labels
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ADDED_LABEL: ${{ github.event.label.name }}
+          PR_LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+        run: |
+          PR=${{ github.event.pull_request.number }}
+          REPO=${{ github.repository }}
+
+          remove_if_present() {
+            if echo "$PR_LABELS" | grep -q "\"$1\""; then
+              gh pr edit "$PR" --repo "$REPO" --remove-label "$1"
+            fi
+          }
+
+          case "$ADDED_LABEL" in
+            "QA Active")
+              remove_if_present "Ready for QA"
+              ;;
+            "Dev Active")
+              remove_if_present "QA Failed"
+              remove_if_present "QA Invalidated"
+              ;;
+            "Ready for QA Signoff")
+              remove_if_present "QA Active"
+              ;;
+            "QA Failed")
+              remove_if_present "QA Active"
+              ;;
+            "QA Approved")
+              remove_if_present "Ready for QA Signoff"
+              ;;
+          esac
