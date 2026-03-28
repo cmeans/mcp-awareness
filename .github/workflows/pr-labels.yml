@@ -1,0 +1,121 @@
+name: PR Label Automation
+
+on:
+  pull_request:
+    branches: [main]
+    types: [synchronize, labeled]
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+
+permissions:
+  pull-requests: write
+
+jobs:
+  # When new commits are pushed to a PR, reset to Awaiting CI.
+  # Removes any QA/review labels that are now stale.
+  on-push:
+    if: github.event_name == 'pull_request' && github.event.action == 'synchronize'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Reset labels on new push
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          PR=${{ github.event.pull_request.number }}
+          REPO=${{ github.repository }}
+          LABELS='${{ toJSON(github.event.pull_request.labels.*.name) }}'
+
+          HAD_QA_ACTIVE=false
+          if echo "$LABELS" | grep -q '"QA Active"'; then
+            HAD_QA_ACTIVE=true
+          fi
+
+          # Remove stale workflow labels
+          for LABEL in "Ready for QA" "Ready for QA Signoff" "QA Approved" "QA Active" "QA Failed"; do
+            if echo "$LABELS" | grep -q "\"$LABEL\""; then
+              gh pr edit "$PR" --repo "$REPO" --remove-label "$LABEL"
+            fi
+          done
+
+          # Add Awaiting CI (unless already present)
+          if ! echo "$LABELS" | grep -q '"Awaiting CI"'; then
+            gh pr edit "$PR" --repo "$REPO" --add-label "Awaiting CI"
+          fi
+
+          # If QA was actively reviewing, flag the invalidation
+          if [ "$HAD_QA_ACTIVE" = true ]; then
+            gh pr edit "$PR" --repo "$REPO" --add-label "QA Invalidated"
+            gh pr comment "$PR" --repo "$REPO" \
+              --body "⚠️ New commits pushed while QA was active. QA review invalidated — resetting to Awaiting CI."
+          fi
+
+  # When CI completes successfully, move from Awaiting CI to Ready for QA.
+  on-ci-pass:
+    if: >-
+      github.event_name == 'workflow_run'
+      && github.event.workflow_run.conclusion == 'success'
+      && github.event.workflow_run.event == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Promote to Ready for QA
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          REPO=${{ github.repository }}
+
+          # Get the PR number from the workflow run
+          PR=$(gh api repos/$REPO/actions/runs/${{ github.event.workflow_run.id }}/pull_requests \
+            --jq '.[0].number // empty')
+
+          if [ -z "$PR" ]; then
+            echo "No PR associated with this workflow run"
+            exit 0
+          fi
+
+          LABELS=$(gh pr view "$PR" --repo "$REPO" --json labels --jq '.labels[].name')
+
+          # Only promote if Awaiting CI is present
+          if echo "$LABELS" | grep -q "^Awaiting CI$"; then
+            gh pr edit "$PR" --repo "$REPO" --remove-label "Awaiting CI"
+            gh pr edit "$PR" --repo "$REPO" --add-label "Ready for QA"
+          fi
+
+  # When a workflow label is added, clean up labels that no longer apply.
+  on-label:
+    if: github.event_name == 'pull_request' && github.event.action == 'labeled'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Clean up stale labels
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          PR=${{ github.event.pull_request.number }}
+          REPO=${{ github.repository }}
+          ADDED='${{ github.event.label.name }}'
+          LABELS='${{ toJSON(github.event.pull_request.labels.*.name) }}'
+
+          remove_if_present() {
+            if echo "$LABELS" | grep -q "\"$1\""; then
+              gh pr edit "$PR" --repo "$REPO" --remove-label "$1"
+            fi
+          }
+
+          case "$ADDED" in
+            "QA Active")
+              remove_if_present "Ready for QA"
+              ;;
+            "Dev Active")
+              remove_if_present "QA Failed"
+              remove_if_present "QA Invalidated"
+              ;;
+            "Ready for QA Signoff")
+              remove_if_present "QA Active"
+              ;;
+            "QA Failed")
+              remove_if_present "QA Active"
+              ;;
+            "QA Approved")
+              remove_if_present "Ready for QA Signoff"
+              ;;
+          esac
