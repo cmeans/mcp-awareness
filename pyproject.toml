@@ -35,6 +35,7 @@ packages = ["src/mcp_awareness"]
 
 [tool.hatch.build.targets.wheel.force-include]
 "src/mcp_awareness/instructions.md" = "mcp_awareness/instructions.md"
+"src/mcp_awareness/favicon.ico" = "mcp_awareness/favicon.ico"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
