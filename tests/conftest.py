@@ -25,6 +25,11 @@ from testcontainers.postgres import PostgresContainer
 
 from mcp_awareness.postgres_store import PostgresStore
 
+TEST_OWNER = "test-owner"
+
+# Set default owner for all tests before any module imports read it.
+os.environ["AWARENESS_DEFAULT_OWNER"] = TEST_OWNER
+
 # testcontainers needs to find the Docker socket. Docker Desktop on Linux
 # uses a non-default path — set DOCKER_HOST if not already configured.
 _DOCKER_DESKTOP_SOCK = os.path.expanduser("~/.docker/desktop/docker.sock")

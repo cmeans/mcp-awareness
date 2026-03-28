@@ -82,6 +82,31 @@ OLLAMA_URL = os.environ.get("AWARENESS_OLLAMA_URL", "http://ollama:11434")
 EMBEDDING_DIMENSIONS = int(os.environ.get("AWARENESS_EMBEDDING_DIMENSIONS", "768"))
 
 # ---------------------------------------------------------------------------
+# Owner context
+# ---------------------------------------------------------------------------
+
+import contextvars  # noqa: E402
+import getpass  # noqa: E402
+
+_owner_ctx: contextvars.ContextVar[str] = contextvars.ContextVar("owner_id")
+
+try:
+    _fallback_user = getpass.getuser()
+except Exception:
+    _fallback_user = "system"
+
+DEFAULT_OWNER = os.environ.get("AWARENESS_DEFAULT_OWNER", _fallback_user)
+
+
+def _owner_id() -> str:
+    """Get current owner_id from request context or default."""
+    try:
+        return _owner_ctx.get()
+    except LookupError:
+        return DEFAULT_OWNER
+
+
+# ---------------------------------------------------------------------------
 # Store (lazy-initialised)
 # ---------------------------------------------------------------------------
 
@@ -145,6 +170,7 @@ _embedding_pool = concurrent.futures.ThreadPoolExecutor(max_workers=2, thread_na
 
 
 def _do_embed(
+    owner_id: str,
     entry_id: str,
     entry_source: str,
     entry_tags: list[str],
@@ -174,7 +200,7 @@ def _do_embed(
         vectors = provider.embed([text])
         if vectors:
             store.upsert_embedding(
-                entry_id, provider.model_name, provider.dimensions, h, vectors[0]
+                owner_id, entry_id, provider.model_name, provider.dimensions, h, vectors[0]
             )
     except Exception:
         logger.debug("Embedding failed for entry %s", entry_id, exc_info=True)
@@ -185,8 +211,9 @@ def _generate_embedding(entry: Entry) -> None:
     if not should_embed(entry):
         return
     entry_type_val = entry.type.value if isinstance(entry.type, EntryType) else entry.type
+    oid = _owner_id()
     _embedding_pool.submit(
-        _do_embed, entry.id, entry.source, list(entry.tags), dict(entry.data), entry_type_val
+        _do_embed, oid, entry.id, entry.source, list(entry.tags), dict(entry.data), entry_type_val
     )
 
 
@@ -195,7 +222,7 @@ def _log_reads(entries: list[Any], tool_name: str) -> None:
     try:
         ids = [e.id for e in entries if hasattr(e, "id")]
         if ids:
-            store.log_read(ids, tool_used=tool_name)
+            store.log_read(_owner_id(), ids, tool_used=tool_name)
     except Exception:
         logger.debug("Read logging failed for %s", tool_name, exc_info=True)
 
@@ -232,7 +259,7 @@ def _sync_custom_prompts() -> None:
     from mcp.server.fastmcp.prompts import Prompt
     from mcp.server.fastmcp.prompts.base import PromptArgument
 
-    entries = store.get_entries(source="custom-prompt")
+    entries = store.get_entries(_owner_id(), source="custom-prompt")
     # Access _prompts dict for deletion only — no public remove API exists in FastMCP.
     # add_prompt() is used for insertion (public API).
     prompts_dict = mcp._prompt_manager._prompts

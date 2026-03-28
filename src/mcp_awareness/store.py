@@ -35,28 +35,31 @@ TRASH_RETENTION_DAYS = 30
 class Store(Protocol):
     """Storage protocol — the contract that all backends must satisfy."""
 
-    def add(self, entry: Entry) -> Entry:
+    def add(self, owner_id: str, entry: Entry) -> Entry:
         """Store a new entry and return it."""
         ...
 
-    def upsert_status(self, source: str, tags: list[str], data: dict[str, Any]) -> Entry:
+    def upsert_status(
+        self, owner_id: str, source: str, tags: list[str], data: dict[str, Any]
+    ) -> Entry:
         """Upsert a status entry for a source (one active status per source)."""
         ...
 
     def upsert_alert(
-        self, source: str, tags: list[str], alert_id: str, data: dict[str, Any]
+        self, owner_id: str, source: str, tags: list[str], alert_id: str, data: dict[str, Any]
     ) -> Entry:
         """Upsert an alert keyed by source + alert_id."""
         ...
 
     def upsert_preference(
-        self, key: str, scope: str, tags: list[str], data: dict[str, Any]
+        self, owner_id: str, key: str, scope: str, tags: list[str], data: dict[str, Any]
     ) -> Entry:
         """Upsert a preference keyed by key + scope."""
         ...
 
     def get_entries(
         self,
+        owner_id: str,
         entry_type: EntryType | None = None,
         source: str | None = None,
         tags: list[str] | None = None,
@@ -67,16 +70,17 @@ class Store(Protocol):
         """Query active entries with optional filters for type, source, tags, and time."""
         ...
 
-    def get_sources(self) -> list[str]:
+    def get_sources(self, owner_id: str) -> list[str]:
         """Return all unique sources that have reported status."""
         ...
 
-    def get_latest_status(self, source: str) -> Entry | None:
+    def get_latest_status(self, owner_id: str, source: str) -> Entry | None:
         """Get the most recent active status entry for a source, or None."""
         ...
 
     def get_active_alerts(
         self,
+        owner_id: str,
         source: str | None = None,
         since: datetime | None = None,
         limit: int | None = None,
@@ -85,20 +89,21 @@ class Store(Protocol):
         """Get non-expired alert entries, optionally filtered by source and time."""
         ...
 
-    def get_active_suppressions(self, source: str | None = None) -> list[Entry]:
+    def get_active_suppressions(self, owner_id: str, source: str | None = None) -> list[Entry]:
         """Get non-expired suppression entries, optionally filtered by source."""
         ...
 
-    def get_patterns(self, source: str | None = None) -> list[Entry]:
+    def get_patterns(self, owner_id: str, source: str | None = None) -> list[Entry]:
         """Get all pattern entries, optionally filtered by source."""
         ...
 
-    def count_active_suppressions(self) -> int:
+    def count_active_suppressions(self, owner_id: str) -> int:
         """Return the count of non-expired suppression entries."""
         ...
 
     def get_knowledge(
         self,
+        owner_id: str,
         tags: list[str] | None = None,
         include_history: str | None = None,
         since: datetime | None = None,
@@ -114,66 +119,79 @@ class Store(Protocol):
         """Query knowledge entries (note, pattern, context, preference) with rich filtering."""
         ...
 
-    def get_entry_by_id(self, entry_id: str) -> Entry | None:
+    def get_entry_by_id(self, owner_id: str, entry_id: str) -> Entry | None:
         """Get a single active entry by ID, or None if not found or deleted."""
         ...
 
-    def get_entries_by_ids(self, entry_ids: list[str]) -> list[Entry]:
+    def get_entries_by_ids(self, owner_id: str, entry_ids: list[str]) -> list[Entry]:
         """Get multiple active entries by ID in a single query."""
         ...
 
-    def update_entry(self, entry_id: str, updates: dict[str, Any]) -> Entry | None:
+    def update_entry(self, owner_id: str, entry_id: str, updates: dict[str, Any]) -> Entry | None:
         """Update a knowledge entry in place, appending previous values to changelog."""
         ...
 
     def upsert_by_logical_key(
-        self, source: str, logical_key: str, entry: Entry
+        self, owner_id: str, source: str, logical_key: str, entry: Entry
     ) -> tuple[Entry, bool]:
         """Upsert by source + logical_key. Returns (entry, created)."""
         ...
 
-    def get_stats(self) -> dict[str, Any]:
+    def get_stats(self, owner_id: str) -> dict[str, Any]:
         """Get entry counts by type, list of sources, and total count."""
         ...
 
-    def get_tags(self) -> list[dict[str, Any]]:
+    def get_tags(self, owner_id: str) -> list[dict[str, Any]]:
         """Get all tags in use with usage counts."""
         ...
 
-    def soft_delete_by_id(self, entry_id: str) -> bool:
+    def soft_delete_by_id(self, owner_id: str, entry_id: str) -> bool:
         """Soft-delete a single entry. Returns True if an entry was trashed."""
         ...
 
-    def soft_delete_by_tags(self, tags: list[str]) -> int:
+    def soft_delete_by_tags(self, owner_id: str, tags: list[str]) -> int:
         """Soft-delete all entries matching ALL given tags. Returns count trashed."""
         ...
 
-    def soft_delete_by_source(self, source: str, entry_type: EntryType | None = None) -> int:
+    def soft_delete_by_source(
+        self, owner_id: str, source: str, entry_type: EntryType | None = None
+    ) -> int:
         """Soft-delete all entries for a source, optionally by type. Returns count trashed."""
         ...
 
     def get_deleted(
-        self, since: datetime | None = None, limit: int | None = None, offset: int | None = None
+        self,
+        owner_id: str,
+        since: datetime | None = None,
+        limit: int | None = None,
+        offset: int | None = None,
     ) -> list[Entry]:
         """Get all soft-deleted entries (the trash), ordered by deletion time."""
         ...
 
-    def restore_by_id(self, entry_id: str) -> bool:
+    def restore_by_id(self, owner_id: str, entry_id: str) -> bool:
         """Restore a soft-deleted entry. Returns True if restored."""
         ...
 
-    def restore_by_tags(self, tags: list[str]) -> int:
+    def restore_by_tags(self, owner_id: str, tags: list[str]) -> int:
         """Restore all soft-deleted entries matching ALL given tags. Returns count restored."""
         ...
 
     # Read / action tracking
 
-    def log_read(self, entry_ids: list[str], tool_used: str, platform: str | None = None) -> None:
+    def log_read(
+        self,
+        owner_id: str,
+        entry_ids: list[str],
+        tool_used: str,
+        platform: str | None = None,
+    ) -> None:
         """Record that entries were read. Fire-and-forget — failures are silent."""
         ...
 
     def log_action(
         self,
+        owner_id: str,
         entry_id: str,
         action: str,
         platform: str | None = None,
@@ -185,6 +203,7 @@ class Store(Protocol):
 
     def get_reads(
         self,
+        owner_id: str,
         entry_id: str | None = None,
         since: datetime | None = None,
         platform: str | None = None,
@@ -195,6 +214,7 @@ class Store(Protocol):
 
     def get_actions(
         self,
+        owner_id: str,
         entry_id: str | None = None,
         since: datetime | None = None,
         platform: str | None = None,
@@ -204,12 +224,15 @@ class Store(Protocol):
         """Query action records with optional filters."""
         ...
 
-    def get_unread(self, since: datetime | None = None, limit: int | None = None) -> list[Entry]:
+    def get_unread(
+        self, owner_id: str, since: datetime | None = None, limit: int | None = None
+    ) -> list[Entry]:
         """Get entries with zero reads, optionally created since a timestamp."""
         ...
 
     def get_activity(
         self,
+        owner_id: str,
         since: datetime | None = None,
         platform: str | None = None,
         limit: int | None = None,
@@ -217,7 +240,7 @@ class Store(Protocol):
         """Get a unified timeline of reads and actions, sorted by timestamp."""
         ...
 
-    def get_read_counts(self, entry_ids: list[str]) -> dict[str, dict[str, Any]]:
+    def get_read_counts(self, owner_id: str, entry_ids: list[str]) -> dict[str, dict[str, Any]]:
         """Get read_count and last_read for a list of entry IDs."""
         ...
 
@@ -225,6 +248,7 @@ class Store(Protocol):
 
     def get_intentions(
         self,
+        owner_id: str,
         state: str | None = None,
         source: str | None = None,
         tags: list[str] | None = None,
@@ -234,12 +258,12 @@ class Store(Protocol):
         ...
 
     def update_intention_state(
-        self, entry_id: str, new_state: str, reason: str | None = None
+        self, owner_id: str, entry_id: str, new_state: str, reason: str | None = None
     ) -> Entry | None:
         """Transition an intention to a new state. Appends to changelog."""
         ...
 
-    def get_fired_intentions(self) -> list[Entry]:
+    def get_fired_intentions(self, owner_id: str) -> list[Entry]:
         """Get intentions whose deliver_at has passed and state is still pending."""
         ...
 
@@ -247,6 +271,7 @@ class Store(Protocol):
 
     def upsert_embedding(
         self,
+        owner_id: str,
         entry_id: str,
         model: str,
         dimensions: int,
@@ -258,6 +283,7 @@ class Store(Protocol):
 
     def get_entries_without_embeddings(
         self,
+        owner_id: str,
         model: str,
         limit: int = 100,
     ) -> list[Entry]:
@@ -266,6 +292,7 @@ class Store(Protocol):
 
     def get_stale_embeddings(
         self,
+        owner_id: str,
         model: str,
         limit: int = 100,
     ) -> list[Entry]:
@@ -274,6 +301,7 @@ class Store(Protocol):
 
     def semantic_search(
         self,
+        owner_id: str,
         embedding: list[float],
         model: str,
         entry_type: EntryType | None = None,
@@ -286,7 +314,7 @@ class Store(Protocol):
         """Search entries by vector similarity. Returns (entry, score) pairs sorted by relevance."""
         ...
 
-    def get_referencing_entries(self, entry_id: str) -> list[Entry]:
+    def get_referencing_entries(self, owner_id: str, entry_id: str) -> list[Entry]:
         """Find entries whose data.related_ids contains the given entry_id."""
         ...
 

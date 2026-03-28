@@ -28,6 +28,8 @@ from mcp_awareness.embeddings import OllamaEmbedding
 from mcp_awareness.postgres_store import PostgresStore
 from mcp_awareness.store import Store
 
+TEST_OWNER = "test-owner"
+
 
 @pytest.fixture(autouse=True)
 def _use_temp_store(store: Store, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -88,8 +90,9 @@ class TestBriefingResource:
     @pytest.mark.anyio
     async def test_briefing_with_alert(self) -> None:
         s = _store()
-        s.upsert_status("nas", ["infra"], {"metrics": {}, "ttl_sec": 3600})
+        s.upsert_status(TEST_OWNER, "nas", ["infra"], {"metrics": {}, "ttl_sec": 3600})
         s.upsert_alert(
+            TEST_OWNER,
             "nas",
             ["infra"],
             "a1",
@@ -117,6 +120,7 @@ class TestAlertsResource:
     async def test_alerts_returned(self) -> None:
         s = _store()
         s.upsert_alert(
+            TEST_OWNER,
             "nas",
             ["infra"],
             "a1",
@@ -137,6 +141,7 @@ class TestAlertsResource:
     async def test_source_alerts(self) -> None:
         s = _store()
         s.upsert_alert(
+            TEST_OWNER,
             "nas",
             ["infra"],
             "a1",
@@ -149,6 +154,7 @@ class TestAlertsResource:
             },
         )
         s.upsert_alert(
+            TEST_OWNER,
             "ci",
             ["cicd"],
             "a2",
@@ -170,7 +176,7 @@ class TestStatusResource:
     @pytest.mark.anyio
     async def test_status_found(self) -> None:
         s = _store()
-        s.upsert_status("nas", ["infra"], {"metrics": {"cpu": 42}, "ttl_sec": 120})
+        s.upsert_status(TEST_OWNER, "nas", ["infra"], {"metrics": {"cpu": 42}, "ttl_sec": 120})
         result = await server_mod.source_status_resource("nas")
         data = json.loads(result)
         assert data["source"] == "nas"
@@ -250,7 +256,7 @@ class TestReportStatusTool:
         data = json.loads(result)
         assert data["status"] == "ok"
         # Verify inventory was stored
-        status = _store().get_latest_status("nas")
+        status = _store().get_latest_status(TEST_OWNER, "nas")
         assert status is not None
         assert status.data["inventory"]["docker"]["running"] == 5
 
@@ -285,7 +291,7 @@ class TestReportAlertTool:
         )
         data = json.loads(result)
         assert data["status"] == "ok"
-        alerts = _store().get_active_alerts("nas")
+        alerts = _store().get_active_alerts(TEST_OWNER, "nas")
         assert len(alerts) == 1
         assert alerts[0].data["details"] == {"threshold": 95}
         assert alerts[0].data["diagnostics"] == {"top_process": "qbt"}
@@ -311,7 +317,7 @@ class TestReportAlertTool:
         )
         data = json.loads(result)
         assert data["action"] == "resolved"
-        assert _store().get_active_alerts("nas") == []
+        assert _store().get_active_alerts(TEST_OWNER, "nas") == []
 
 
 class TestLearnPatternTool:
@@ -327,7 +333,7 @@ class TestLearnPatternTool:
         data = json.loads(result)
         assert data["status"] == "ok"
         assert data["description"] == "qBittorrent stops on Fridays"
-        patterns = _store().get_patterns("nas")
+        patterns = _store().get_patterns(TEST_OWNER, "nas")
         assert len(patterns) == 1
         assert patterns[0].data["conditions"] == {"day_of_week": "friday"}
         assert patterns[0].data["learned_from"] == "conversation"
@@ -341,7 +347,7 @@ class TestLearnPatternTool:
         )
         data = json.loads(result)
         assert data["status"] == "ok"
-        patterns = _store().get_patterns("nas")
+        patterns = _store().get_patterns(TEST_OWNER, "nas")
         assert patterns[0].data["conditions"] == {}
         assert patterns[0].data["effect"] == ""
 
@@ -440,14 +446,14 @@ class TestSuppressAlertTool:
         data = json.loads(result)
         assert data["status"] == "ok"
         assert "expires" in data
-        assert _store().count_active_suppressions() == 1
+        assert _store().count_active_suppressions(TEST_OWNER) == 1
 
     @pytest.mark.anyio
     async def test_suppress_alert_global(self) -> None:
         result = await server_mod.suppress_alert(reason="silence everything")
         data = json.loads(result)
         assert data["status"] == "ok"
-        supps = _store().get_active_suppressions("any-source")
+        supps = _store().get_active_suppressions(TEST_OWNER, "any-source")
         assert len(supps) == 1  # global suppression matches any source
 
 
@@ -463,7 +469,7 @@ class TestAddContextTool:
         data = json.loads(result)
         assert data["status"] == "ok"
         assert "expires" in data
-        knowledge = _store().get_knowledge(tags=["infra"])
+        knowledge = _store().get_knowledge(TEST_OWNER, tags=["infra"])
         assert len(knowledge) == 1
         assert knowledge[0].data["description"] == "sdb replaced, RAID rebuilt"
 
@@ -495,7 +501,7 @@ class TestSetPreferenceTool:
         )
         from mcp_awareness.schema import EntryType
 
-        entries = _store().get_entries(entry_type=EntryType.PREFERENCE)
+        entries = _store().get_entries(TEST_OWNER, entry_type=EntryType.PREFERENCE)
         assert len(entries) == 1
         assert entries[0].data["value"] == "one_sentence"
 
@@ -525,8 +531,9 @@ class TestGetBriefingTool:
     @pytest.mark.anyio
     async def test_get_briefing_with_alert(self) -> None:
         s = _store()
-        s.upsert_status("nas", ["infra"], {"metrics": {}, "ttl_sec": 3600})
+        s.upsert_status(TEST_OWNER, "nas", ["infra"], {"metrics": {}, "ttl_sec": 3600})
         s.upsert_alert(
+            TEST_OWNER,
             "nas",
             ["infra"],
             "a1",
@@ -554,6 +561,7 @@ class TestGetAlertsTool:
     async def test_get_alerts_filtered(self) -> None:
         s = _store()
         s.upsert_alert(
+            TEST_OWNER,
             "nas",
             ["infra"],
             "a1",
@@ -566,6 +574,7 @@ class TestGetAlertsTool:
             },
         )
         s.upsert_alert(
+            TEST_OWNER,
             "ci",
             ["cicd"],
             "a2",
@@ -598,7 +607,9 @@ class TestGetAlertsTool:
 class TestGetStatusTool:
     @pytest.mark.anyio
     async def test_get_status(self) -> None:
-        _store().upsert_status("nas", ["infra"], {"metrics": {"cpu": 42}, "ttl_sec": 120})
+        _store().upsert_status(
+            TEST_OWNER, "nas", ["infra"], {"metrics": {"cpu": 42}, "ttl_sec": 120}
+        )
         result = await server_mod.get_status(source="nas")
         data = json.loads(result)
         assert data["data"]["metrics"]["cpu"] == 42
@@ -691,7 +702,7 @@ class TestSuppressAlertTagsNotDuplicated:
     async def test_suppression_data_has_no_tags_field(self) -> None:
         """Tags should only be in the entry envelope, not duplicated in data."""
         await server_mod.suppress_alert(source="nas", tags=["infra", "docker"], reason="test")
-        supps = _store().get_active_suppressions()
+        supps = _store().get_active_suppressions(TEST_OWNER)
         assert len(supps) == 1
         assert supps[0].tags == ["infra", "docker"]
         assert "tags" not in supps[0].data
@@ -719,9 +730,9 @@ class TestDeleteEntryTool:
         assert data["trashed"] == 1
         assert data["recoverable_days"] == 30
         # Not visible in normal queries
-        assert len(_store().get_patterns()) == 0
+        assert len(_store().get_patterns(TEST_OWNER)) == 0
         # But in trash
-        assert len(_store().get_deleted()) == 1
+        assert len(_store().get_deleted(TEST_OWNER)) == 1
 
     @pytest.mark.anyio
     async def test_delete_by_id_not_found(self) -> None:
@@ -738,7 +749,7 @@ class TestDeleteEntryTool:
         assert data["status"] == "dry_run"
         assert data["would_trash"] == 2
         # Nothing actually trashed
-        assert len(_store().get_patterns("nas")) == 2
+        assert len(_store().get_patterns(TEST_OWNER, "nas")) == 2
 
     @pytest.mark.anyio
     async def test_delete_by_source_with_confirm(self) -> None:
@@ -749,8 +760,8 @@ class TestDeleteEntryTool:
         data = json.loads(result)
         assert data["status"] == "ok"
         assert data["trashed"] == 2
-        assert len(_store().get_patterns("nas")) == 0
-        assert len(_store().get_patterns("ci")) == 1
+        assert len(_store().get_patterns(TEST_OWNER, "nas")) == 0
+        assert len(_store().get_patterns(TEST_OWNER, "ci")) == 1
 
     @pytest.mark.anyio
     async def test_dry_run_by_tags_uses_and_logic(self) -> None:
@@ -776,7 +787,7 @@ class TestDeleteEntryTool:
         assert data["status"] == "ok"
         assert data["trashed"] == 1
         # The entry with only ["infra"] should survive
-        remaining = _store().get_patterns("nas")
+        remaining = _store().get_patterns(TEST_OWNER, "nas")
         assert len(remaining) == 1
         assert remaining[0].data["description"] == "one tag only"
 
@@ -795,12 +806,12 @@ class TestRestoreEntryTool:
         )
         entry_id = json.loads(result)["id"]
         await server_mod.delete_entry(entry_id=entry_id)
-        assert len(_store().get_patterns()) == 0
+        assert len(_store().get_patterns(TEST_OWNER)) == 0
         restore_result = await server_mod.restore_entry(entry_id=entry_id)
         data = json.loads(restore_result)
         assert data["status"] == "ok"
         assert data["restored"] == 1
-        assert len(_store().get_patterns()) == 1
+        assert len(_store().get_patterns(TEST_OWNER)) == 1
 
     @pytest.mark.anyio
     async def test_restore_not_found(self) -> None:
@@ -976,7 +987,7 @@ class TestUpdateEntryTool:
             alert_type="threshold",
             message="CPU high",
         )
-        alerts = _store().get_active_alerts()
+        alerts = _store().get_active_alerts(TEST_OWNER)
         result = await server_mod.update_entry(entry_id=alerts[0].id, description="changed")
         data = json.loads(result)
         assert data["status"] == "error"
@@ -1375,6 +1386,7 @@ class TestPrompts:
     async def test_system_status_with_description(self) -> None:
         """Status entries with a description field in data show it in the output."""
         _store().upsert_status(
+            TEST_OWNER,
             "test-nas-desc",
             ["infra"],
             {"metrics": {"cpu": 10}, "description": "All systems nominal", "ttl_sec": 120},
@@ -1535,8 +1547,8 @@ class TestCustomPrompts:
         pm = server_mod.mcp._prompt_manager
         assert "user/temp" in pm._prompts
         # Delete and re-sync
-        entry_id = server_mod.store.get_entries(source="custom-prompt")[0].id
-        server_mod.store.soft_delete_by_id(entry_id)
+        entry_id = server_mod.store.get_entries(TEST_OWNER, source="custom-prompt")[0].id
+        server_mod.store.soft_delete_by_id(TEST_OWNER, entry_id)
         server_mod._sync_custom_prompts()
         assert "user/temp" not in pm._prompts
 
@@ -1553,6 +1565,7 @@ class TestListModeAndSince:
         from mcp_awareness.schema import Entry, EntryType, make_id, now_utc
 
         s.add(
+            TEST_OWNER,
             Entry(
                 id=make_id(),
                 type=EntryType.NOTE,
@@ -1562,7 +1575,7 @@ class TestListModeAndSince:
                 updated=now_utc(),
                 expires=None,
                 data={"description": "A test note", "content": "lots of content here"},
-            )
+            ),
         )
         # Full mode — includes data with content
         full = json.loads(await server_mod.get_knowledge())
@@ -1582,6 +1595,7 @@ class TestListModeAndSince:
     async def test_get_alerts_list_mode(self) -> None:
         s = _store()
         s.upsert_alert(
+            TEST_OWNER,
             "nas",
             ["infra"],
             "a1",
@@ -1601,6 +1615,7 @@ class TestListModeAndSince:
         s = _store()
         old = datetime.now(timezone.utc) - timedelta(hours=2)
         s.add(
+            TEST_OWNER,
             Entry(
                 id=make_id(),
                 type=EntryType.NOTE,
@@ -1610,9 +1625,10 @@ class TestListModeAndSince:
                 updated=old,
                 expires=None,
                 data={"description": "old note"},
-            )
+            ),
         )
         s.add(
+            TEST_OWNER,
             Entry(
                 id=make_id(),
                 type=EntryType.NOTE,
@@ -1622,7 +1638,7 @@ class TestListModeAndSince:
                 updated=datetime.now(timezone.utc),
                 expires=None,
                 data={"description": "recent note"},
-            )
+            ),
         )
         cutoff = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
         result = json.loads(await server_mod.get_knowledge(since=cutoff))
@@ -1635,6 +1651,7 @@ class TestListModeAndSince:
 
         s = _store()
         entry = s.add(
+            TEST_OWNER,
             Entry(
                 id=make_id(),
                 type=EntryType.NOTE,
@@ -1644,9 +1661,9 @@ class TestListModeAndSince:
                 updated=now_utc(),
                 expires=None,
                 data={"description": "will delete", "content": "big content"},
-            )
+            ),
         )
-        s.soft_delete_by_id(entry.id)
+        s.soft_delete_by_id(TEST_OWNER, entry.id)
         listing = json.loads(await server_mod.get_deleted(mode="list"))
         assert len(listing) == 1
         assert "data" not in listing[0]
@@ -1659,6 +1676,7 @@ class TestListModeAndSince:
         s = _store()
         old = datetime.now(timezone.utc) - timedelta(hours=2)
         s.upsert_alert(
+            TEST_OWNER,
             "nas",
             ["infra"],
             "old-alert",
@@ -1671,6 +1689,7 @@ class TestListModeAndSince:
                 (old,),
             )
         s.upsert_alert(
+            TEST_OWNER,
             "nas",
             ["infra"],
             "recent-alert",
@@ -1692,6 +1711,7 @@ class TestListModeAndSince:
 
         s = _store()
         s.add(
+            TEST_OWNER,
             Entry(
                 id=make_id(),
                 type=EntryType.NOTE,
@@ -1701,9 +1721,10 @@ class TestListModeAndSince:
                 updated=now_utc(),
                 expires=None,
                 data={"description": "from alpha"},
-            )
+            ),
         )
         s.add(
+            TEST_OWNER,
             Entry(
                 id=make_id(),
                 type=EntryType.NOTE,
@@ -1713,7 +1734,7 @@ class TestListModeAndSince:
                 updated=now_utc(),
                 expires=None,
                 data={"description": "from beta"},
-            )
+            ),
         )
         result = json.loads(await server_mod.get_knowledge(source="alpha"))
         assert len(result) == 1
@@ -1743,6 +1764,7 @@ class TestReadActionTracking:
 
         s = _store()
         entry = s.add(
+            TEST_OWNER,
             Entry(
                 id=make_id(),
                 type=EntryType.NOTE,
@@ -1752,7 +1774,7 @@ class TestReadActionTracking:
                 updated=now_utc(),
                 expires=None,
                 data={"description": "actionable note"},
-            )
+            ),
         )
         result = json.loads(
             await server_mod.acted_on(
@@ -1779,6 +1801,7 @@ class TestReadActionTracking:
 
         s = _store()
         s.add(
+            TEST_OWNER,
             Entry(
                 id=make_id(),
                 type=EntryType.NOTE,
@@ -1788,7 +1811,7 @@ class TestReadActionTracking:
                 updated=now_utc(),
                 expires=None,
                 data={"description": "will be read"},
-            )
+            ),
         )
         # This should auto-log reads
         await server_mod.get_knowledge()
@@ -1802,6 +1825,7 @@ class TestReadActionTracking:
 
         s = _store()
         entry = s.add(
+            TEST_OWNER,
             Entry(
                 id=make_id(),
                 type=EntryType.NOTE,
@@ -1811,7 +1835,7 @@ class TestReadActionTracking:
                 updated=now_utc(),
                 expires=None,
                 data={"description": "test"},
-            )
+            ),
         )
         await server_mod.acted_on(entry_id=entry.id, action="test action")
         actions = json.loads(await server_mod.get_actions(entry_id=entry.id))
@@ -1824,6 +1848,7 @@ class TestReadActionTracking:
 
         s = _store()
         s.add(
+            TEST_OWNER,
             Entry(
                 id=make_id(),
                 type=EntryType.NOTE,
@@ -1833,9 +1858,10 @@ class TestReadActionTracking:
                 updated=now_utc(),
                 expires=None,
                 data={"description": "never read"},
-            )
+            ),
         )
         read_entry = s.add(
+            TEST_OWNER,
             Entry(
                 id=make_id(),
                 type=EntryType.NOTE,
@@ -1845,9 +1871,9 @@ class TestReadActionTracking:
                 updated=now_utc(),
                 expires=None,
                 data={"description": "will be read"},
-            )
+            ),
         )
-        s.log_read([read_entry.id], tool_used="test")
+        s.log_read(TEST_OWNER, [read_entry.id], tool_used="test")
         unread = json.loads(await server_mod.get_unread())
         assert len(unread) == 1
         assert unread[0]["description"] == "never read"
@@ -1859,6 +1885,7 @@ class TestReadActionTracking:
         s = _store()
         for i in range(5):
             s.add(
+                TEST_OWNER,
                 Entry(
                     id=make_id(),
                     type=EntryType.NOTE,
@@ -1868,7 +1895,7 @@ class TestReadActionTracking:
                     updated=now_utc(),
                     expires=None,
                     data={"description": f"unread-{i}"},
-                )
+                ),
             )
         all_unread = json.loads(await server_mod.get_unread())
         assert len(all_unread) == 5
@@ -1881,6 +1908,7 @@ class TestReadActionTracking:
 
         s = _store()
         entry = s.add(
+            TEST_OWNER,
             Entry(
                 id=make_id(),
                 type=EntryType.NOTE,
@@ -1890,9 +1918,9 @@ class TestReadActionTracking:
                 updated=now_utc(),
                 expires=None,
                 data={"description": "test"},
-            )
+            ),
         )
-        s.log_read([entry.id], tool_used="test")
+        s.log_read(TEST_OWNER, [entry.id], tool_used="test")
         await server_mod.acted_on(entry_id=entry.id, action="used")
         activity = json.loads(await server_mod.get_activity())
         assert len(activity) >= 2
@@ -1907,6 +1935,7 @@ class TestReadActionTracking:
 
         s = _store()
         entry = s.add(
+            TEST_OWNER,
             Entry(
                 id=make_id(),
                 type=EntryType.NOTE,
@@ -1916,10 +1945,10 @@ class TestReadActionTracking:
                 updated=now_utc(),
                 expires=None,
                 data={"description": "popular entry"},
-            )
+            ),
         )
-        s.log_read([entry.id], tool_used="test")
-        s.log_read([entry.id], tool_used="test")
+        s.log_read(TEST_OWNER, [entry.id], tool_used="test")
+        s.log_read(TEST_OWNER, [entry.id], tool_used="test")
         # get_knowledge itself also logs a read, so count will be 2 + 1 = 3
         listing = json.loads(await server_mod.get_knowledge(mode="list"))
         assert len(listing) >= 1
@@ -1939,6 +1968,7 @@ class TestLogReadsSilencesErrors:
         s = _store()
         now = now_utc()
         s.add(
+            TEST_OWNER,
             Entry(
                 id=make_id(),
                 type=EntryType.NOTE,
@@ -1948,7 +1978,7 @@ class TestLogReadsSilencesErrors:
                 updated=now,
                 expires=None,
                 data={"description": "should still be returned"},
-            )
+            ),
         )
 
         with patch.object(s, "log_read", side_effect=RuntimeError("pool exploded")):
@@ -2041,6 +2071,7 @@ class TestIntentionTools:
 
         past = now_utc() - timedelta(hours=1)
         s.add(
+            TEST_OWNER,
             Entry(
                 id=make_id(),
                 type=EntryType.INTENTION,
@@ -2054,7 +2085,7 @@ class TestIntentionTools:
                     "state": "pending",
                     "deliver_at": past.isoformat(),
                 },
-            )
+            ),
         )
         briefing = json.loads(await server_mod.get_briefing())
         assert briefing["attention_needed"] is True
@@ -2081,6 +2112,7 @@ class TestCreatedFilters:
         from mcp_awareness.schema import Entry, EntryType, make_id
 
         s.add(
+            TEST_OWNER,
             Entry(
                 id=make_id(),
                 type=EntryType.NOTE,
@@ -2090,9 +2122,10 @@ class TestCreatedFilters:
                 updated=late,
                 expires=None,
                 data={"description": "old"},
-            )
+            ),
         )
         s.add(
+            TEST_OWNER,
             Entry(
                 id=make_id(),
                 type=EntryType.NOTE,
@@ -2102,7 +2135,7 @@ class TestCreatedFilters:
                 updated=late,
                 expires=None,
                 data={"description": "new"},
-            )
+            ),
         )
         cutoff = (now_utc() - timedelta(hours=1)).isoformat()
         result = json.loads(await server_mod.get_knowledge(created_after=cutoff))
@@ -2121,6 +2154,7 @@ class TestCreatedFilters:
         from mcp_awareness.schema import Entry, EntryType, make_id
 
         s.add(
+            TEST_OWNER,
             Entry(
                 id=make_id(),
                 type=EntryType.NOTE,
@@ -2130,9 +2164,10 @@ class TestCreatedFilters:
                 updated=early,
                 expires=None,
                 data={"description": "old"},
-            )
+            ),
         )
         s.add(
+            TEST_OWNER,
             Entry(
                 id=make_id(),
                 type=EntryType.NOTE,
@@ -2142,7 +2177,7 @@ class TestCreatedFilters:
                 updated=late,
                 expires=None,
                 data={"description": "new"},
-            )
+            ),
         )
         cutoff = (now_utc() - timedelta(hours=1)).isoformat()
         result = json.loads(await server_mod.get_knowledge(created_before=cutoff))
@@ -2254,8 +2289,8 @@ class TestSemanticSearchTool:
             expires=None,
             data={"description": "401k retirement planning notes"},
         )
-        s.add(entry)
-        s.upsert_embedding(entry.id, "mock", 768, "h1", provider._vec(768, 0))
+        s.add(TEST_OWNER, entry)
+        s.upsert_embedding(TEST_OWNER, entry.id, "mock", 768, "h1", provider._vec(768, 0))
 
         result = json.loads(await server_mod.semantic_search(query="retirement"))
         assert len(result) >= 1
@@ -2296,10 +2331,10 @@ class TestSemanticSearchTool:
             expires=None,
             data={"description": "test entry"},
         )
-        s.add(entry)
+        s.add(TEST_OWNER, entry)
         vec = [0.0] * 768
         vec[0] = 1.0
-        s.upsert_embedding(entry.id, "mock", 768, "h1", vec)
+        s.upsert_embedding(TEST_OWNER, entry.id, "mock", 768, "h1", vec)
 
         result = json.loads(await server_mod.semantic_search(query="test", mode="list"))
         assert len(result) >= 1
@@ -2351,12 +2386,12 @@ class TestSemanticSearchTool:
             expires=None,
             data={"description": "retirement plan"},
         )
-        s.add(e1)
-        s.add(e2)
+        s.add(TEST_OWNER, e1)
+        s.add(TEST_OWNER, e2)
         vec = [0.0] * 768
         vec[0] = 1.0
-        s.upsert_embedding(e1.id, "mock", 768, "h1", vec)
-        s.upsert_embedding(e2.id, "mock", 768, "h2", vec)
+        s.upsert_embedding(TEST_OWNER, e1.id, "mock", 768, "h1", vec)
+        s.upsert_embedding(TEST_OWNER, e2.id, "mock", 768, "h2", vec)
 
         # Filter by source
         result = json.loads(await server_mod.semantic_search(query="test", source="nas"))
@@ -2466,6 +2501,7 @@ class TestBackfillEmbeddings:
         now = now_utc()
         for i in range(3):
             s.add(
+                TEST_OWNER,
                 Entry(
                     id=make_id(),
                     type=EntryType.NOTE,
@@ -2475,7 +2511,7 @@ class TestBackfillEmbeddings:
                     updated=now,
                     expires=None,
                     data={"description": f"note-{i}"},
-                )
+                ),
             )
 
         result = json.loads(await server_mod.backfill_embeddings(limit=10))
@@ -2513,14 +2549,14 @@ class TestBackfillEmbeddings:
             expires=None,
             data={"description": "original"},
         )
-        s.add(entry)
+        s.add(TEST_OWNER, entry)
 
         # First backfill — creates embedding
         result = json.loads(await server_mod.backfill_embeddings(limit=10))
         assert result["new_embeddings"] == 1
 
         # Update the entry text
-        s.update_entry(entry.id, {"description": "changed text"})
+        s.update_entry(TEST_OWNER, entry.id, {"description": "changed text"})
 
         # Second backfill — should refresh the stale embedding
         result = json.loads(await server_mod.backfill_embeddings(limit=10))
@@ -2579,12 +2615,12 @@ class TestGetKnowledgeHint:
             expires=None,
             data={"description": "401k retirement"},
         )
-        s.add(e1)
-        s.add(e2)
+        s.add(TEST_OWNER, e1)
+        s.add(TEST_OWNER, e2)
         vec = [0.0] * 768
         vec[0] = 1.0
-        s.upsert_embedding(e1.id, "mock", 768, "h1", vec)
-        s.upsert_embedding(e2.id, "mock", 768, "h2", vec)
+        s.upsert_embedding(TEST_OWNER, e1.id, "mock", 768, "h1", vec)
+        s.upsert_embedding(TEST_OWNER, e2.id, "mock", 768, "h2", vec)
 
         result = json.loads(
             await server_mod.get_knowledge(tags=["finance"], hint="retirement savings")
@@ -2625,10 +2661,10 @@ class TestGetKnowledgeHint:
             expires=None,
             data={"description": "test entry"},
         )
-        s.add(entry)
+        s.add(TEST_OWNER, entry)
         vec = [0.0] * 768
         vec[0] = 1.0
-        s.upsert_embedding(entry.id, "mock", 768, "h1", vec)
+        s.upsert_embedding(TEST_OWNER, entry.id, "mock", 768, "h1", vec)
 
         result = json.loads(await server_mod.get_knowledge(tags=["test"], hint="test", mode="list"))
         assert len(result) == 1
@@ -2643,6 +2679,7 @@ class TestGetKnowledgeHint:
 
         now = now_utc()
         s.add(
+            TEST_OWNER,
             Entry(
                 id=make_id(),
                 type=EntryType.NOTE,
@@ -2652,7 +2689,7 @@ class TestGetKnowledgeHint:
                 updated=now,
                 expires=None,
                 data={"description": "test note"},
-            )
+            ),
         )
         # Default NullEmbedding — hint should be ignored, not error
         result = json.loads(await server_mod.get_knowledge(tags=["test"], hint="something"))
@@ -2693,8 +2730,8 @@ class TestGetRelated:
             expires=None,
             data={"description": "links to target", "related_ids": [target.id]},
         )
-        s.add(target)
-        s.add(referrer)
+        s.add(TEST_OWNER, target)
+        s.add(TEST_OWNER, referrer)
 
         result = json.loads(await server_mod.get_related(entry_id=referrer.id))
         assert len(result) == 1
@@ -2727,8 +2764,8 @@ class TestGetRelated:
             expires=None,
             data={"description": "links to target", "related_ids": [target.id]},
         )
-        s.add(target)
-        s.add(referrer)
+        s.add(TEST_OWNER, target)
+        s.add(TEST_OWNER, referrer)
 
         result = json.loads(await server_mod.get_related(entry_id=target.id))
         assert len(result) == 1
@@ -2763,8 +2800,8 @@ class TestGetRelated:
         )
         # A also references B
         a.data["related_ids"] = [b.id]
-        s.add(a)
-        s.add(b)
+        s.add(TEST_OWNER, a)
+        s.add(TEST_OWNER, b)
 
         result = json.loads(await server_mod.get_related(entry_id=a.id))
         assert len(result) == 1
@@ -2792,7 +2829,7 @@ class TestGetRelated:
             expires=None,
             data={"description": "lone wolf"},
         )
-        s.add(entry)
+        s.add(TEST_OWNER, entry)
         result = json.loads(await server_mod.get_related(entry_id=entry.id))
         assert result == []
 
@@ -2822,8 +2859,8 @@ class TestGetRelated:
             expires=None,
             data={"description": "referrer", "related_ids": [target.id]},
         )
-        s.add(target)
-        s.add(referrer)
+        s.add(TEST_OWNER, target)
+        s.add(TEST_OWNER, referrer)
         result = json.loads(await server_mod.get_related(entry_id=referrer.id, mode="list"))
         assert len(result) == 1
         assert "description" in result[0]
@@ -2911,13 +2948,13 @@ class TestSemanticSearchIntegration:
 
         for _ in range(20):
             s = _store()
-            missing = s.get_entries_without_embeddings("nomic-embed-text")
+            missing = s.get_entries_without_embeddings(TEST_OWNER, "nomic-embed-text")
             if entry_id not in [e.id for e in missing]:
                 break
             time.sleep(0.5)
 
         # Verify embedding was created in the store
         s = _store()
-        missing = s.get_entries_without_embeddings("nomic-embed-text")
+        missing = s.get_entries_without_embeddings(TEST_OWNER, "nomic-embed-text")
         missing_ids = [e.id for e in missing]
         assert entry_id not in missing_ids

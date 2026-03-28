@@ -10,6 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - **Multi-tenant schema**: `owner_id` column on all data tables (entries, reads, actions, embeddings) with backfill migration for existing data
 - **Users table**: full user schema with email (+ canonical normalization for uniqueness), E.164 phone, argon2id password hash, timezone, preferences JSONB
+- **Owner isolation**: all store methods, tools, resources, and collator now thread `owner_id` — queries are scoped per-owner
+- **`AWARENESS_DEFAULT_OWNER`**: env var (falls back to system username) sets the default owner for stdio and unauthenticated HTTP
 
 ### Fixed
 - **PR label automation**: `Dev Active` is now a proper hold state — `on-push` and `on-ci-pass` skip pipeline transitions while it's present, `on-unlabel` handles promotion when it's removed
