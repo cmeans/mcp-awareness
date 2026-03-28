@@ -14,10 +14,11 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-"""ASGI middleware for health checks and secret-path routing."""
+"""ASGI middleware for health checks, favicon, and secret-path routing."""
 
 from __future__ import annotations
 
+import pathlib
 from collections.abc import Callable
 from typing import Any
 
@@ -26,6 +27,10 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 
 # The health response builder is injected so middleware doesn't depend on server globals.
 HealthBuilder = Callable[[], dict[str, Any]]
+
+# Favicon bytes loaded once at import time (~15 KB).
+_FAVICON_PATH = pathlib.Path(__file__).parent / "favicon.ico"
+_FAVICON_BYTES: bytes | None = _FAVICON_PATH.read_bytes() if _FAVICON_PATH.exists() else None
 
 
 class SecretPathMiddleware:
@@ -44,6 +49,12 @@ class SecretPathMiddleware:
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] in ("http", "websocket"):
             path: str = scope.get("path", "")
+            # Favicon — served publicly (no secret path required) so external
+            # services like Google's favicon crawler can fetch it.
+            if path == "/favicon.ico" and _FAVICON_BYTES is not None:
+                resp = Response(_FAVICON_BYTES, media_type="image/x-icon")
+                await resp(scope, receive, send)
+                return
             # Health endpoint — served at /SECRET/health
             if path == f"{self.prefix}/health":
                 health_resp = JSONResponse(self.health_builder())
@@ -69,8 +80,14 @@ class HealthMiddleware:
         self.health_builder = health_builder
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        if scope["type"] == "http" and scope.get("path") == "/health":
-            health_resp = JSONResponse(self.health_builder())
-            await health_resp(scope, receive, send)
-            return
+        if scope["type"] == "http":
+            path = scope.get("path", "")
+            if path == "/health":
+                health_resp = JSONResponse(self.health_builder())
+                await health_resp(scope, receive, send)
+                return
+            if path == "/favicon.ico" and _FAVICON_BYTES is not None:
+                resp = Response(_FAVICON_BYTES, media_type="image/x-icon")
+                await resp(scope, receive, send)
+                return
         await self.app(scope, receive, send)

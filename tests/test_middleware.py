@@ -25,7 +25,11 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from mcp_awareness import server as server_mod
-from mcp_awareness.middleware import HealthMiddleware, SecretPathMiddleware
+from mcp_awareness.middleware import (
+    _FAVICON_BYTES,
+    HealthMiddleware,
+    SecretPathMiddleware,
+)
 
 
 def _health_builder() -> dict[str, Any]:
@@ -113,6 +117,15 @@ class TestSecretPathMiddleware:
         assert status == 404
 
     @pytest.mark.anyio
+    async def test_favicon_served_without_secret_path(self) -> None:
+        """/favicon.ico is served publicly without requiring the secret prefix."""
+        app = self._make_app()
+        scope = {"type": "http", "path": "/favicon.ico", "method": "GET"}
+        status, body = await _collect_response(app, scope)
+        assert status == 200
+        assert body == _FAVICON_BYTES
+
+    @pytest.mark.anyio
     async def test_non_http_scope_passes_through(self) -> None:
         """Non-HTTP scope (e.g. lifespan) passes through to wrapped app."""
         calls: list[dict[str, Any]] = []
@@ -190,6 +203,15 @@ class TestHealthMiddleware:
         assert status == 200
         data = json.loads(body)
         assert data["path"] == "/mcp"
+
+    @pytest.mark.anyio
+    async def test_favicon_served(self) -> None:
+        """/favicon.ico returns the favicon with correct content type."""
+        app = self._make_app()
+        scope = {"type": "http", "path": "/favicon.ico", "method": "GET"}
+        status, body = await _collect_response(app, scope)
+        assert status == 200
+        assert body == _FAVICON_BYTES
 
     @pytest.mark.anyio
     async def test_non_http_scope_passes_through(self) -> None:

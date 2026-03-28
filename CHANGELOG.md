@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `CONTRIBUTING.md` with Contributor License Agreement (CLA) requirement
 - `benchmarks/semantic_search_bench.py` — latency benchmarks for semantic search across scale tiers (500–10K entries)
 - **PR label automation** (`pr-labels.yml`): GitHub Actions workflow that automates label transitions — resets to "Awaiting CI" on push, promotes to "Ready for QA" when CI passes, cleans up stale labels when actors pick up tasks
+- **Favicon route**: `/favicon.ico` served from both `SecretPathMiddleware` and `HealthMiddleware` so Anthropic's Connectors UI (and other services using Google's favicon service) display the awareness logo instead of a generic globe. Served publicly — no secret path required.
 
 ## [0.12.0] - 2026-03-26
 
