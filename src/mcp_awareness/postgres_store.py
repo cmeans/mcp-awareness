@@ -31,6 +31,7 @@ import os
 import threading
 import time
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Any
 
 import psycopg
@@ -46,6 +47,17 @@ _DEFAULT_OWNER = os.environ.get("AWARENESS_DEFAULT_OWNER", "system")
 _escaped_default_owner = _DEFAULT_OWNER.replace("'", "''")
 
 logger = logging.getLogger(__name__)
+
+_SQL_DIR = Path(__file__).parent / "sql"
+_sql_cache: dict[str, str] = {}
+
+
+def _load_sql(name: str) -> str:
+    """Load a SQL template from the sql/ directory, caching on first read."""
+    if name not in _sql_cache:
+        _sql_cache[name] = (_SQL_DIR / f"{name}.sql").read_text()
+    return _sql_cache[name]
+
 
 # How long soft-deleted entries remain recoverable before auto-purge
 TRASH_RETENTION_DAYS = 30
@@ -74,99 +86,12 @@ class PostgresStore:
         self._create_tables()
 
     def _create_tables(self) -> None:
+        ddl = _load_sql("create_tables").format(
+            default_owner=_escaped_default_owner,
+            embedding_dimensions=self._embedding_dimensions,
+        )
         with self._pool.connection() as conn, conn.cursor() as cur:
-            cur.execute(f"""
-                CREATE TABLE IF NOT EXISTS users (
-                    id              TEXT PRIMARY KEY,
-                    email           TEXT,
-                    canonical_email TEXT UNIQUE,
-                    email_verified  BOOLEAN NOT NULL DEFAULT FALSE,
-                    phone           TEXT,
-                    phone_verified  BOOLEAN NOT NULL DEFAULT FALSE,
-                    password_hash   TEXT,
-                    display_name    TEXT,
-                    timezone        TEXT DEFAULT 'UTC',
-                    preferences     JSONB NOT NULL DEFAULT '{{}}'::jsonb,
-                    created         TIMESTAMPTZ NOT NULL DEFAULT now(),
-                    updated         TIMESTAMPTZ NOT NULL DEFAULT now(),
-                    deleted         TIMESTAMPTZ
-                );
-
-                CREATE TABLE IF NOT EXISTS entries (
-                    id       TEXT PRIMARY KEY,
-                    owner_id TEXT NOT NULL DEFAULT '{_escaped_default_owner}',
-                    type     TEXT NOT NULL,
-                    source   TEXT NOT NULL,
-                    created  TIMESTAMPTZ NOT NULL,
-                    updated  TIMESTAMPTZ NOT NULL,
-                    expires  TIMESTAMPTZ,
-                    deleted  TIMESTAMPTZ,
-                    tags     JSONB NOT NULL DEFAULT '[]',
-                    data     JSONB NOT NULL DEFAULT '{{}}',
-                    logical_key TEXT
-                );
-                CREATE INDEX IF NOT EXISTS idx_entries_owner
-                    ON entries(owner_id);
-                CREATE INDEX IF NOT EXISTS idx_entries_owner_type
-                    ON entries(owner_id, type);
-                CREATE INDEX IF NOT EXISTS idx_entries_owner_source
-                    ON entries(owner_id, source);
-                CREATE INDEX IF NOT EXISTS idx_entries_owner_type_source
-                    ON entries(owner_id, type, source);
-                CREATE INDEX IF NOT EXISTS idx_entries_tags_gin
-                    ON entries USING GIN (tags);
-                CREATE UNIQUE INDEX IF NOT EXISTS idx_entries_source_logical_key
-                    ON entries(owner_id, source, logical_key)
-                    WHERE logical_key IS NOT NULL AND deleted IS NULL;
-
-                CREATE TABLE IF NOT EXISTS reads (
-                    id       SERIAL PRIMARY KEY,
-                    owner_id TEXT NOT NULL DEFAULT '{_escaped_default_owner}',
-                    entry_id TEXT NOT NULL REFERENCES entries(id) ON DELETE CASCADE,
-                    timestamp TIMESTAMPTZ NOT NULL DEFAULT now(),
-                    platform TEXT,
-                    tool_used TEXT
-                );
-                CREATE INDEX IF NOT EXISTS idx_reads_owner ON reads(owner_id);
-                CREATE INDEX IF NOT EXISTS idx_reads_entry ON reads(entry_id);
-                CREATE INDEX IF NOT EXISTS idx_reads_timestamp ON reads(timestamp);
-
-                CREATE TABLE IF NOT EXISTS actions (
-                    id       SERIAL PRIMARY KEY,
-                    owner_id TEXT NOT NULL DEFAULT '{_escaped_default_owner}',
-                    entry_id TEXT NOT NULL REFERENCES entries(id) ON DELETE CASCADE,
-                    timestamp TIMESTAMPTZ NOT NULL DEFAULT now(),
-                    platform TEXT,
-                    action   TEXT NOT NULL,
-                    detail   TEXT,
-                    tags     JSONB NOT NULL DEFAULT '[]'
-                );
-                CREATE INDEX IF NOT EXISTS idx_actions_owner ON actions(owner_id);
-                CREATE INDEX IF NOT EXISTS idx_actions_entry ON actions(entry_id);
-                CREATE INDEX IF NOT EXISTS idx_actions_timestamp ON actions(timestamp);
-                CREATE INDEX IF NOT EXISTS idx_actions_tags_gin ON actions USING GIN (tags);
-
-                CREATE EXTENSION IF NOT EXISTS vector;
-
-                CREATE TABLE IF NOT EXISTS embeddings (
-                    id          SERIAL PRIMARY KEY,
-                    owner_id    TEXT NOT NULL DEFAULT '{_escaped_default_owner}',
-                    entry_id    TEXT NOT NULL REFERENCES entries(id) ON DELETE CASCADE,
-                    model       TEXT NOT NULL,
-                    dimensions  INTEGER NOT NULL,
-                    text_hash   TEXT NOT NULL,
-                    embedding   VECTOR({self._embedding_dimensions}) NOT NULL,
-                    created     TIMESTAMPTZ NOT NULL DEFAULT now(),
-                    UNIQUE (entry_id, model)
-                );
-                CREATE INDEX IF NOT EXISTS idx_embeddings_owner
-                    ON embeddings(owner_id);
-                CREATE INDEX IF NOT EXISTS idx_embeddings_entry
-                    ON embeddings(entry_id);
-                CREATE INDEX IF NOT EXISTS idx_embeddings_vector_hnsw
-                    ON embeddings USING hnsw (embedding vector_cosine_ops)
-                    WITH (m = 16, ef_construction = 64);
-            """)
+            cur.execute(ddl)
         # Note: schema migrations are managed by Alembic (see alembic/ directory).
         # Run `alembic upgrade head` before starting the server on a new database.
 
@@ -197,9 +122,7 @@ class PostgresStore:
 
     def _insert_entry(self, cur: psycopg.Cursor[Any], owner_id: str, entry: Entry) -> None:
         cur.execute(
-            """INSERT INTO entries
-               (id, owner_id, type, source, created, updated, expires, tags, data, logical_key)
-               VALUES (%s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s::jsonb, %s)""",
+            _load_sql("insert_entry"),
             (
                 entry.id,
                 owner_id,
@@ -236,14 +159,9 @@ class PostgresStore:
         try:
             with self._pool.connection() as conn, conn.cursor() as cur:
                 now = datetime.now(timezone.utc)
-                cur.execute(
-                    "DELETE FROM entries WHERE expires IS NOT NULL AND expires <= %s",
-                    (now,),
-                )
+                cur.execute(_load_sql("cleanup_expired"), (now,))
         except Exception as exc:
             print(f"[awareness] cleanup failed: {type(exc).__name__}: {exc}")
-
-    _ACTIVE = "deleted IS NULL"
 
     def _query_entries(
         self,
@@ -254,17 +172,18 @@ class PostgresStore:
         limit: int | None = None,
         offset: int | None = None,
     ) -> list[Entry]:
-        sql = (
-            f"SELECT * FROM entries"
-            f" WHERE owner_id = %s AND {self._ACTIVE} AND ({where})"
-            f" ORDER BY {order_by}"
+        limit_clause = ""
+        if limit is not None:
+            limit_clause += " LIMIT %s"
+        if offset is not None:
+            limit_clause += " OFFSET %s"
+        sql = _load_sql("query_entries").format(
+            where=where, order_by=order_by, limit_clause=limit_clause
         )
         query_params: list[Any] = [owner_id, *params]
         if limit is not None:
-            sql += " LIMIT %s"
             query_params.append(limit)
         if offset is not None:
-            sql += " OFFSET %s"
             query_params.append(offset)
         with self._pool.connection() as conn, conn.cursor() as cur:
             cur.execute(sql, tuple(query_params))
@@ -288,8 +207,7 @@ class PostgresStore:
         now = now_utc()
         with self._pool.connection() as conn, conn.cursor() as cur:
             cur.execute(
-                "DELETE FROM entries"
-                f" WHERE owner_id = %s AND type = %s AND source = %s AND {self._ACTIVE}",
+                _load_sql("upsert_status_delete"),
                 (owner_id, EntryType.STATUS.value, source),
             )
             entry = Entry(
@@ -323,8 +241,7 @@ class PostgresStore:
             e.data.update(data)
             with self._pool.connection() as conn, conn.cursor() as cur:
                 cur.execute(
-                    "UPDATE entries SET updated = %s, tags = %s::jsonb, "
-                    "data = %s::jsonb WHERE id = %s",
+                    _load_sql("upsert_alert_update"),
                     (now, json.dumps(e.tags), json.dumps(e.data), e.id),
                 )
             return e
@@ -360,8 +277,7 @@ class PostgresStore:
             e.data.update(data)
             with self._pool.connection() as conn, conn.cursor() as cur:
                 cur.execute(
-                    "UPDATE entries SET updated = %s, tags = %s::jsonb, "
-                    "data = %s::jsonb WHERE id = %s",
+                    _load_sql("upsert_preference_update"),
                     (now, json.dumps(e.tags), json.dumps(e.data), e.id),
                 )
             return e
@@ -412,8 +328,7 @@ class PostgresStore:
         """Get all unique sources that have reported status."""
         with self._pool.connection() as conn, conn.cursor() as cur:
             cur.execute(
-                "SELECT DISTINCT source FROM entries"
-                f" WHERE owner_id = %s AND type = %s AND {self._ACTIVE}",
+                _load_sql("get_sources"),
                 (owner_id, EntryType.STATUS.value),
             )
             return [row["source"] for row in cur.fetchall()]
@@ -421,9 +336,7 @@ class PostgresStore:
     def get_latest_status(self, owner_id: str, source: str) -> Entry | None:
         with self._pool.connection() as conn, conn.cursor() as cur:
             cur.execute(
-                "SELECT * FROM entries"
-                f" WHERE owner_id = %s AND type = %s AND source = %s AND {self._ACTIVE}"
-                " ORDER BY created DESC LIMIT 1",
+                _load_sql("get_latest_status"),
                 (owner_id, EntryType.STATUS.value, source),
             )
             row = cur.fetchone()
@@ -472,9 +385,7 @@ class PostgresStore:
     def count_active_suppressions(self, owner_id: str) -> int:
         with self._pool.connection() as conn, conn.cursor() as cur:
             cur.execute(
-                "SELECT COUNT(*) AS cnt FROM entries"
-                f" WHERE owner_id = %s AND type = %s AND {self._ACTIVE}"
-                " AND (expires IS NULL OR expires > NOW())",
+                _load_sql("count_active_suppressions"),
                 (owner_id, EntryType.SUPPRESSION.value),
             )
             row = cur.fetchone()
@@ -594,8 +505,7 @@ class PostgresStore:
 
         with self._pool.connection() as conn, conn.cursor() as cur:
             cur.execute(
-                "UPDATE entries SET updated = %s, source = %s, "
-                "tags = %s::jsonb, data = %s::jsonb WHERE id = %s",
+                _load_sql("update_entry"),
                 (now, entry.source, json.dumps(entry.tags), json.dumps(entry.data), entry.id),
             )
         return entry
@@ -611,13 +521,7 @@ class PostgresStore:
         with self._pool.connection() as conn, conn.cursor() as cur:
             # Attempt insert; on conflict, fetch the existing row's id
             cur.execute(
-                """INSERT INTO entries
-                   (id, owner_id, type, source, created, updated, expires, tags, data, logical_key)
-                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s::jsonb, %s)
-                   ON CONFLICT (owner_id, source, logical_key)
-                       WHERE logical_key IS NOT NULL AND deleted IS NULL
-                   DO UPDATE SET id = entries.id
-                   RETURNING (xmax = 0) AS inserted""",
+                _load_sql("upsert_by_logical_key"),
                 (
                     entry.id,
                     owner_id,
@@ -660,17 +564,9 @@ class PostgresStore:
     def get_stats(self, owner_id: str) -> dict[str, Any]:
         """Get entry counts by type, list of sources, and total count."""
         with self._pool.connection() as conn, conn.cursor() as cur:
-            cur.execute(
-                "SELECT type, COUNT(*) AS cnt FROM entries"
-                f" WHERE owner_id = %s AND {self._ACTIVE} GROUP BY type",
-                (owner_id,),
-            )
+            cur.execute(_load_sql("get_stats_counts"), (owner_id,))
             counts = {row["type"]: row["cnt"] for row in cur.fetchall()}
-            cur.execute(
-                "SELECT DISTINCT source FROM entries"
-                f" WHERE owner_id = %s AND {self._ACTIVE} ORDER BY source",
-                (owner_id,),
-            )
+            cur.execute(_load_sql("get_stats_sources"), (owner_id,))
             sources = [row["source"] for row in cur.fetchall()]
         return {
             "entries": {t.value: counts.get(t.value, 0) for t in EntryType},
@@ -681,12 +577,7 @@ class PostgresStore:
     def get_tags(self, owner_id: str) -> list[dict[str, Any]]:
         """Get all tags in use with usage counts."""
         with self._pool.connection() as conn, conn.cursor() as cur:
-            cur.execute(
-                f"SELECT value, COUNT(*) AS cnt FROM entries, "
-                f"jsonb_array_elements_text(tags) AS value "
-                f"WHERE owner_id = %s AND {self._ACTIVE} GROUP BY value ORDER BY cnt DESC",
-                (owner_id,),
-            )
+            cur.execute(_load_sql("get_tags"), (owner_id,))
             return [{"tag": row["value"], "count": row["cnt"]} for row in cur.fetchall()]
 
     # ------------------------------------------------------------------
@@ -698,14 +589,8 @@ class PostgresStore:
         now = datetime.now(timezone.utc)
         trash_expires = now + timedelta(days=TRASH_RETENTION_DAYS)
         with self._pool.connection() as conn, conn.cursor() as cur:
-            # Save original expires into data so restore can recover it
             cur.execute(
-                "UPDATE entries SET"
-                " data = CASE WHEN expires IS NOT NULL"
-                "   THEN jsonb_set(data, '{_original_expires}', to_jsonb(expires))"
-                "   ELSE data - '_original_expires' END,"
-                " deleted = %s, expires = %s"
-                f" WHERE owner_id = %s AND id = %s AND {self._ACTIVE}",
+                _load_sql("soft_delete_by_id"),
                 (now, trash_expires, owner_id, entry_id),
             )
             affected = cur.rowcount
@@ -726,12 +611,7 @@ class PostgresStore:
         params.extend(json.dumps([t]) for t in tags)
         with self._pool.connection() as conn, conn.cursor() as cur:
             cur.execute(
-                "UPDATE entries SET"
-                " data = CASE WHEN expires IS NOT NULL"
-                "   THEN jsonb_set(data, '{_original_expires}', to_jsonb(expires))"
-                "   ELSE data - '_original_expires' END,"
-                " deleted = %s, expires = %s"
-                f" WHERE owner_id = %s AND {self._ACTIVE} AND {tag_clauses}",
+                _load_sql("soft_delete_by_tags").format(tag_clauses=tag_clauses),
                 tuple(params),
             )
             affected = cur.rowcount
@@ -746,7 +626,7 @@ class PostgresStore:
         """Soft-delete all entries for a source, optionally filtered by type."""
         now = datetime.now(timezone.utc)
         trash_expires = now + timedelta(days=TRASH_RETENTION_DAYS)
-        clauses = ["owner_id = %s", "source = %s", self._ACTIVE]
+        clauses = ["owner_id = %s", "source = %s", "deleted IS NULL"]
         params: list[Any] = [owner_id, source]
         if entry_type is not None:
             clauses.append("type = %s")
@@ -754,11 +634,7 @@ class PostgresStore:
         where = " AND ".join(clauses)
         with self._pool.connection() as conn, conn.cursor() as cur:
             cur.execute(
-                "UPDATE entries SET"
-                " data = CASE WHEN expires IS NOT NULL"
-                "   THEN jsonb_set(data, '{_original_expires}', to_jsonb(expires))"
-                "   ELSE data - '_original_expires' END,"
-                f" deleted = %s, expires = %s WHERE {where}",
+                _load_sql("soft_delete_by_source").format(where=where),
                 (now, trash_expires, *params),
             )
             affected = cur.rowcount
@@ -778,13 +654,14 @@ class PostgresStore:
             clauses.append("deleted >= %s")
             params.append(since)
         where = " AND ".join(clauses)
-        sql = f"SELECT * FROM entries WHERE {where} ORDER BY deleted DESC"
+        limit_clause = ""
         if limit is not None:
-            sql += " LIMIT %s"
+            limit_clause += " LIMIT %s"
             params.append(limit)
         if offset is not None:
-            sql += " OFFSET %s"
+            limit_clause += " OFFSET %s"
             params.append(offset)
+        sql = _load_sql("get_deleted").format(where=where, limit_clause=limit_clause)
         with self._pool.connection() as conn, conn.cursor() as cur:
             cur.execute(sql, tuple(params))
             return [self._row_to_entry(r) for r in cur.fetchall()]
@@ -796,10 +673,7 @@ class PostgresStore:
         """
         with self._pool.connection() as conn, conn.cursor() as cur:
             cur.execute(
-                "UPDATE entries SET deleted = NULL,"
-                " expires = (data->>'_original_expires')::timestamptz,"
-                " data = data - '_original_expires'"
-                " WHERE owner_id = %s AND id = %s AND deleted IS NOT NULL",
+                _load_sql("restore_by_id"),
                 (owner_id, entry_id),
             )
             affected = cur.rowcount
@@ -817,10 +691,7 @@ class PostgresStore:
         params.extend(json.dumps([t]) for t in tags)
         with self._pool.connection() as conn, conn.cursor() as cur:
             cur.execute(
-                "UPDATE entries SET deleted = NULL,"
-                " expires = (data->>'_original_expires')::timestamptz,"
-                " data = data - '_original_expires'"
-                f" WHERE owner_id = %s AND deleted IS NOT NULL AND {tag_clauses}",
+                _load_sql("restore_by_tags").format(tag_clauses=tag_clauses),
                 tuple(params),
             )
             affected = cur.rowcount
@@ -840,8 +711,7 @@ class PostgresStore:
             with self._pool.connection() as conn, conn.cursor() as cur:
                 for eid in entry_ids:
                     cur.execute(
-                        "INSERT INTO reads (owner_id, entry_id, platform, tool_used)"
-                        " VALUES (%s, %s, %s, %s)",
+                        _load_sql("log_read"),
                         (owner_id, eid, platform, tool_used),
                     )
         except Exception:
@@ -869,9 +739,7 @@ class PostgresStore:
         now = now_utc()
         with self._pool.connection() as conn, conn.cursor() as cur:
             cur.execute(
-                "INSERT INTO actions"
-                " (owner_id, entry_id, timestamp, platform, action, detail, tags)"
-                " VALUES (%s, %s, %s, %s, %s, %s, %s::jsonb) RETURNING id",
+                _load_sql("log_action"),
                 (owner_id, entry_id, now, platform, action, detail, json.dumps(tags)),
             )
             row = cur.fetchone()
@@ -906,9 +774,10 @@ class PostgresStore:
             clauses.append("platform = %s")
             params.append(platform)
         where = " AND ".join(clauses) if clauses else "1=1"
-        sql = f"SELECT * FROM reads WHERE {where} ORDER BY timestamp DESC"
+        limit_clause = ""
         if limit:
-            sql += f" LIMIT {int(limit)}"
+            limit_clause = f" LIMIT {int(limit)}"
+        sql = _load_sql("get_reads").format(where=where, limit_clause=limit_clause)
         with self._pool.connection() as conn, conn.cursor() as cur:
             cur.execute(sql, tuple(params))
             rows = cur.fetchall()
@@ -949,9 +818,10 @@ class PostgresStore:
                 clauses.append("tags @> %s::jsonb")
                 params.append(json.dumps([t]))
         where = " AND ".join(clauses) if clauses else "1=1"
-        sql = f"SELECT * FROM actions WHERE {where} ORDER BY timestamp DESC"
+        limit_clause = ""
         if limit:
-            sql += f" LIMIT {int(limit)}"
+            limit_clause = f" LIMIT {int(limit)}"
+        sql = _load_sql("get_actions").format(where=where, limit_clause=limit_clause)
         with self._pool.connection() as conn, conn.cursor() as cur:
             cur.execute(sql, tuple(params))
             rows = cur.fetchall()
@@ -981,14 +851,11 @@ class PostgresStore:
         if limit is not None:
             limit_clause = " LIMIT %s"
             params.append(limit)
+        sql = _load_sql("get_unread").format(
+            since_clause=since_clause, limit_clause=limit_clause
+        )
         with self._pool.connection() as conn, conn.cursor() as cur:
-            cur.execute(
-                f"SELECT e.* FROM entries e "
-                f"LEFT JOIN reads r ON e.id = r.entry_id {since_clause} "
-                f"WHERE e.owner_id = %s AND e.deleted IS NULL AND r.id IS NULL "
-                f"ORDER BY e.created DESC{limit_clause}",
-                params,
-            )
+            cur.execute(sql, params)
             return [self._row_to_entry(r) for r in cur.fetchall()]
 
     def get_activity(
@@ -1016,13 +883,8 @@ class PostgresStore:
         where_r = " AND ".join(clauses_r) if clauses_r else "1=1"
         where_a = " AND ".join(clauses_a) if clauses_a else "1=1"
         limit_clause = f"LIMIT {int(limit)}" if limit else ""
-        sql = (
-            f"SELECT 'read' AS event_type, entry_id, timestamp, platform, "
-            f"tool_used AS detail, NULL AS action, '[]'::jsonb AS tags FROM reads WHERE {where_r} "
-            f"UNION ALL "
-            f"SELECT 'action' AS event_type, entry_id, timestamp, platform, "
-            f"detail, action, tags FROM actions WHERE {where_a} "
-            f"ORDER BY timestamp DESC {limit_clause}"
+        sql = _load_sql("get_activity").format(
+            where_r=where_r, where_a=where_a, limit_clause=limit_clause
         )
         with self._pool.connection() as conn, conn.cursor() as cur:
             cur.execute(sql, tuple(params_r + params_a))
@@ -1045,13 +907,9 @@ class PostgresStore:
         if not entry_ids:
             return {}
         placeholders = ",".join("%s" for _ in entry_ids)
+        sql = _load_sql("get_read_counts").format(placeholders=placeholders)
         with self._pool.connection() as conn, conn.cursor() as cur:
-            cur.execute(
-                f"SELECT entry_id, COUNT(*) AS cnt, MAX(timestamp) AS last "
-                f"FROM reads WHERE owner_id = %s AND entry_id IN ({placeholders})"
-                " GROUP BY entry_id",
-                (owner_id, *entry_ids),
-            )
+            cur.execute(sql, (owner_id, *entry_ids))
             rows = cur.fetchall()
         result: dict[str, dict[str, Any]] = {}
         for r in rows:
@@ -1112,7 +970,7 @@ class PostgresStore:
         entry.updated = now
         with self._pool.connection() as conn, conn.cursor() as cur:
             cur.execute(
-                "UPDATE entries SET updated = %s, data = %s::jsonb WHERE id = %s",
+                _load_sql("update_intention_state"),
                 (now, json.dumps(entry.data), entry.id),
             )
         return entry
@@ -1152,12 +1010,7 @@ class PostgresStore:
         vector_literal = "[" + ",".join(str(v) for v in embedding) + "]"
         with self._pool.connection() as conn, conn.cursor() as cur:
             cur.execute(
-                "INSERT INTO embeddings"
-                " (owner_id, entry_id, model, dimensions, text_hash, embedding)"
-                " VALUES (%s, %s, %s, %s, %s, %s::vector) "
-                "ON CONFLICT (entry_id, model) DO UPDATE SET "
-                "embedding = EXCLUDED.embedding, text_hash = EXCLUDED.text_hash, "
-                "dimensions = EXCLUDED.dimensions, created = now()",
+                _load_sql("upsert_embedding"),
                 (owner_id, entry_id, model, dimensions, text_hash, vector_literal),
             )
 
@@ -1173,11 +1026,7 @@ class PostgresStore:
         """
         with self._pool.connection() as conn, conn.cursor() as cur:
             cur.execute(
-                "SELECT e.* FROM entries e "
-                "LEFT JOIN embeddings emb ON e.id = emb.entry_id AND emb.model = %s "
-                "WHERE e.owner_id = %s AND e.deleted IS NULL AND emb.id IS NULL "
-                "AND e.type != %s "
-                "ORDER BY e.updated DESC LIMIT %s",
+                _load_sql("get_entries_without_embeddings"),
                 (model, owner_id, EntryType.SUPPRESSION.value, limit),
             )
             return [self._row_to_entry(r) for r in cur.fetchall()]
@@ -1198,10 +1047,7 @@ class PostgresStore:
 
         with self._pool.connection() as conn, conn.cursor() as cur:
             cur.execute(
-                "SELECT e.*, emb.text_hash AS emb_text_hash FROM entries e "
-                "JOIN embeddings emb ON e.id = emb.entry_id AND emb.model = %s "
-                "WHERE e.owner_id = %s AND e.deleted IS NULL "
-                "ORDER BY e.updated DESC LIMIT %s",
+                _load_sql("get_stale_embeddings"),
                 (model, owner_id, limit),
             )
             rows = cur.fetchall()
@@ -1251,14 +1097,7 @@ class PostgresStore:
             params.append(until)
         where = " AND ".join(clauses)
         params.append(limit)
-        sql = (
-            f"SELECT e.*, 1 - (emb.embedding <=> %s::vector) AS similarity "
-            f"FROM entries e "
-            f"JOIN embeddings emb ON e.id = emb.entry_id AND emb.model = %s "
-            f"WHERE {where} "
-            f"ORDER BY emb.embedding <=> %s::vector "
-            f"LIMIT %s"
-        )
+        sql = _load_sql("semantic_search").format(where=where)
         # query_vector (similarity), model, ...filters, query_vector (ORDER BY), limit
         ordered_params = [vector_literal, model, *params[2:-1], vector_literal, limit]
         with self._pool.connection() as conn, conn.cursor() as cur:
