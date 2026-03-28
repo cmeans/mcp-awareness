@@ -2958,3 +2958,47 @@ class TestSemanticSearchIntegration:
         missing = s.get_entries_without_embeddings(TEST_OWNER, "nomic-embed-text")
         missing_ids = [e.id for e in missing]
         assert entry_id not in missing_ids
+
+
+# ---------------------------------------------------------------------------
+# Owner context + main() coverage
+# ---------------------------------------------------------------------------
+
+
+def test_owner_id_returns_default(monkeypatch):
+    """_owner_id() returns DEFAULT_OWNER when no contextvar is set."""
+    monkeypatch.setattr(server_mod, "DEFAULT_OWNER", "test-default")
+    assert server_mod._owner_id() == "test-default"
+
+
+def test_owner_id_returns_contextvar():
+    """_owner_id() returns contextvar value when set."""
+    token = server_mod._owner_ctx.set("ctx-user")
+    try:
+        assert server_mod._owner_id() == "ctx-user"
+    finally:
+        server_mod._owner_ctx.reset(token)
+
+
+def test_main_handles_keyboard_interrupt(monkeypatch):
+    """main() catches KeyboardInterrupt and exits cleanly."""
+    monkeypatch.setattr(server_mod, "_sync_custom_prompts", lambda: None)
+    monkeypatch.setattr(server_mod, "_run", _raise_keyboard_interrupt)
+    # Should not raise
+    server_mod.main()
+
+
+def _raise_keyboard_interrupt():
+    raise KeyboardInterrupt
+
+
+def test_fallback_user_on_getpass_failure(monkeypatch):
+    """When getpass.getuser() fails, _fallback_user resolves to 'system'."""
+    import importlib
+
+    monkeypatch.setattr("getpass.getuser", lambda: (_ for _ in ()).throw(OSError("no tty")))
+    monkeypatch.delenv("AWARENESS_DEFAULT_OWNER", raising=False)
+    importlib.reload(server_mod)
+    assert server_mod.DEFAULT_OWNER == "system"
+    # Restore
+    importlib.reload(server_mod)
