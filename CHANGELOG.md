@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-03-28
+
 ### Changed
 - **License changed from Apache 2.0 to AGPL v3** to protect against proprietary cloud hosting of the codebase. Dual-licensing path preserved for future commercial license.
 
@@ -336,7 +338,8 @@ Initial implementation.
 - **Dockerfile** for container deployment
 - Design docs: core spec and collation layer
 
-[Unreleased]: https://github.com/cmeans/mcp-awareness/compare/v0.12.0...HEAD
+[Unreleased]: https://github.com/cmeans/mcp-awareness/compare/v0.14.0...HEAD
+[0.14.0]: https://github.com/cmeans/mcp-awareness/compare/v0.12.0...v0.14.0
 [0.12.0]: https://github.com/cmeans/mcp-awareness/compare/v0.11.2...v0.12.0
 [0.11.2]: https://github.com/cmeans/mcp-awareness/compare/v0.11.1...v0.11.2
 [0.11.1]: https://github.com/cmeans/mcp-awareness/compare/v0.11.0...v0.11.1
