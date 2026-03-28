@@ -6,7 +6,7 @@
   <a href="https://github.com/cmeans/mcp-awareness/actions/workflows/ci.yml"><img src="https://github.com/cmeans/mcp-awareness/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="https://codecov.io/gh/cmeans/mcp-awareness"><img src="https://codecov.io/gh/cmeans/mcp-awareness/branch/main/graph/badge.svg" alt="codecov"></a>
   <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/python-3.10%2B-blue" alt="Python 3.10+"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-blue" alt="License"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0-blue" alt="License"></a>
   <a href="https://ghcr.io/cmeans/mcp-awareness"><img src="https://img.shields.io/badge/docker-ghcr.io-blue" alt="Docker"></a>
 </p>
 
@@ -227,6 +227,16 @@ ruff check src/ tests/     # lint
 mypy src/mcp_awareness/    # type check
 ```
 
+#### Benchmarks
+
+`benchmarks/semantic_search_bench.py` measures semantic search latency across scale tiers (500–10K entries), filter combinations, and concurrency levels. It creates an isolated database, generates synthetic data, embeds via Ollama, and cleans up after itself.
+
+```bash
+docker compose exec mcp-awareness python benchmarks/semantic_search_bench.py
+```
+
+Results from the initial run (2026-03-27): HNSW query P50 stays under 4ms from 500 to 10K entries across all filter scenarios. Concurrency bottleneck appears at 10 workers (~100ms P50) due to connection pool size. See the [benchmark script](benchmarks/semantic_search_bench.py) for configuration and methodology.
+
 ## Tools
 
 The server exposes 29 MCP tools. Clients that support MCP resources also get 6 read-only resources, but since not all clients surface resources, every resource has a tool mirror.
@@ -406,7 +416,9 @@ Each interaction generated a case study. Read them all: **[Case Studies — Awar
 
 ## License
 
-Apache 2.0 — see [LICENSE](LICENSE) for details.
+AGPL-3.0-or-later — see [LICENSE](LICENSE) for details.
+
+Versions prior to v0.13.0 were released under the Apache License 2.0.
 
 ---
 

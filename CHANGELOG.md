@@ -7,7 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **License changed from Apache 2.0 to AGPL v3** to protect against proprietary cloud hosting of the codebase. Dual-licensing path preserved for future commercial license.
+
 ### Added
+- `NOTICE` file documenting the license change, prior license, and rationale
+- `CONTRIBUTING.md` with Contributor License Agreement (CLA) requirement
+- `benchmarks/semantic_search_bench.py` — latency benchmarks for semantic search across scale tiers (500–10K entries)
 - **PR label automation** (`pr-labels.yml`): GitHub Actions workflow that automates label transitions — resets to "Awaiting CI" on push, promotes to "Ready for QA" when CI passes, cleans up stale labels when actors pick up tasks
 
 ## [0.12.0] - 2026-03-26
