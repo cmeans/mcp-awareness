@@ -1,4 +1,10 @@
--- _create_tables: DDL for all tables (users, entries, reads, actions, embeddings)
+/* name: create_tables */
+/* mode: templated */
+/* DDL for all tables: users, entries, reads, actions, embeddings.
+   Creates tables, indexes (B-tree, GIN, HNSW), and the pgvector extension.
+   {{default_owner}} — escaped default owner ID for column DEFAULT values
+   {{embedding_dimensions}} — vector dimension for the embeddings VECTOR column
+*/
 CREATE TABLE IF NOT EXISTS users (
     id              TEXT PRIMARY KEY,
     email           TEXT,

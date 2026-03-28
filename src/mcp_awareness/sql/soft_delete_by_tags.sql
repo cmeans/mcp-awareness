@@ -1,4 +1,10 @@
--- soft_delete_by_tags: soft-delete entries matching ALL given tags
+/* name: soft_delete_by_tags */
+/* mode: templated */
+/* Soft-delete all entries matching ALL given tags (AND logic).
+   Saves original expires into data._original_expires for later restoration.
+   {{tag_clauses}} — "tags @> (tag)::jsonb" repeated per tag with AND logic
+   Params: deleted (now), expires (trash_expires), owner_id, ...tag values (one jsonb array per tag)
+*/
 UPDATE entries SET
  data = CASE WHEN expires IS NOT NULL
    THEN jsonb_set(data, '{{_original_expires}}', to_jsonb(expires))
