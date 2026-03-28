@@ -851,9 +851,7 @@ class PostgresStore:
         if limit is not None:
             limit_clause = " LIMIT %s"
             params.append(limit)
-        sql = _load_sql("get_unread").format(
-            since_clause=since_clause, limit_clause=limit_clause
-        )
+        sql = _load_sql("get_unread").format(since_clause=since_clause, limit_clause=limit_clause)
         with self._pool.connection() as conn, conn.cursor() as cur:
             cur.execute(sql, params)
             return [self._row_to_entry(r) for r in cur.fetchall()]
