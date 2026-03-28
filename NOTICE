@@ -1,0 +1,24 @@
+mcp-awareness
+Copyright (C) 2026 Chris Means
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+License change notice
+---------------------
+Effective with version 0.14.0, this project is licensed under the
+GNU Affero General Public License v3 (AGPL-3.0-or-later).
+
+All versions prior to 0.14.0 were released under the Apache License 2.0.
+Anyone who obtained the code under Apache 2.0 before this change retains
+Apache 2.0 rights on those prior versions.
+
+The license was changed to ensure that anyone running a hosted service
+based on this code must make their modifications available to users,
+closing the "cloud loophole" that permissive licenses leave open.
+
+Copyright registration: Case 1-15127131181 (effective 2026-03-24).
+The copyright registration is unaffected by this license change —
+copyright and licensing are independent.
