@@ -21,13 +21,14 @@ name: PR Label Automation
 on:
   pull_request:
     branches: [main]
-    types: [synchronize, labeled]
+    types: [synchronize, labeled, unlabeled]
   workflow_run:
     workflows: [CI]
     types: [completed]
 
 permissions:
   pull-requests: write
+  checks: read
 
 jobs:
   # When new commits are pushed to a PR, reset to Awaiting CI.
@@ -64,8 +65,12 @@ jobs:
             gh pr edit "$PR" --repo "$REPO" --remove-label "$REMOVE"
           fi
 
-          # Add Awaiting CI (unless already present)
-          if ! echo "$PR_LABELS" | grep -q '"Awaiting CI"'; then
+          # Only add Awaiting CI if Dev Active is NOT present.
+          # If Dev Active is on, the dev isn't done yet — on-unlabel will
+          # handle the transition when they remove it.
+          if echo "$PR_LABELS" | grep -q '"Dev Active"'; then
+            echo "Dev Active present — skipping Awaiting CI (dev still working)"
+          elif ! echo "$PR_LABELS" | grep -q '"Awaiting CI"'; then
             gh pr edit "$PR" --repo "$REPO" --add-label "Awaiting CI"
           fi
 
@@ -92,16 +97,24 @@ jobs:
         run: |
           REPO=${{ github.repository }}
 
-          # Get the PR number from the workflow run
+          # Get the PR number from the workflow run.
+          # This can 404 after a force-push (the old commit's run is orphaned).
           PR=$(gh api repos/$REPO/actions/runs/${{ github.event.workflow_run.id }}/pull_requests \
-            --jq '.[0].number // empty')
+            --jq '.[0].number // empty' 2>/dev/null) || true
 
           if [ -z "$PR" ]; then
-            echo "No PR associated with this workflow run (may be a fork PR)"
+            echo "No PR associated with this workflow run (may be a fork PR or force-pushed away)"
             exit 0
           fi
 
           LABELS=$(gh pr view "$PR" --repo "$REPO" --json labels --jq '.labels[].name')
+
+          # Don't promote if Dev Active is present — dev isn't done yet.
+          # When they remove Dev Active, on-unlabel will check CI and promote.
+          if echo "$LABELS" | grep -q "^Dev Active$"; then
+            echo "Dev Active present — skipping promotion (dev still working)"
+            exit 0
+          fi
 
           # Only promote if Awaiting CI is present
           if echo "$LABELS" | grep -q "^Awaiting CI$"; then
@@ -112,6 +125,49 @@ jobs:
             fi
             gh pr edit "$PR" --repo "$REPO" --remove-label "$REMOVE"
             gh pr edit "$PR" --repo "$REPO" --add-label "Ready for QA"
+          fi
+
+  # When Dev Active is removed, transition to Awaiting CI — or straight
+  # to Ready for QA if CI already passed (avoids stuck state when CI
+  # finishes before the label is removed).
+  on-unlabel:
+    if: >-
+      github.event_name == 'pull_request'
+      && github.event.action == 'unlabeled'
+      && github.event.label.name == 'Dev Active'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Transition after Dev Active removed
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+        run: |
+          PR=${{ github.event.pull_request.number }}
+          REPO=${{ github.repository }}
+
+          # Check if CI already passed for the head commit (job-name-agnostic).
+          HEAD_SHA=${{ github.event.pull_request.head.sha }}
+          CI_CONCLUSION=$(gh api "repos/$REPO/actions/workflows/ci.yml/runs?head_sha=$HEAD_SHA" \
+            --jq '.workflow_runs[0].conclusion // empty' 2>/dev/null) || true
+
+          if [ "$CI_CONCLUSION" = "success" ]; then
+            # CI passed — go straight to Ready for QA
+            REMOVE=""
+            if echo "$PR_LABELS" | grep -q '"Awaiting CI"'; then
+              REMOVE="Awaiting CI"
+            fi
+            if echo "$PR_LABELS" | grep -q '"QA Invalidated"'; then
+              REMOVE="${REMOVE:+$REMOVE,}QA Invalidated"
+            fi
+            if [ -n "$REMOVE" ]; then
+              gh pr edit "$PR" --repo "$REPO" --remove-label "$REMOVE"
+            fi
+            gh pr edit "$PR" --repo "$REPO" --add-label "Ready for QA"
+          else
+            # CI hasn't passed yet — ensure Awaiting CI is present
+            if ! echo "$PR_LABELS" | grep -q '"Awaiting CI"'; then
+              gh pr edit "$PR" --repo "$REPO" --add-label "Awaiting CI"
+            fi
           fi
 
   # When a workflow label is added, clean up labels that no longer apply.
@@ -146,6 +202,8 @@ jobs:
             "Dev Active")
               remove_if_present "QA Failed"
               remove_if_present "QA Invalidated"
+              remove_if_present "Awaiting CI"
+              remove_if_present "Ready for QA"
               ;;
             "Ready for QA Signoff")
               remove_if_present "QA Active"
