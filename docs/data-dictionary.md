@@ -301,4 +301,4 @@ The PostgreSQL backend is designed for a clean migration path to AWS RDS:
 
 ---
 
-*[mcp-awareness](https://github.com/cmeans/mcp-awareness) is open source under the [AGPL v3 License](../LICENSE). Copyright (c) 2026 Chris Means.*
+*Part of the [Awareness](https://github.com/cmeans/mcp-awareness) ecosystem. Copyright (c) 2026 Chris Means.*
