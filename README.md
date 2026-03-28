@@ -418,7 +418,7 @@ Each interaction generated a case study. Read them all: **[Case Studies — Awar
 
 AGPL-3.0-or-later — see [LICENSE](LICENSE) for details.
 
-Versions prior to v0.13.0 were released under the Apache License 2.0.
+Versions prior to v0.14.0 were released under the Apache License 2.0.
 
 ---
 

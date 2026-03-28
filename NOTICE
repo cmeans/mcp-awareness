@@ -8,10 +8,10 @@ the Free Software Foundation, either version 3 of the License, or
 
 License change notice
 ---------------------
-Effective with version 0.13.0, this project is licensed under the
+Effective with version 0.14.0, this project is licensed under the
 GNU Affero General Public License v3 (AGPL-3.0-or-later).
 
-All versions prior to 0.13.0 were released under the Apache License 2.0.
+All versions prior to 0.14.0 were released under the Apache License 2.0.
 Anyone who obtained the code under Apache 2.0 before this change retains
 Apache 2.0 rights on those prior versions.
 
