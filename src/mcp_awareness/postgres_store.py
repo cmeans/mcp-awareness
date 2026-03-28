@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import threading
 import time
 from datetime import datetime, timedelta, timezone
@@ -37,6 +38,12 @@ from psycopg.rows import dict_row
 from psycopg_pool import ConnectionPool
 
 from .schema import Entry, EntryType, ensure_dt, ensure_dt_optional, make_id, now_utc, to_iso
+
+# Default owner for backward compatibility — used as column DEFAULT in DDL
+# so inserts without explicit owner_id still work (PR 1: schema only).
+# PR 2 will thread owner_id through all store methods explicitly.
+_DEFAULT_OWNER = os.environ.get("AWARENESS_DEFAULT_OWNER", "system")
+_escaped_default_owner = _DEFAULT_OWNER.replace("'", "''")
 
 logger = logging.getLogger(__name__)
 
@@ -69,8 +76,25 @@ class PostgresStore:
     def _create_tables(self) -> None:
         with self._pool.connection() as conn, conn.cursor() as cur:
             cur.execute(f"""
+                CREATE TABLE IF NOT EXISTS users (
+                    id              TEXT PRIMARY KEY,
+                    email           TEXT,
+                    canonical_email TEXT UNIQUE,
+                    email_verified  BOOLEAN NOT NULL DEFAULT FALSE,
+                    phone           TEXT,
+                    phone_verified  BOOLEAN NOT NULL DEFAULT FALSE,
+                    password_hash   TEXT,
+                    display_name    TEXT,
+                    timezone        TEXT DEFAULT 'UTC',
+                    preferences     JSONB NOT NULL DEFAULT '{{}}'::jsonb,
+                    created         TIMESTAMPTZ NOT NULL DEFAULT now(),
+                    updated         TIMESTAMPTZ NOT NULL DEFAULT now(),
+                    deleted         TIMESTAMPTZ
+                );
+
                 CREATE TABLE IF NOT EXISTS entries (
                     id       TEXT PRIMARY KEY,
+                    owner_id TEXT NOT NULL DEFAULT '{_escaped_default_owner}',
                     type     TEXT NOT NULL,
                     source   TEXT NOT NULL,
                     created  TIMESTAMPTZ NOT NULL,
@@ -81,26 +105,35 @@ class PostgresStore:
                     data     JSONB NOT NULL DEFAULT '{{}}',
                     logical_key TEXT
                 );
-                CREATE INDEX IF NOT EXISTS idx_entries_type ON entries(type);
-                CREATE INDEX IF NOT EXISTS idx_entries_source ON entries(source);
-                CREATE INDEX IF NOT EXISTS idx_entries_type_source ON entries(type, source);
-                CREATE INDEX IF NOT EXISTS idx_entries_tags_gin ON entries USING GIN (tags);
+                CREATE INDEX IF NOT EXISTS idx_entries_owner
+                    ON entries(owner_id);
+                CREATE INDEX IF NOT EXISTS idx_entries_owner_type
+                    ON entries(owner_id, type);
+                CREATE INDEX IF NOT EXISTS idx_entries_owner_source
+                    ON entries(owner_id, source);
+                CREATE INDEX IF NOT EXISTS idx_entries_owner_type_source
+                    ON entries(owner_id, type, source);
+                CREATE INDEX IF NOT EXISTS idx_entries_tags_gin
+                    ON entries USING GIN (tags);
                 CREATE UNIQUE INDEX IF NOT EXISTS idx_entries_source_logical_key
-                    ON entries(source, logical_key)
+                    ON entries(owner_id, source, logical_key)
                     WHERE logical_key IS NOT NULL AND deleted IS NULL;
 
                 CREATE TABLE IF NOT EXISTS reads (
                     id       SERIAL PRIMARY KEY,
+                    owner_id TEXT NOT NULL DEFAULT '{_escaped_default_owner}',
                     entry_id TEXT NOT NULL REFERENCES entries(id) ON DELETE CASCADE,
                     timestamp TIMESTAMPTZ NOT NULL DEFAULT now(),
                     platform TEXT,
                     tool_used TEXT
                 );
+                CREATE INDEX IF NOT EXISTS idx_reads_owner ON reads(owner_id);
                 CREATE INDEX IF NOT EXISTS idx_reads_entry ON reads(entry_id);
                 CREATE INDEX IF NOT EXISTS idx_reads_timestamp ON reads(timestamp);
 
                 CREATE TABLE IF NOT EXISTS actions (
                     id       SERIAL PRIMARY KEY,
+                    owner_id TEXT NOT NULL DEFAULT '{_escaped_default_owner}',
                     entry_id TEXT NOT NULL REFERENCES entries(id) ON DELETE CASCADE,
                     timestamp TIMESTAMPTZ NOT NULL DEFAULT now(),
                     platform TEXT,
@@ -108,6 +141,7 @@ class PostgresStore:
                     detail   TEXT,
                     tags     JSONB NOT NULL DEFAULT '[]'
                 );
+                CREATE INDEX IF NOT EXISTS idx_actions_owner ON actions(owner_id);
                 CREATE INDEX IF NOT EXISTS idx_actions_entry ON actions(entry_id);
                 CREATE INDEX IF NOT EXISTS idx_actions_timestamp ON actions(timestamp);
                 CREATE INDEX IF NOT EXISTS idx_actions_tags_gin ON actions USING GIN (tags);
@@ -116,6 +150,7 @@ class PostgresStore:
 
                 CREATE TABLE IF NOT EXISTS embeddings (
                     id          SERIAL PRIMARY KEY,
+                    owner_id    TEXT NOT NULL DEFAULT '{_escaped_default_owner}',
                     entry_id    TEXT NOT NULL REFERENCES entries(id) ON DELETE CASCADE,
                     model       TEXT NOT NULL,
                     dimensions  INTEGER NOT NULL,
@@ -124,6 +159,8 @@ class PostgresStore:
                     created     TIMESTAMPTZ NOT NULL DEFAULT now(),
                     UNIQUE (entry_id, model)
                 );
+                CREATE INDEX IF NOT EXISTS idx_embeddings_owner
+                    ON embeddings(owner_id);
                 CREATE INDEX IF NOT EXISTS idx_embeddings_entry
                     ON embeddings(entry_id);
                 CREATE INDEX IF NOT EXISTS idx_embeddings_vector_hnsw
@@ -557,8 +594,8 @@ class PostgresStore:
                 """INSERT INTO entries
                    (id, type, source, created, updated, expires, tags, data, logical_key)
                    VALUES (%s, %s, %s, %s, %s, %s, %s::jsonb, %s::jsonb, %s)
-                   ON CONFLICT (source, logical_key) WHERE logical_key IS NOT NULL
-                       AND deleted IS NULL
+                   ON CONFLICT (owner_id, source, logical_key)
+                       WHERE logical_key IS NOT NULL AND deleted IS NULL
                    DO UPDATE SET id = entries.id
                    RETURNING (xmax = 0) AS inserted""",
                 (
