@@ -345,7 +345,6 @@ async def learn_pattern(
         source=source,
         tags=tags,
         created=now,
-        updated=now,
         expires=None,
         data={
             "description": description,
@@ -402,7 +401,6 @@ async def remember(
         source=source,
         tags=tags,
         created=now,
-        updated=now,
         expires=None,
         data=data,
         logical_key=logical_key,
@@ -463,7 +461,11 @@ async def update_entry(
             }
         )
     _srv._generate_embedding(result)
-    return json.dumps({"status": "ok", "id": result.id, "updated": to_iso(result.updated)})
+    return json.dumps({
+        "status": "ok",
+        "id": result.id,
+        "updated": to_iso(result.updated) if result.updated else None,
+    })
 
 
 @_srv.mcp.tool()
@@ -516,7 +518,6 @@ async def suppress_alert(
         source=source or "",
         tags=tags or [],
         created=now,
-        updated=now,
         expires=expires,
         data={
             "metric": metric,
@@ -554,7 +555,6 @@ async def add_context(
         source=source,
         tags=tags,
         created=now,
-        updated=now,
         expires=expires,
         data={"description": description},
     )
@@ -881,7 +881,6 @@ async def remind(
         source=source,
         tags=tags,
         created=now,
-        updated=now,
         expires=None,
         data={
             "goal": goal,

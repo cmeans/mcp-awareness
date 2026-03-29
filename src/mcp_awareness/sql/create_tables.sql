@@ -27,7 +27,7 @@ CREATE TABLE IF NOT EXISTS entries (
     type     TEXT NOT NULL,
     source   TEXT NOT NULL,
     created  TIMESTAMPTZ NOT NULL,
-    updated  TIMESTAMPTZ NOT NULL,
+    updated  TIMESTAMPTZ,
     expires  TIMESTAMPTZ,
     deleted  TIMESTAMPTZ,
     tags     JSONB NOT NULL DEFAULT '[]',

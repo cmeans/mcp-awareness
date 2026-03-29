@@ -63,7 +63,6 @@ def test_entry_roundtrip():
         source="test-source",
         tags=["infra", "test"],
         created=now,
-        updated=now,
         expires=None,
         data={"metrics": {"cpu": 50}},
     )
@@ -85,7 +84,6 @@ def test_entry_type_serialization():
             source="s",
             tags=[],
             created=now,
-            updated=now,
             expires=None,
             data={},
         )
@@ -101,7 +99,6 @@ def test_is_expired_none():
         source="s",
         tags=[],
         created=now_utc(),
-        updated=now_utc(),
         expires=None,
         data={},
     )
@@ -116,7 +113,6 @@ def test_is_expired_future():
         source="s",
         tags=[],
         created=now_utc(),
-        updated=now_utc(),
         expires=future,
         data={},
     )
@@ -131,7 +127,6 @@ def test_is_expired_past():
         source="s",
         tags=[],
         created=now_utc(),
-        updated=now_utc(),
         expires=past,
         data={},
     )
@@ -146,7 +141,6 @@ def test_is_stale_within_ttl():
         source="s",
         tags=[],
         created=now,
-        updated=now,
         expires=None,
         data={"ttl_sec": 120},
     )
@@ -161,7 +155,6 @@ def test_is_stale_expired_ttl():
         source="s",
         tags=[],
         created=old,
-        updated=old,
         expires=None,
         data={"ttl_sec": 120},
     )
@@ -176,7 +169,6 @@ def test_is_stale_non_status():
         source="s",
         tags=[],
         created=old,
-        updated=old,
         expires=None,
         data={"ttl_sec": 120},
     )
@@ -191,11 +183,26 @@ def test_is_stale_no_ttl():
         source="s",
         tags=[],
         created=old,
-        updated=old,
         expires=None,
         data={},
     )
     assert not entry.is_stale()
+
+
+def test_age_sec_falls_back_to_created_when_updated_is_none():
+    """age_sec uses created as reference when updated is None."""
+    created = datetime.now(timezone.utc) - timedelta(seconds=60)
+    entry = Entry(
+        id="x",
+        type=EntryType.STATUS,
+        source="s",
+        tags=[],
+        created=created,
+        expires=None,
+        data={},
+    )
+    assert entry.updated is None
+    assert abs(entry.age_sec - 60.0) < 2.0
 
 
 def test_severity_rank():
@@ -245,7 +252,6 @@ def test_to_list_dict_alert_uses_message():
         source="nas",
         tags=["infra"],
         created=now,
-        updated=now,
         expires=None,
         data={"alert_id": "a1", "level": "warning", "message": "CPU high"},
     )
@@ -262,7 +268,6 @@ def test_to_list_dict_intention_includes_goal_state():
         source="personal",
         tags=["errands"],
         created=now,
-        updated=now,
         expires=None,
         data={"goal": "Pick up milk", "state": "pending"},
     )

@@ -19,7 +19,7 @@
 from __future__ import annotations
 
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
@@ -104,9 +104,9 @@ class Entry:
     source: str
     tags: list[str]
     created: datetime
-    updated: datetime
-    expires: datetime | None
-    data: dict[str, Any]
+    updated: datetime | None = None
+    expires: datetime | None = None
+    data: dict[str, Any] = field(default_factory=dict)
     logical_key: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
@@ -116,7 +116,7 @@ class Entry:
             "source": self.source,
             "tags": self.tags,
             "created": to_iso(self.created),
-            "updated": to_iso(self.updated),
+            "updated": to_iso(self.updated) if self.updated else None,
             "expires": to_iso(self.expires) if self.expires else None,
             "data": self.data,
         }
@@ -142,7 +142,7 @@ class Entry:
             "tags": self.tags,
             "description": desc,
             "created": to_iso(self.created),
-            "updated": to_iso(self.updated),
+            "updated": to_iso(self.updated) if self.updated else None,
         }
         # Include key fields for intentions in list mode
         if entry_type == "intention":
@@ -160,7 +160,7 @@ class Entry:
             source=d["source"],
             tags=d.get("tags", []),
             created=ensure_dt(d["created"]),
-            updated=ensure_dt(d["updated"]),
+            updated=ensure_dt_optional(d.get("updated")),
             expires=ensure_dt_optional(d.get("expires")),
             data=d.get("data", {}),
             logical_key=d.get("logical_key"),
@@ -182,7 +182,8 @@ class Entry:
 
     @property
     def age_sec(self) -> float:
-        return (datetime.now(timezone.utc) - self.updated).total_seconds()
+        ref = self.updated or self.created
+        return (datetime.now(timezone.utc) - ref).total_seconds()
 
 
 def validate_entry_data(data: dict[str, Any]) -> list[str]:
