@@ -134,7 +134,7 @@ class PostgresStore:
             source=row["source"],
             tags=tags,
             created=ensure_dt(row["created"]),
-            updated=ensure_dt(row["updated"]),
+            updated=ensure_dt_optional(row["updated"]),
             expires=ensure_dt_optional(row["expires"]),
             data=data,
             logical_key=row.get("logical_key"),
@@ -188,7 +188,7 @@ class PostgresStore:
         owner_id: str,
         where: str = "1=1",
         params: tuple[Any, ...] = (),
-        order_by: str = "updated DESC",
+        order_by: str = "COALESCE(updated, created) DESC",
         limit: int | None = None,
         offset: int | None = None,
     ) -> list[Entry]:
@@ -239,7 +239,6 @@ class PostgresStore:
                 source=source,
                 tags=tags,
                 created=now,
-                updated=now,
                 expires=None,
                 data=data,
             )
@@ -275,7 +274,6 @@ class PostgresStore:
             source=source,
             tags=tags,
             created=now,
-            updated=now,
             expires=None,
             data=data,
         )
@@ -313,7 +311,6 @@ class PostgresStore:
             source=scope,
             tags=tags,
             created=now,
-            updated=now,
             expires=None,
             data=data,
         )
@@ -346,7 +343,7 @@ class PostgresStore:
                 clauses.append("tags @> %s::jsonb")
                 params.append(json.dumps([t]))
         if since is not None:
-            clauses.append("updated >= %s")
+            clauses.append("COALESCE(updated, created) >= %s")
             params.append(since)
         where = " AND ".join(clauses) if clauses else "1=1"
         return self._query_entries(owner_id, where, tuple(params), limit=limit, offset=offset)
@@ -388,7 +385,7 @@ class PostgresStore:
             clauses.append("source = %s")
             params.append(source)
         if since is not None:
-            clauses.append("updated >= %s")
+            clauses.append("COALESCE(updated, created) >= %s")
             params.append(since)
         where = " AND ".join(clauses)
         return self._query_entries(owner_id, where, tuple(params), limit=limit, offset=offset)
@@ -459,10 +456,10 @@ class PostgresStore:
                 clauses.append("tags @> %s::jsonb")
                 params.append(json.dumps([t]))
         if since is not None:
-            clauses.append("updated >= %s")
+            clauses.append("COALESCE(updated, created) >= %s")
             params.append(since)
         if until is not None:
-            clauses.append("updated <= %s")
+            clauses.append("COALESCE(updated, created) <= %s")
             params.append(until)
         if learned_from is not None:
             clauses.append("data->>'learned_from' = %s")
@@ -1145,10 +1142,10 @@ class PostgresStore:
                 clauses.append("e.tags @> %s::jsonb")
                 params.append(json.dumps([t]))
         if since is not None:
-            clauses.append("e.updated >= %s")
+            clauses.append("COALESCE(e.updated, e.created) >= %s")
             params.append(since)
         if until is not None:
-            clauses.append("e.updated <= %s")
+            clauses.append("COALESCE(e.updated, e.created) <= %s")
             params.append(until)
         where = " AND ".join(clauses)
         params.append(limit)

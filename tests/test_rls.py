@@ -91,7 +91,6 @@ class TestRLSEntries:
             source="test",
             tags=["rls-test"],
             created=now_utc(),
-            updated=now_utc(),
             expires=None,
             data={"description": "alice's secret"},
         )
@@ -116,7 +115,6 @@ class TestRLSEntries:
             source="test-knowledge",
             tags=["rls-knowledge"],
             created=now_utc(),
-            updated=now_utc(),
             expires=None,
             data={"description": "alice knowledge"},
         )
@@ -136,7 +134,6 @@ class TestRLSEntries:
                 source="test-stats",
                 tags=["rls-stats"],
                 created=now_utc(),
-                updated=now_utc(),
                 expires=None,
                 data={"description": f"{owner}'s note"},
             )
@@ -163,7 +160,6 @@ class TestRLSReads:
             source="test-reads",
             tags=["rls-reads"],
             created=now_utc(),
-            updated=now_utc(),
             expires=None,
             data={"description": "test entry"},
         )
@@ -189,7 +185,6 @@ class TestRLSActions:
             source="test-actions",
             tags=["rls-actions"],
             created=now_utc(),
-            updated=now_utc(),
             expires=None,
             data={"description": "test entry for actions"},
         )
