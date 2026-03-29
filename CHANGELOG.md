@@ -33,6 +33,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **PR label automation**: removing `Dev Active` checks CI status (via workflow runs API, job-name-agnostic) and promotes to `Ready for QA` or `Awaiting CI` accordingly
 - **PR label automation**: adding `Dev Active` now also clears `Awaiting CI` and `Ready for QA` to prevent competing state
 - **PR label automation**: added explicit `checks: read` permission
+- **PR label automation**: `on-ci-pass` now finds PRs from dependabot and other non-default branches by falling back to head branch search when the `pull_requests` array is empty
 
 ## [0.14.0] - 2026-03-28
 

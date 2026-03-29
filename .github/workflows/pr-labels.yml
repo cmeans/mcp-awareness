@@ -102,6 +102,14 @@ jobs:
           PR=$(gh api repos/$REPO/actions/runs/${{ github.event.workflow_run.id }}/pull_requests \
             --jq '.[0].number // empty' 2>/dev/null) || true
 
+          # Fallback: pull_requests array is empty for dependabot and other
+          # non-default-branch PRs. Search by head branch instead.
+          if [ -z "$PR" ]; then
+            HEAD_BRANCH=${{ github.event.workflow_run.head_branch }}
+            PR=$(gh pr list --repo "$REPO" --head "$HEAD_BRANCH" --state open \
+              --json number --jq '.[0].number // empty' 2>/dev/null) || true
+          fi
+
           if [ -z "$PR" ]; then
             echo "No PR associated with this workflow run (may be a fork PR or force-pushed away)"
             exit 0
