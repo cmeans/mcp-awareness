@@ -175,9 +175,14 @@ class PostgresStore:
         self._cleanup_thread.start()
 
     def _do_cleanup(self) -> None:
-        """Run the actual DELETE using a pool connection (background thread)."""
+        """Run the actual DELETE using a pool connection (background thread).
+
+        Uses SET LOCAL row_security = off because cleanup is a system-wide
+        maintenance task — expired entries should be cleaned regardless of owner.
+        """
         try:
-            with self._pool.connection() as conn, conn.cursor() as cur:
+            with self._pool.connection() as conn, conn.transaction(), conn.cursor() as cur:
+                cur.execute(_load_sql("disable_row_security"))
                 now = datetime.now(timezone.utc)
                 cur.execute(_load_sql("cleanup_expired"), (now,))
         except Exception as exc:
@@ -1166,9 +1171,10 @@ class PostgresStore:
             (json.dumps([entry_id]),),
         )
 
-    def clear(self) -> None:
-        with self._pool.connection() as conn, conn.cursor() as cur:
-            cur.execute("DELETE FROM reads")
-            cur.execute("DELETE FROM actions")
-            cur.execute("DELETE FROM embeddings")
-            cur.execute("DELETE FROM entries")
+    def clear(self, owner_id: str) -> None:
+        with self._pool.connection() as conn, conn.transaction(), conn.cursor() as cur:
+            self._set_rls_context(cur, owner_id)
+            cur.execute(_load_sql("clear_reads"), (owner_id,))
+            cur.execute(_load_sql("clear_actions"), (owner_id,))
+            cur.execute(_load_sql("clear_embeddings"), (owner_id,))
+            cur.execute(_load_sql("clear_entries"), (owner_id,))

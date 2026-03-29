@@ -62,4 +62,4 @@ def store(pg_dsn):
     """Fresh PostgresStore for each test — tables created, then cleared after."""
     s = PostgresStore(pg_dsn)
     yield s
-    s.clear()
+    s.clear(TEST_OWNER)

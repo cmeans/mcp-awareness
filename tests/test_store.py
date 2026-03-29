@@ -20,6 +20,8 @@ import concurrent.futures
 import threading
 import time
 
+import pytest
+
 from mcp_awareness.schema import Entry, EntryType, make_id, now_utc
 
 TEST_OWNER = "test-owner"
@@ -467,8 +469,46 @@ def test_double_soft_delete_is_noop(store):
 
 def test_clear(store):
     store.upsert_status(TEST_OWNER, "nas", [], {"metrics": {}, "ttl_sec": 60})
-    store.clear()
+    store.clear(TEST_OWNER)
     assert store.get_sources(TEST_OWNER) == []
+
+
+def test_clear_isolates_owners(store):
+    """clear(owner_id) must only delete that owner's data."""
+    other_owner = "other-owner"
+    store.upsert_status(TEST_OWNER, "nas", [], {"metrics": {}, "ttl_sec": 60})
+    store.upsert_status(other_owner, "nas", [], {"metrics": {}, "ttl_sec": 60})
+    store.clear(TEST_OWNER)
+    # TEST_OWNER data gone
+    assert store.get_sources(TEST_OWNER) == []
+    # Other owner's data intact
+    assert store.get_sources(other_owner) == ["nas"]
+    # Clean up other owner
+    store.clear(other_owner)
+
+
+def test_cleanup_respects_rls(store):
+    """_do_cleanup() must delete expired entries across all owners."""
+    from datetime import datetime, timedelta, timezone
+
+    other_owner = "other-owner"
+    past = datetime.now(timezone.utc) - timedelta(hours=1)
+    for owner in (TEST_OWNER, other_owner):
+        entry = Entry(
+            id=make_id(),
+            type=EntryType.SUPPRESSION,
+            source="test",
+            tags=[],
+            created=past,
+            expires=past,
+            data={"metric": "cpu", "suppress_level": "warning"},
+        )
+        store.add(owner, entry)
+    # Run cleanup directly (bypasses debounce)
+    store._do_cleanup()
+    # Expired entries for both owners should be gone
+    assert store.count_active_suppressions(TEST_OWNER) == 0
+    assert store.count_active_suppressions(other_owner) == 0
 
 
 # ------------------------------------------------------------------
@@ -1162,7 +1202,7 @@ def test_clear_removes_reads_and_actions(store):
     )
     store.log_read(TEST_OWNER, [entry.id], tool_used="test")
     store.log_action(TEST_OWNER, entry_id=entry.id, action="test")
-    store.clear()
+    store.clear(TEST_OWNER)
     assert store.get_reads(TEST_OWNER) == []
     assert store.get_actions(TEST_OWNER) == []
 
@@ -1923,7 +1963,7 @@ class TestEmbeddings:
         )
         store.add(TEST_OWNER, entry)
         store.upsert_embedding(TEST_OWNER, entry.id, "m", 768, "h1", self._vec(768, 0))
-        store.clear()
+        store.clear(TEST_OWNER)
         results = store.semantic_search(TEST_OWNER, self._vec(768, 0), "m")
         assert results == []
 
@@ -2519,6 +2559,12 @@ class TestEmbeddingRoundTrip:
 
 
 class TestOwnerIsolation:
+    @pytest.fixture(autouse=True)
+    def _cleanup_owners(self, store):
+        yield
+        for owner in ("alice", "bob"):
+            store.clear(owner)
+
     def test_entries_isolated_by_owner(self, store):
         """Entries from one owner are not visible to another."""
         entry = Entry(

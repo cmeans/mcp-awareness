@@ -66,6 +66,7 @@ OLLAMA_URL = "http://ollama:11434"
 EMBEDDING_MODEL = "nomic-embed-text"
 EMBEDDING_DIM = 768
 
+BENCH_OWNER = "bench-owner"
 SCALE_TIERS = [500, 1_000, 5_000, 10_000]
 # Tiers above this threshold use synthetic vectors (skip Ollama embedding)
 REAL_EMBED_THRESHOLD = 1_000
@@ -540,7 +541,7 @@ def main() -> None:
             }
 
             # Clean up for next tier
-            store.clear()
+            store.clear(BENCH_OWNER)
             # Close pool connections
             store._pool.close()
 

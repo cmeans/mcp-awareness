@@ -234,7 +234,7 @@ def _user_set_password(dsn: str, args: argparse.Namespace) -> None:
 
         break  # password accepted
 
-    ph = PasswordHasher()
+    ph = PasswordHasher(time_cost=3)
     hashed = ph.hash(password)
     now = datetime.now(timezone.utc)
     with psycopg.connect(dsn) as conn, conn.cursor() as cur:
