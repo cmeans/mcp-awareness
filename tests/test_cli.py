@@ -490,6 +490,30 @@ class TestUserSetPassword:
         assert "does not meet requirements" in capsys.readouterr().err
         _cleanup_user(pg_dsn, "weak-pw-user")
 
+    def test_set_password_weak_no_feedback(
+        self, pg_dsn: str, store: object, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Weak password with no zxcvbn feedback still shows a message."""
+        _ensure_users_table(pg_dsn)
+        _insert_user(pg_dsn, "nofb-pw-user")
+        args = argparse.Namespace(user_id="nofb-pw-user")
+        pw = "ValidLength14ch!"
+        with (
+            patch(
+                "mcp_awareness.cli.getpass.getpass",
+                side_effect=[pw, pw] * 3,
+            ),
+            patch(
+                "zxcvbn.zxcvbn",
+                return_value={"score": 1, "feedback": {"warning": "", "suggestions": []}},
+            ),
+            pytest.raises(SystemExit) as exc_info,
+        ):
+            _user_set_password(pg_dsn, args)
+        assert exc_info.value.code == 1
+        assert "too easily guessed" in capsys.readouterr().err
+        _cleanup_user(pg_dsn, "nofb-pw-user")
+
 
 class TestUserExport:
     def test_export_to_stdout(
