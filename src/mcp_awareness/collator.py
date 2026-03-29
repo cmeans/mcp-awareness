@@ -292,7 +292,7 @@ def generate_briefing(store: Store, owner_id: str) -> dict[str, Any]:
             age = int(status.age_sec)
             briefing["sources"][source] = {
                 "status": "stale",
-                "last_report": to_iso(status.updated),
+                "last_report": to_iso(status.updated or status.created),
                 "headline": f"{source} has not reported in {age}s",
                 "drill_down": f"awareness://status/{source}",
             }
@@ -323,7 +323,7 @@ def generate_briefing(store: Store, owner_id: str) -> dict[str, Any]:
 
         source_entry: dict[str, Any] = {
             "status": source_status,
-            "last_report": to_iso(status.updated) if status else None,
+            "last_report": to_iso(status.updated or status.created) if status else None,
         }
 
         if active_alerts:

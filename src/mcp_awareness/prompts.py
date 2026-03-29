@@ -160,7 +160,7 @@ async def system_status(source: str) -> str:
         desc = status.data.get("description", "")
         if desc:
             parts.append(f"- {desc}")
-        parts.append(f"- Last report: {to_iso(status.updated)}")
+        parts.append(f"- Last report: {to_iso(status.updated or status.created)}")
 
     if alerts:
         unresolved = [a for a in alerts if not a.data.get("resolved")]

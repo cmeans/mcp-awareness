@@ -196,7 +196,7 @@ def _do_embed(
             source=entry_source,
             tags=entry_tags,
             created=now_utc(),
-            updated=now_utc(),
+            updated=None,
             expires=None,
             data=entry_data,
         )

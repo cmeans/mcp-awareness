@@ -51,7 +51,6 @@ def _make_alert(
         source=source,
         tags=tags or ["infra"],
         created=now,
-        updated=now,
         expires=None,
         data={
             "alert_id": alert_id,
@@ -80,7 +79,6 @@ def _make_suppression(
         source=source,
         tags=tags or [],
         created=now,
-        updated=now,
         expires=expires,
         data={
             "metric": metric,
@@ -98,7 +96,6 @@ def _make_pattern(source="nas", effect="suppress cpu_pct", conditions=None, tags
         source=source,
         tags=tags or [],
         created=now,
-        updated=now,
         expires=None,
         data={
             "description": "test",
@@ -457,7 +454,6 @@ class TestGenerateBriefing:
                 source="nas",
                 tags=[],
                 created=now,
-                updated=now,
                 expires=expires,
                 data={
                     "metric": "cpu_pct",
@@ -497,7 +493,6 @@ class TestGenerateBriefing:
                 source="nas",
                 tags=[],
                 created=now,
-                updated=now,
                 expires=expires,
                 data={
                     "metric": "cpu_pct",
@@ -534,7 +529,6 @@ class TestGenerateBriefing:
                 source="nas",
                 tags=[],
                 created=now,
-                updated=now,
                 expires=None,
                 data={
                     "description": "Maintenance on Fridays",
@@ -628,7 +622,6 @@ class TestGenerateBriefing:
                     source="nas",
                     tags=[],
                     created=now,
-                    updated=now,
                     expires=expires,
                     data={"metric": f"m{i}", "suppress_level": "warning"},
                 ),
@@ -717,7 +710,6 @@ class TestGenerateBriefing:
                 source="nas",
                 tags=["infra"],
                 created=now,
-                updated=now,
                 expires=now + timedelta(hours=1),
                 data={"suppress_level": "warning", "escalation_override": True, "reason": "test"},
             ),
@@ -757,7 +749,6 @@ class TestGenerateBriefing:
                 source="nas",
                 tags=["infra"],
                 created=now,
-                updated=now,
                 expires=None,
                 data={
                     "description": "Backup causes CPU spikes",
@@ -834,7 +825,6 @@ class TestGenerateBriefing:
                 source="personal",
                 tags=["errands"],
                 created=now_utc(),
-                updated=now_utc(),
                 expires=None,
                 data={
                     "goal": "Pick up milk",
@@ -873,7 +863,6 @@ class TestGenerateBriefing:
                 source="personal",
                 tags=[],
                 created=now_utc(),
-                updated=now_utc(),
                 expires=None,
                 data={
                     "goal": "Future task",

@@ -64,7 +64,6 @@ def _make_entry(
         source=source,
         tags=tags or [],
         created=now,
-        updated=now,
         expires=None,
         data=data or {},
     )
