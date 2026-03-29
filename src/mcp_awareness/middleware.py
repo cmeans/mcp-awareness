@@ -91,3 +91,65 @@ class HealthMiddleware:
                 await resp(scope, receive, send)
                 return
         await self.app(scope, receive, send)
+
+
+class AuthMiddleware:
+    """Validate JWT Bearer token and set owner context."""
+
+    def __init__(self, app: ASGIApp, jwt_secret: str, algorithm: str = "HS256") -> None:
+        self.app = app
+        self.jwt_secret = jwt_secret
+        self.algorithm = algorithm
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        path = scope.get("path", "")
+        # Skip auth for health, favicon, and non-MCP paths
+        if path in ("/health", "/favicon.ico"):
+            await self.app(scope, receive, send)
+            return
+
+        # Extract Bearer token
+        headers = dict(scope.get("headers", []))
+        auth_header = headers.get(b"authorization", b"").decode()
+        if not auth_header.startswith("Bearer "):
+            resp = JSONResponse(
+                {"error": "Missing or invalid Authorization header"}, status_code=401
+            )
+            await resp(scope, receive, send)
+            return
+
+        token = auth_header[7:]  # Strip "Bearer "
+        try:
+            import jwt
+
+            payload = jwt.decode(token, self.jwt_secret, algorithms=[self.algorithm])
+            owner_id: str | None = payload.get("sub")
+            if not owner_id:
+                resp = JSONResponse({"error": "JWT missing 'sub' claim"}, status_code=401)
+                await resp(scope, receive, send)
+                return
+        except Exception as exc:
+            # Handle both ExpiredSignatureError and InvalidTokenError
+            import jwt as jwt_mod
+
+            if isinstance(exc, jwt_mod.ExpiredSignatureError):
+                resp = JSONResponse({"error": "Token expired"}, status_code=401)
+            elif isinstance(exc, jwt_mod.InvalidTokenError):
+                resp = JSONResponse({"error": "Invalid token"}, status_code=401)
+            else:
+                raise
+            await resp(scope, receive, send)
+            return
+
+        # Set owner context for downstream handlers
+        from .server import _owner_ctx
+
+        token_reset = _owner_ctx.set(owner_id)
+        try:
+            await self.app(scope, receive, send)
+        finally:
+            _owner_ctx.reset(token_reset)

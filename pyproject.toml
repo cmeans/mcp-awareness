@@ -11,11 +11,18 @@ dependencies = [
     "psycopg_pool>=3.2",
     "alembic>=1.13",
     "sqlalchemy>=2.0",
+    "PyJWT>=2.8",
+    "argon2-cffi>=23.1",
+    "phonenumbers>=8.13",
+    "zxcvbn>=4.4",
 ]
 
 [project.scripts]
 mcp-awareness = "mcp_awareness.server:main"
 mcp-awareness-migrate = "mcp_awareness.migrate:main"
+mcp-awareness-user = "mcp_awareness.cli:user_main"
+mcp-awareness-token = "mcp_awareness.cli:token_main"
+mcp-awareness-secret = "mcp_awareness.cli:secret_main"
 
 [project.optional-dependencies]
 dev = [
@@ -88,6 +95,10 @@ ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
 module = ["alembic.*", "sqlalchemy.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["jwt.*", "zxcvbn.*"]
 ignore_missing_imports = true
 
 # The tools/resources/prompts modules use a circular import pattern

@@ -96,6 +96,26 @@ class PostgresStore:
         # Run `alembic upgrade head` before starting the server on a new database.
 
     # ------------------------------------------------------------------
+    # RLS context helper
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _set_rls_context(cur: psycopg.Cursor[Any], owner_id: str) -> None:
+        """Set the RLS context variable for the current transaction.
+
+        Must be called inside a ``conn.transaction()`` block so that
+        the setting scopes to the transaction and is automatically reset
+        when the transaction ends. This keeps pool connections clean for
+        the next user.
+
+        Uses ``set_config()`` instead of ``SET LOCAL`` because SET does not
+        support parameterized values (the identifier gets interpolated as-is).
+        ``set_config(name, value, is_local)`` with ``true`` is equivalent to
+        ``SET LOCAL``.
+        """
+        cur.execute("SELECT set_config('app.current_user', %s, true)", (owner_id,))
+
+    # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
 
@@ -185,7 +205,8 @@ class PostgresStore:
             query_params.append(limit)
         if offset is not None:
             query_params.append(offset)
-        with self._pool.connection() as conn, conn.cursor() as cur:
+        with self._pool.connection() as conn, conn.transaction(), conn.cursor() as cur:
+            self._set_rls_context(cur, owner_id)
             cur.execute(sql, tuple(query_params))
             return [self._row_to_entry(r) for r in cur.fetchall()]
 
@@ -195,7 +216,8 @@ class PostgresStore:
 
     def add(self, owner_id: str, entry: Entry) -> Entry:
         self._cleanup_expired()
-        with self._pool.connection() as conn, conn.cursor() as cur:
+        with self._pool.connection() as conn, conn.transaction(), conn.cursor() as cur:
+            self._set_rls_context(cur, owner_id)
             self._insert_entry(cur, owner_id, entry)
         return entry
 
@@ -205,7 +227,8 @@ class PostgresStore:
         """Upsert a status entry for a source (one active status per source)."""
         self._cleanup_expired()
         now = now_utc()
-        with self._pool.connection() as conn, conn.cursor() as cur:
+        with self._pool.connection() as conn, conn.transaction(), conn.cursor() as cur:
+            self._set_rls_context(cur, owner_id)
             cur.execute(
                 _load_sql("upsert_status_delete"),
                 (owner_id, EntryType.STATUS.value, source),
@@ -239,7 +262,8 @@ class PostgresStore:
             e.updated = now
             e.tags = tags
             e.data.update(data)
-            with self._pool.connection() as conn, conn.cursor() as cur:
+            with self._pool.connection() as conn, conn.transaction(), conn.cursor() as cur:
+                self._set_rls_context(cur, owner_id)
                 cur.execute(
                     _load_sql("upsert_alert_update"),
                     (now, json.dumps(e.tags), json.dumps(e.data), e.id),
@@ -255,7 +279,8 @@ class PostgresStore:
             expires=None,
             data=data,
         )
-        with self._pool.connection() as conn, conn.cursor() as cur:
+        with self._pool.connection() as conn, conn.transaction(), conn.cursor() as cur:
+            self._set_rls_context(cur, owner_id)
             self._insert_entry(cur, owner_id, entry)
         return entry
 
@@ -275,7 +300,8 @@ class PostgresStore:
             e.updated = now
             e.tags = tags
             e.data.update(data)
-            with self._pool.connection() as conn, conn.cursor() as cur:
+            with self._pool.connection() as conn, conn.transaction(), conn.cursor() as cur:
+                self._set_rls_context(cur, owner_id)
                 cur.execute(
                     _load_sql("upsert_preference_update"),
                     (now, json.dumps(e.tags), json.dumps(e.data), e.id),
@@ -291,7 +317,8 @@ class PostgresStore:
             expires=None,
             data=data,
         )
-        with self._pool.connection() as conn, conn.cursor() as cur:
+        with self._pool.connection() as conn, conn.transaction(), conn.cursor() as cur:
+            self._set_rls_context(cur, owner_id)
             self._insert_entry(cur, owner_id, entry)
         return entry
 
@@ -326,7 +353,8 @@ class PostgresStore:
 
     def get_sources(self, owner_id: str) -> list[str]:
         """Get all unique sources that have reported status."""
-        with self._pool.connection() as conn, conn.cursor() as cur:
+        with self._pool.connection() as conn, conn.transaction(), conn.cursor() as cur:
+            self._set_rls_context(cur, owner_id)
             cur.execute(
                 _load_sql("get_sources"),
                 (owner_id, EntryType.STATUS.value),
@@ -334,7 +362,8 @@ class PostgresStore:
             return [row["source"] for row in cur.fetchall()]
 
     def get_latest_status(self, owner_id: str, source: str) -> Entry | None:
-        with self._pool.connection() as conn, conn.cursor() as cur:
+        with self._pool.connection() as conn, conn.transaction(), conn.cursor() as cur:
+            self._set_rls_context(cur, owner_id)
             cur.execute(
                 _load_sql("get_latest_status"),
                 (owner_id, EntryType.STATUS.value, source),
@@ -383,7 +412,8 @@ class PostgresStore:
         return self._query_entries(owner_id, "type = %s", (EntryType.PATTERN.value,))
 
     def count_active_suppressions(self, owner_id: str) -> int:
-        with self._pool.connection() as conn, conn.cursor() as cur:
+        with self._pool.connection() as conn, conn.transaction(), conn.cursor() as cur:
+            self._set_rls_context(cur, owner_id)
             cur.execute(
                 _load_sql("count_active_suppressions"),
                 (owner_id, EntryType.SUPPRESSION.value),
@@ -503,10 +533,17 @@ class PostgresStore:
         changelog.append({"updated": to_iso(now), "changed": changed})
         entry.updated = now
 
-        with self._pool.connection() as conn, conn.cursor() as cur:
+        with self._pool.connection() as conn, conn.transaction(), conn.cursor() as cur:
+            self._set_rls_context(cur, owner_id)
             cur.execute(
                 _load_sql("update_entry"),
-                (now, entry.source, json.dumps(entry.tags), json.dumps(entry.data), entry.id),
+                (
+                    now,
+                    entry.source,
+                    json.dumps(entry.tags),
+                    json.dumps(entry.data),
+                    entry.id,
+                ),
             )
         return entry
 
@@ -518,7 +555,8 @@ class PostgresStore:
         Uses a single connection with INSERT ... ON CONFLICT to avoid race
         conditions when concurrent writers target the same logical_key.
         """
-        with self._pool.connection() as conn, conn.cursor() as cur:
+        with self._pool.connection() as conn, conn.transaction(), conn.cursor() as cur:
+            self._set_rls_context(cur, owner_id)
             # Attempt insert; on conflict, fetch the existing row's id
             cur.execute(
                 _load_sql("upsert_by_logical_key"),
@@ -563,7 +601,8 @@ class PostgresStore:
 
     def get_stats(self, owner_id: str) -> dict[str, Any]:
         """Get entry counts by type, list of sources, and total count."""
-        with self._pool.connection() as conn, conn.cursor() as cur:
+        with self._pool.connection() as conn, conn.transaction(), conn.cursor() as cur:
+            self._set_rls_context(cur, owner_id)
             cur.execute(_load_sql("get_stats_counts"), (owner_id,))
             counts = {row["type"]: row["cnt"] for row in cur.fetchall()}
             cur.execute(_load_sql("get_stats_sources"), (owner_id,))
@@ -576,7 +615,8 @@ class PostgresStore:
 
     def get_tags(self, owner_id: str) -> list[dict[str, Any]]:
         """Get all tags in use with usage counts."""
-        with self._pool.connection() as conn, conn.cursor() as cur:
+        with self._pool.connection() as conn, conn.transaction(), conn.cursor() as cur:
+            self._set_rls_context(cur, owner_id)
             cur.execute(_load_sql("get_tags"), (owner_id,))
             return [{"tag": row["value"], "count": row["cnt"]} for row in cur.fetchall()]
 
@@ -588,7 +628,8 @@ class PostgresStore:
         """Soft-delete a single entry. Returns True if an entry was trashed."""
         now = datetime.now(timezone.utc)
         trash_expires = now + timedelta(days=TRASH_RETENTION_DAYS)
-        with self._pool.connection() as conn, conn.cursor() as cur:
+        with self._pool.connection() as conn, conn.transaction(), conn.cursor() as cur:
+            self._set_rls_context(cur, owner_id)
             cur.execute(
                 _load_sql("soft_delete_by_id"),
                 (now, trash_expires, owner_id, entry_id),
@@ -609,7 +650,8 @@ class PostgresStore:
         tag_clauses = " AND ".join("tags @> %s::jsonb" for _ in tags)
         params: list[Any] = [now, trash_expires, owner_id]
         params.extend(json.dumps([t]) for t in tags)
-        with self._pool.connection() as conn, conn.cursor() as cur:
+        with self._pool.connection() as conn, conn.transaction(), conn.cursor() as cur:
+            self._set_rls_context(cur, owner_id)
             cur.execute(
                 _load_sql("soft_delete_by_tags").format(tag_clauses=tag_clauses),
                 tuple(params),
@@ -632,7 +674,8 @@ class PostgresStore:
             clauses.append("type = %s")
             params.append(entry_type.value)
         where = " AND ".join(clauses)
-        with self._pool.connection() as conn, conn.cursor() as cur:
+        with self._pool.connection() as conn, conn.transaction(), conn.cursor() as cur:
+            self._set_rls_context(cur, owner_id)
             cur.execute(
                 _load_sql("soft_delete_by_source").format(where=where),
                 (now, trash_expires, *params),
@@ -662,7 +705,8 @@ class PostgresStore:
             limit_clause += " OFFSET %s"
             params.append(offset)
         sql = _load_sql("get_deleted").format(where=where, limit_clause=limit_clause)
-        with self._pool.connection() as conn, conn.cursor() as cur:
+        with self._pool.connection() as conn, conn.transaction(), conn.cursor() as cur:
+            self._set_rls_context(cur, owner_id)
             cur.execute(sql, tuple(params))
             return [self._row_to_entry(r) for r in cur.fetchall()]
 
@@ -671,7 +715,8 @@ class PostgresStore:
 
         Recovers the original expires value that was saved during soft-delete.
         """
-        with self._pool.connection() as conn, conn.cursor() as cur:
+        with self._pool.connection() as conn, conn.transaction(), conn.cursor() as cur:
+            self._set_rls_context(cur, owner_id)
             cur.execute(
                 _load_sql("restore_by_id"),
                 (owner_id, entry_id),
@@ -689,7 +734,8 @@ class PostgresStore:
         tag_clauses = " AND ".join("tags @> %s::jsonb" for _ in tags)
         params: list[Any] = [owner_id]
         params.extend(json.dumps([t]) for t in tags)
-        with self._pool.connection() as conn, conn.cursor() as cur:
+        with self._pool.connection() as conn, conn.transaction(), conn.cursor() as cur:
+            self._set_rls_context(cur, owner_id)
             cur.execute(
                 _load_sql("restore_by_tags").format(tag_clauses=tag_clauses),
                 tuple(params),
@@ -708,7 +754,8 @@ class PostgresStore:
         if not entry_ids:
             return
         try:
-            with self._pool.connection() as conn, conn.cursor() as cur:
+            with self._pool.connection() as conn, conn.transaction(), conn.cursor() as cur:
+                self._set_rls_context(cur, owner_id)
                 for eid in entry_ids:
                     cur.execute(
                         _load_sql("log_read"),
@@ -737,7 +784,8 @@ class PostgresStore:
         if tags is None:
             tags = entry.tags
         now = now_utc()
-        with self._pool.connection() as conn, conn.cursor() as cur:
+        with self._pool.connection() as conn, conn.transaction(), conn.cursor() as cur:
+            self._set_rls_context(cur, owner_id)
             cur.execute(
                 _load_sql("log_action"),
                 (owner_id, entry_id, now, platform, action, detail, json.dumps(tags)),
@@ -778,7 +826,8 @@ class PostgresStore:
         if limit:
             limit_clause = f" LIMIT {int(limit)}"
         sql = _load_sql("get_reads").format(where=where, limit_clause=limit_clause)
-        with self._pool.connection() as conn, conn.cursor() as cur:
+        with self._pool.connection() as conn, conn.transaction(), conn.cursor() as cur:
+            self._set_rls_context(cur, owner_id)
             cur.execute(sql, tuple(params))
             rows = cur.fetchall()
         return [
@@ -822,7 +871,8 @@ class PostgresStore:
         if limit:
             limit_clause = f" LIMIT {int(limit)}"
         sql = _load_sql("get_actions").format(where=where, limit_clause=limit_clause)
-        with self._pool.connection() as conn, conn.cursor() as cur:
+        with self._pool.connection() as conn, conn.transaction(), conn.cursor() as cur:
+            self._set_rls_context(cur, owner_id)
             cur.execute(sql, tuple(params))
             rows = cur.fetchall()
         return [
@@ -852,7 +902,8 @@ class PostgresStore:
             limit_clause = " LIMIT %s"
             params.append(limit)
         sql = _load_sql("get_unread").format(since_clause=since_clause, limit_clause=limit_clause)
-        with self._pool.connection() as conn, conn.cursor() as cur:
+        with self._pool.connection() as conn, conn.transaction(), conn.cursor() as cur:
+            self._set_rls_context(cur, owner_id)
             cur.execute(sql, params)
             return [self._row_to_entry(r) for r in cur.fetchall()]
 
@@ -884,7 +935,8 @@ class PostgresStore:
         sql = _load_sql("get_activity").format(
             where_r=where_r, where_a=where_a, limit_clause=limit_clause
         )
-        with self._pool.connection() as conn, conn.cursor() as cur:
+        with self._pool.connection() as conn, conn.transaction(), conn.cursor() as cur:
+            self._set_rls_context(cur, owner_id)
             cur.execute(sql, tuple(params_r + params_a))
             rows = cur.fetchall()
         return [
@@ -906,7 +958,8 @@ class PostgresStore:
             return {}
         placeholders = ",".join("%s" for _ in entry_ids)
         sql = _load_sql("get_read_counts").format(placeholders=placeholders)
-        with self._pool.connection() as conn, conn.cursor() as cur:
+        with self._pool.connection() as conn, conn.transaction(), conn.cursor() as cur:
+            self._set_rls_context(cur, owner_id)
             cur.execute(sql, (owner_id, *entry_ids))
             rows = cur.fetchall()
         result: dict[str, dict[str, Any]] = {}
@@ -966,7 +1019,8 @@ class PostgresStore:
             changed["state_reason"] = old_reason
         changelog.append({"updated": to_iso(now), "changed": changed})
         entry.updated = now
-        with self._pool.connection() as conn, conn.cursor() as cur:
+        with self._pool.connection() as conn, conn.transaction(), conn.cursor() as cur:
+            self._set_rls_context(cur, owner_id)
             cur.execute(
                 _load_sql("update_intention_state"),
                 (now, json.dumps(entry.data), entry.id),
@@ -1006,7 +1060,8 @@ class PostgresStore:
     ) -> None:
         """Store or update an embedding for an entry + model pair."""
         vector_literal = "[" + ",".join(str(v) for v in embedding) + "]"
-        with self._pool.connection() as conn, conn.cursor() as cur:
+        with self._pool.connection() as conn, conn.transaction(), conn.cursor() as cur:
+            self._set_rls_context(cur, owner_id)
             cur.execute(
                 _load_sql("upsert_embedding"),
                 (owner_id, entry_id, model, dimensions, text_hash, vector_literal),
@@ -1022,7 +1077,8 @@ class PostgresStore:
 
         Excludes suppression entries (short-lived, not worth embedding).
         """
-        with self._pool.connection() as conn, conn.cursor() as cur:
+        with self._pool.connection() as conn, conn.transaction(), conn.cursor() as cur:
+            self._set_rls_context(cur, owner_id)
             cur.execute(
                 _load_sql("get_entries_without_embeddings"),
                 (model, owner_id, EntryType.SUPPRESSION.value, limit),
@@ -1043,7 +1099,8 @@ class PostgresStore:
         from .embeddings import compose_embedding_text as _compose
         from .embeddings import text_hash as _hash
 
-        with self._pool.connection() as conn, conn.cursor() as cur:
+        with self._pool.connection() as conn, conn.transaction(), conn.cursor() as cur:
+            self._set_rls_context(cur, owner_id)
             cur.execute(
                 _load_sql("get_stale_embeddings"),
                 (model, owner_id, limit),
@@ -1098,7 +1155,8 @@ class PostgresStore:
         sql = _load_sql("semantic_search").format(where=where)
         # query_vector (similarity), model, ...filters, query_vector (ORDER BY), limit
         ordered_params = [vector_literal, model, *params[2:-1], vector_literal, limit]
-        with self._pool.connection() as conn, conn.cursor() as cur:
+        with self._pool.connection() as conn, conn.transaction(), conn.cursor() as cur:
+            self._set_rls_context(cur, owner_id)
             cur.execute(sql, tuple(ordered_params))
             rows = cur.fetchall()
         return [(self._row_to_entry(r), float(r["similarity"])) for r in rows]
