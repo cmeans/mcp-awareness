@@ -461,11 +461,13 @@ async def update_entry(
             }
         )
     _srv._generate_embedding(result)
-    return json.dumps({
-        "status": "ok",
-        "id": result.id,
-        "updated": to_iso(result.updated) if result.updated else None,
-    })
+    return json.dumps(
+        {
+            "status": "ok",
+            "id": result.id,
+            "updated": to_iso(result.updated) if result.updated else None,
+        }
+    )
 
 
 @_srv.mcp.tool()
