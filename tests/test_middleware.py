@@ -506,3 +506,78 @@ class TestAuthMiddleware:
         status, _ = await _collect_response(app, scope)
         assert status == 200
         assert captured_owner == ["bob"]
+
+    @pytest.mark.anyio
+    async def test_unexpected_exception_re_raises(self) -> None:
+        """Non-JWT exceptions during decode are re-raised, not swallowed."""
+
+        async def inner_app(scope: Any, receive: Any, send: Any) -> None:
+            pass  # never reached
+
+        app = AuthMiddleware(inner_app, _JWT_SECRET)
+        scope = {
+            "type": "http",
+            "path": "/mcp",
+            "method": "POST",
+            "headers": [(b"authorization", b"Bearer valid-looking-token")],
+        }
+
+        async def noop_receive() -> dict[str, Any]:
+            return {"type": "http.request", "body": b""}
+
+        async def noop_send(msg: dict[str, Any]) -> None:
+            pass
+
+        with (
+            patch("jwt.decode", side_effect=RuntimeError("boom")),
+            pytest.raises(RuntimeError, match="boom"),
+        ):
+            await app(scope, noop_receive, noop_send)
+
+
+class TestServerAuthWiring:
+    """Additional server wiring tests for auth coverage."""
+
+    def test_http_with_mount_path_auth_no_secret_raises(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """AUTH_REQUIRED + MOUNT_PATH without JWT_SECRET raises ValueError."""
+        monkeypatch.setattr(server_mod, "TRANSPORT", "streamable-http")
+        monkeypatch.setattr(server_mod, "MOUNT_PATH", "/secret")
+        monkeypatch.setattr(server_mod, "HOST", "0.0.0.0")
+        monkeypatch.setattr(server_mod, "PORT", 8080)
+        monkeypatch.setattr(server_mod, "AUTH_REQUIRED", True)
+        monkeypatch.setattr(server_mod, "JWT_SECRET", "")
+
+        mock_app = MagicMock()
+        monkeypatch.setattr(server_mod.mcp, "streamable_http_app", lambda: mock_app)
+
+        with pytest.raises(ValueError, match="AWARENESS_JWT_SECRET is required"):
+            server_mod._run()
+
+    def test_http_no_mount_path_auth_required_wraps_with_auth_middleware(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """streamable-http without MOUNT_PATH + AUTH_REQUIRED wires AuthMiddleware."""
+        monkeypatch.setattr(server_mod, "TRANSPORT", "streamable-http")
+        monkeypatch.setattr(server_mod, "MOUNT_PATH", "")
+        monkeypatch.setattr(server_mod, "HOST", "0.0.0.0")
+        monkeypatch.setattr(server_mod, "PORT", 8080)
+        monkeypatch.setattr(server_mod, "AUTH_REQUIRED", True)
+        monkeypatch.setattr(server_mod, "JWT_SECRET", "test-secret-key")
+        monkeypatch.setattr(server_mod, "JWT_ALGORITHM", "HS256")
+
+        mock_app = MagicMock()
+        monkeypatch.setattr(server_mod.mcp, "streamable_http_app", lambda: mock_app)
+
+        captured_app: list[Any] = []
+
+        def fake_config(app: Any, **kwargs: Any) -> MagicMock:
+            captured_app.append(app)
+            return MagicMock()
+
+        with patch("uvicorn.Config", side_effect=fake_config), patch("anyio.run"):
+            server_mod._run()
+
+        assert len(captured_app) == 1
+        assert isinstance(captured_app[0], AuthMiddleware)
