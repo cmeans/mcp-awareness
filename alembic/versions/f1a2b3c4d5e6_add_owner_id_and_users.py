@@ -62,7 +62,7 @@ def upgrade() -> None:
             timezone        TEXT DEFAULT 'UTC',
             preferences     JSONB NOT NULL DEFAULT '{}',
             created         TIMESTAMPTZ NOT NULL DEFAULT now(),
-            updated         TIMESTAMPTZ NOT NULL DEFAULT now(),
+            updated         TIMESTAMPTZ,
             deleted         TIMESTAMPTZ
         )
     """)

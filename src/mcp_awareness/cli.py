@@ -144,8 +144,8 @@ def _user_add(dsn: str, args: argparse.Namespace) -> None:
         cur.execute(
             """
             INSERT INTO users
-                (id, email, canonical_email, phone, display_name, timezone, created, updated)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                (id, email, canonical_email, phone, display_name, timezone, created)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
             """,
             (
                 args.user_id,
@@ -154,7 +154,6 @@ def _user_add(dsn: str, args: argparse.Namespace) -> None:
                 phone,
                 args.display_name,
                 args.timezone,
-                now,
                 now,
             ),
         )

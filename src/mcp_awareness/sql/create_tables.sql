@@ -17,7 +17,7 @@ CREATE TABLE IF NOT EXISTS users (
     timezone        TEXT DEFAULT 'UTC',
     preferences     JSONB NOT NULL DEFAULT '{{}}'::jsonb,
     created         TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated         TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated         TIMESTAMPTZ,
     deleted         TIMESTAMPTZ
 );
 

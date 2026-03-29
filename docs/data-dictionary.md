@@ -17,7 +17,7 @@ All data in mcp-awareness is stored in a single `entries` table using a common e
 | `timezone` | TEXT | Yes | IANA timezone (e.g., `"America/Chicago"`). Default: `"UTC"`. Used for notification scheduling. |
 | `preferences` | JSONB | No | Extensible user settings (notification prefs, etc.). Default: `{}`. |
 | `created` | TIMESTAMPTZ | No | When the user was created. Default: `now()`. |
-| `updated` | TIMESTAMPTZ | No | Last update timestamp. Default: `now()`. |
+| `updated` | TIMESTAMPTZ | Yes | Last update timestamp. `NULL` until first update. |
 | `deleted` | TIMESTAMPTZ | Yes | Soft deletion timestamp. `NULL` means active. |
 
 ### Email normalization (`canonical_email`)
