@@ -194,6 +194,25 @@ def _user_set_password(dsn: str, args: argparse.Namespace) -> None:
         print("Error: passwords do not match", file=sys.stderr)
         sys.exit(1)
 
+    # Validate password strength
+    if len(password) > 128:
+        print("Error: password must be 128 characters or fewer (DoS protection)", file=sys.stderr)
+        sys.exit(1)
+    if len(password) < 14:
+        print("Error: password must be at least 14 characters", file=sys.stderr)
+        sys.exit(1)
+
+    from zxcvbn import zxcvbn
+
+    result = zxcvbn(password, user_inputs=[args.user_id])
+    if result["score"] < 3:
+        warning = result["feedback"].get("warning", "")
+        suggestions = result["feedback"].get("suggestions", [])
+        print(f"Error: password too weak{': ' + warning if warning else ''}", file=sys.stderr)
+        for s in suggestions:
+            print(f"  - {s}", file=sys.stderr)
+        sys.exit(1)
+
     ph = PasswordHasher()
     hashed = ph.hash(password)
     now = datetime.now(timezone.utc)

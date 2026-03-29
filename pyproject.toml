@@ -14,6 +14,7 @@ dependencies = [
     "PyJWT>=2.8",
     "argon2-cffi>=23.1",
     "phonenumbers>=8.13",
+    "zxcvbn-python>=4.4",
 ]
 
 [project.scripts]
@@ -97,7 +98,7 @@ module = ["alembic.*", "sqlalchemy.*"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
-module = ["jwt.*"]
+module = ["jwt.*", "zxcvbn.*"]
 ignore_missing_imports = true
 
 # The tools/resources/prompts modules use a circular import pattern

@@ -197,7 +197,7 @@ CREATE TABLE IF NOT EXISTS users (
     timezone TEXT DEFAULT 'UTC',
     preferences JSONB NOT NULL DEFAULT '{}',
     created TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated TIMESTAMPTZ,
     deleted TIMESTAMPTZ
 )
 """
@@ -370,7 +370,8 @@ class TestUserSetPassword:
         _insert_user(pg_dsn, "pw-user", "pw@example.com")
 
         args = argparse.Namespace(user_id="pw-user")
-        with patch("mcp_awareness.cli.getpass.getpass", side_effect=["s3cret!", "s3cret!"]):
+        strong_pw = "Tr0ub4dor&Horse99!"
+        with patch("mcp_awareness.cli.getpass.getpass", side_effect=[strong_pw, strong_pw]):
             _user_set_password(pg_dsn, args)
 
         output = capsys.readouterr().out
@@ -415,16 +416,75 @@ class TestUserSetPassword:
         _ensure_users_table(pg_dsn)
 
         args = argparse.Namespace(user_id="no-such-user")
+        strong_pw = "Tr0ub4dor&Horse99!"
         with (
             patch(
                 "mcp_awareness.cli.getpass.getpass",
-                side_effect=["password", "password"],
+                side_effect=[strong_pw, strong_pw],
             ),
             pytest.raises(SystemExit) as exc_info,
         ):
             _user_set_password(pg_dsn, args)
         assert exc_info.value.code == 1
         assert "not found" in capsys.readouterr().err
+
+    def test_set_password_too_short(
+        self, pg_dsn: str, store: object, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Password under 14 chars is rejected."""
+        _ensure_users_table(pg_dsn)
+        _insert_user(pg_dsn, "short-pw-user")
+        args = argparse.Namespace(user_id="short-pw-user")
+        with (
+            patch(
+                "mcp_awareness.cli.getpass.getpass",
+                side_effect=["short", "short"],
+            ),
+            pytest.raises(SystemExit) as exc_info,
+        ):
+            _user_set_password(pg_dsn, args)
+        assert exc_info.value.code == 1
+        assert "at least 14" in capsys.readouterr().err
+        _cleanup_user(pg_dsn, "short-pw-user")
+
+    def test_set_password_too_long(
+        self, pg_dsn: str, store: object, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Password over 128 chars is rejected."""
+        _ensure_users_table(pg_dsn)
+        _insert_user(pg_dsn, "long-pw-user")
+        args = argparse.Namespace(user_id="long-pw-user")
+        long_pw = "A" * 129
+        with (
+            patch(
+                "mcp_awareness.cli.getpass.getpass",
+                side_effect=[long_pw, long_pw],
+            ),
+            pytest.raises(SystemExit) as exc_info,
+        ):
+            _user_set_password(pg_dsn, args)
+        assert exc_info.value.code == 1
+        assert "128 characters" in capsys.readouterr().err
+        _cleanup_user(pg_dsn, "long-pw-user")
+
+    def test_set_password_weak_zxcvbn(
+        self, pg_dsn: str, store: object, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Password that meets length but is weak (zxcvbn < 3) is rejected."""
+        _ensure_users_table(pg_dsn)
+        _insert_user(pg_dsn, "weak-pw-user")
+        args = argparse.Namespace(user_id="weak-pw-user")
+        with (
+            patch(
+                "mcp_awareness.cli.getpass.getpass",
+                side_effect=["aaaaaaaaaaaaaaaa", "aaaaaaaaaaaaaaaa"],
+            ),
+            pytest.raises(SystemExit) as exc_info,
+        ):
+            _user_set_password(pg_dsn, args)
+        assert exc_info.value.code == 1
+        assert "too weak" in capsys.readouterr().err
+        _cleanup_user(pg_dsn, "weak-pw-user")
 
 
 class TestUserExport:
@@ -683,7 +743,7 @@ class TestUserMainDispatch:
         _insert_user(pg_dsn, "pw-main-user")
         monkeypatch.setenv("AWARENESS_DATABASE_URL", pg_dsn)
         monkeypatch.setattr("sys.argv", ["prog", "set-password", "pw-main-user"])
-        monkeypatch.setattr("getpass.getpass", lambda prompt="": "testpass123")
+        monkeypatch.setattr("getpass.getpass", lambda prompt="": "Tr0ub4dor&Horse99!")
         user_main()
         import psycopg
         from psycopg.rows import dict_row
