@@ -193,15 +193,8 @@ def _user_set_password(dsn: str, args: argparse.Namespace) -> None:
     print("Password requirements: 14-128 characters, must be strong (no common patterns).")
     for attempt in range(1, max_attempts + 1):
         password = getpass.getpass(f"New password for '{args.user_id}': ")
-        confirm = getpass.getpass("Confirm password: ")
-        if password != confirm:
-            print("Passwords do not match. Please try again.", file=sys.stderr)
-            if attempt < max_attempts:
-                continue
-            print("Too many failed attempts.", file=sys.stderr)
-            sys.exit(1)
 
-        # Validate password strength
+        # Validate strength before asking for confirmation
         issues: list[str] = []
         if len(password) > 128:
             issues.append("Must be 128 characters or fewer.")
@@ -223,6 +216,16 @@ def _user_set_password(dsn: str, args: argparse.Namespace) -> None:
             print("Password does not meet requirements:", file=sys.stderr)
             for issue in issues:
                 print(f"  · {issue}", file=sys.stderr)
+            if attempt < max_attempts:
+                print(f"Please try again ({max_attempts - attempt} attempt(s) remaining).")
+                continue
+            print("Too many failed attempts.", file=sys.stderr)
+            sys.exit(1)
+
+        # Password is strong — now confirm
+        confirm = getpass.getpass("Confirm password: ")
+        if password != confirm:
+            print("Passwords do not match.", file=sys.stderr)
             if attempt < max_attempts:
                 print(f"Please try again ({max_attempts - attempt} attempt(s) remaining).")
                 continue
