@@ -318,6 +318,6 @@ class Store(Protocol):
         """Find entries whose data.related_ids contains the given entry_id."""
         ...
 
-    def clear(self) -> None:
-        """Delete all entries, reads, actions, and embeddings."""
+    def clear(self, owner_id: str) -> None:
+        """Delete all entries, reads, actions, and embeddings for an owner."""
         ...
