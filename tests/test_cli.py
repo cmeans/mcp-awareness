@@ -396,16 +396,18 @@ class TestUserSetPassword:
         _insert_user(pg_dsn, "pw-mismatch", "pwm@example.com")
 
         args = argparse.Namespace(user_id="pw-mismatch")
+        # 3 attempts, all mismatched (2 getpass calls per attempt)
         with (
             patch(
                 "mcp_awareness.cli.getpass.getpass",
-                side_effect=["password1", "password2"],
+                side_effect=["a", "b", "c", "d", "e", "f"],
             ),
             pytest.raises(SystemExit) as exc_info,
         ):
             _user_set_password(pg_dsn, args)
         assert exc_info.value.code == 1
-        assert "passwords do not match" in capsys.readouterr().err
+        err = capsys.readouterr().err
+        assert "do not match" in err
 
         _cleanup_user(pg_dsn, "pw-mismatch")
 
@@ -435,10 +437,11 @@ class TestUserSetPassword:
         _ensure_users_table(pg_dsn)
         _insert_user(pg_dsn, "short-pw-user")
         args = argparse.Namespace(user_id="short-pw-user")
+        # 3 attempts, all too short
         with (
             patch(
                 "mcp_awareness.cli.getpass.getpass",
-                side_effect=["short", "short"],
+                side_effect=["short", "short", "short", "short", "short", "short"],
             ),
             pytest.raises(SystemExit) as exc_info,
         ):
@@ -455,10 +458,11 @@ class TestUserSetPassword:
         _insert_user(pg_dsn, "long-pw-user")
         args = argparse.Namespace(user_id="long-pw-user")
         long_pw = "A" * 129
+        # 3 attempts, all too long
         with (
             patch(
                 "mcp_awareness.cli.getpass.getpass",
-                side_effect=[long_pw, long_pw],
+                side_effect=[long_pw, long_pw] * 3,
             ),
             pytest.raises(SystemExit) as exc_info,
         ):
@@ -477,13 +481,13 @@ class TestUserSetPassword:
         with (
             patch(
                 "mcp_awareness.cli.getpass.getpass",
-                side_effect=["aaaaaaaaaaaaaaaa", "aaaaaaaaaaaaaaaa"],
+                side_effect=["aaaaaaaaaaaaaaaa", "aaaaaaaaaaaaaaaa"] * 3,
             ),
             pytest.raises(SystemExit) as exc_info,
         ):
             _user_set_password(pg_dsn, args)
         assert exc_info.value.code == 1
-        assert "too weak" in capsys.readouterr().err
+        assert "does not meet requirements" in capsys.readouterr().err
         _cleanup_user(pg_dsn, "weak-pw-user")
 
 

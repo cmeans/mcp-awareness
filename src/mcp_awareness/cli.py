@@ -187,31 +187,49 @@ def _user_set_password(dsn: str, args: argparse.Namespace) -> None:
     """Set a user's password (interactive prompt)."""
     import psycopg
     from argon2 import PasswordHasher
-
-    password = getpass.getpass(f"New password for '{args.user_id}': ")
-    confirm = getpass.getpass("Confirm password: ")
-    if password != confirm:
-        print("Error: passwords do not match", file=sys.stderr)
-        sys.exit(1)
-
-    # Validate password strength
-    if len(password) > 128:
-        print("Error: password must be 128 characters or fewer (DoS protection)", file=sys.stderr)
-        sys.exit(1)
-    if len(password) < 14:
-        print("Error: password must be at least 14 characters", file=sys.stderr)
-        sys.exit(1)
-
     from zxcvbn import zxcvbn
 
-    result = zxcvbn(password, user_inputs=[args.user_id])
-    if result["score"] < 3:
-        warning = result["feedback"].get("warning", "")
-        suggestions = result["feedback"].get("suggestions", [])
-        print(f"Error: password too weak{': ' + warning if warning else ''}", file=sys.stderr)
-        for s in suggestions:
-            print(f"  - {s}", file=sys.stderr)
-        sys.exit(1)
+    max_attempts = 3
+    print("Password requirements: 14-128 characters, must be strong (no common patterns).")
+    for attempt in range(1, max_attempts + 1):
+        password = getpass.getpass(f"New password for '{args.user_id}': ")
+        confirm = getpass.getpass("Confirm password: ")
+        if password != confirm:
+            print("Passwords do not match. Please try again.", file=sys.stderr)
+            if attempt < max_attempts:
+                continue
+            print("Too many failed attempts.", file=sys.stderr)
+            sys.exit(1)
+
+        # Validate password strength
+        issues: list[str] = []
+        if len(password) > 128:
+            issues.append("Must be 128 characters or fewer.")
+        if len(password) < 14:
+            issues.append(f"Must be at least 14 characters (got {len(password)}).")
+
+        if not issues:
+            result = zxcvbn(password, user_inputs=[args.user_id])
+            if result["score"] < 3:
+                warning = result["feedback"].get("warning", "")
+                if warning:
+                    issues.append(warning)
+                for s in result["feedback"].get("suggestions", []):
+                    issues.append(s)
+                if not issues:
+                    issues.append("Password is too easily guessed.")
+
+        if issues:
+            print("Password does not meet requirements:", file=sys.stderr)
+            for issue in issues:
+                print(f"  · {issue}", file=sys.stderr)
+            if attempt < max_attempts:
+                print(f"Please try again ({max_attempts - attempt} attempt(s) remaining).")
+                continue
+            print("Too many failed attempts.", file=sys.stderr)
+            sys.exit(1)
+
+        break  # password accepted
 
     ph = PasswordHasher()
     hashed = ph.hash(password)
