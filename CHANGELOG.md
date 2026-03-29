@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **JWT auth middleware**: opt-in via `AWARENESS_AUTH_REQUIRED=true`, validates Bearer tokens, extracts owner_id from `sub` claim
+- **Row-level security**: Postgres RLS policies on all data tables as defense-in-depth alongside application-level owner_id filtering
+- **CLI: `mcp-awareness-user`**: add/list/set-password/export/delete users with email normalization, E.164 phone validation, argon2id password hashing
+- **CLI: `mcp-awareness-token`**: generate JWTs for self-hosted multi-user deployments
+- **CLI: `mcp-awareness-secret`**: generate 256-bit JWT signing secrets
+- **New dependencies**: `PyJWT` (JWT validation), `argon2-cffi` (password hashing), `phonenumbers` (E.164 validation)
 - **Multi-tenant schema**: `owner_id` column on all data tables (entries, reads, actions, embeddings) with backfill migration for existing data
 - **Users table**: full user schema with email (+ canonical normalization for uniqueness), E.164 phone, argon2id password hash, timezone, preferences JSONB
 - **Owner isolation**: all store methods, tools, resources, and collator now thread `owner_id` — queries are scoped per-owner

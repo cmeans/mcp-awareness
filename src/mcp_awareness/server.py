@@ -75,6 +75,11 @@ PORT = int(os.environ.get("AWARENESS_PORT", "8420"))
 MOUNT_PATH = os.environ.get("AWARENESS_MOUNT_PATH", "")
 DATABASE_URL = os.environ.get("AWARENESS_DATABASE_URL", "")
 
+# Auth — opt-in via AWARENESS_AUTH_REQUIRED=true
+AUTH_REQUIRED = os.environ.get("AWARENESS_AUTH_REQUIRED", "false").lower() == "true"
+JWT_SECRET = os.environ.get("AWARENESS_JWT_SECRET", "")
+JWT_ALGORITHM = os.environ.get("AWARENESS_JWT_ALGORITHM", "HS256")
+
 # Embedding provider — optional, configured via env vars
 EMBEDDING_PROVIDER = os.environ.get("AWARENESS_EMBEDDING_PROVIDER", "")
 EMBEDDING_MODEL = os.environ.get("AWARENESS_EMBEDDING_MODEL", "nomic-embed-text")
@@ -330,11 +335,21 @@ def main() -> None:
 def _run() -> None:
     if TRANSPORT == "streamable-http" and MOUNT_PATH:
         import uvicorn
+        from starlette.types import ASGIApp as _ASGIApp
 
         from mcp_awareness.middleware import SecretPathMiddleware
 
         inner_app = mcp.streamable_http_app()
-        app = SecretPathMiddleware(inner_app, MOUNT_PATH, _health_response)
+        app: _ASGIApp = SecretPathMiddleware(inner_app, MOUNT_PATH, _health_response)
+
+        if AUTH_REQUIRED:
+            if not JWT_SECRET:
+                raise ValueError(
+                    "AWARENESS_JWT_SECRET is required when AWARENESS_AUTH_REQUIRED=true"
+                )
+            from mcp_awareness.middleware import AuthMiddleware
+
+            app = AuthMiddleware(app, JWT_SECRET, JWT_ALGORITHM)
 
         config = uvicorn.Config(app, host=HOST, port=PORT)
         server = uvicorn.Server(config)
@@ -349,6 +364,15 @@ def _run() -> None:
 
         inner_app = mcp.streamable_http_app()
         health_app = HealthMiddleware(inner_app, _health_response)
+
+        if AUTH_REQUIRED:
+            if not JWT_SECRET:
+                raise ValueError(
+                    "AWARENESS_JWT_SECRET is required when AWARENESS_AUTH_REQUIRED=true"
+                )
+            from mcp_awareness.middleware import AuthMiddleware
+
+            health_app = AuthMiddleware(health_app, JWT_SECRET, JWT_ALGORITHM)  # type: ignore[assignment]
 
         config = uvicorn.Config(health_app, host=HOST, port=PORT)
         server = uvicorn.Server(config)
