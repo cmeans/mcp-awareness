@@ -173,3 +173,4 @@ Rationale: `workflow_run` fires on every CI completion (including merges to main
 ### QA Gate
 
 `qa-gate.yml` is unchanged. It sets a GitHub status check based on the `QA Approved` label. This is the merge gate — independent of the label automation.
+
