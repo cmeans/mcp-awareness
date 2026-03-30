@@ -272,7 +272,7 @@ def phase_insert(store: PostgresStore, entries: list[Entry]) -> float:
     """Insert entries, return total time in seconds."""
     t0 = time.perf_counter()
     for entry in entries:
-        store.add(entry)
+        store.add(BENCH_OWNER, entry)
     return time.perf_counter() - t0
 
 
@@ -296,7 +296,7 @@ def phase_embed_real(
             continue
         for entry, h, vec in zip(batch, hashes, vectors):
             store.upsert_embedding(
-                entry.id, provider.model_name, provider.dimensions, h, vec
+                BENCH_OWNER, entry.id, provider.model_name, provider.dimensions, h, vec
             )
             embedded += 1
         if (i + batch_size) % 500 == 0 or i + batch_size >= len(entries):
@@ -325,7 +325,7 @@ def phase_embed_synthetic(
             vec = [random.gauss(0, 1) for _ in range(dimensions)]
             norm = sum(v * v for v in vec) ** 0.5
             vec = [v / norm for v in vec]
-            store.upsert_embedding(entry.id, model_name, dimensions, h, vec)
+            store.upsert_embedding(BENCH_OWNER, entry.id, model_name, dimensions, h, vec)
             embedded += 1
         if (i + batch_size) % 1000 == 0 or i + batch_size >= len(entries):
             print(f"    Inserted {min(i + batch_size, len(entries))}/{len(entries)} synthetic vectors")
@@ -352,6 +352,7 @@ def phase_query(
             kwargs.setdefault("limit", 10)
             t0 = time.perf_counter()
             store.semantic_search(
+                owner_id=BENCH_OWNER,
                 embedding=qvec,
                 model=provider.model_name,
                 **kwargs,
@@ -382,6 +383,7 @@ def phase_concurrent(
             qvec = random.choice(query_vectors)
             t0 = time.perf_counter()
             store.semantic_search(
+                owner_id=BENCH_OWNER,
                 embedding=qvec,
                 model=provider.model_name,
                 limit=10,
