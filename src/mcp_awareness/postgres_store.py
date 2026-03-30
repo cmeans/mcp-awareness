@@ -303,34 +303,37 @@ class PostgresStore:
         """Upsert a preference by key + scope."""
         self._cleanup_expired()
         now = now_utc()
-        existing = self._query_entries(
-            owner_id,
-            "type = %s AND data->>'key' = %s AND data->>'scope' = %s",
-            (EntryType.PREFERENCE.value, key, scope),
-        )
-        if existing:
-            e = existing[0]
-            e.updated = now
-            e.tags = tags
-            e.data.update(data)
-            with self._pool.connection() as conn, conn.transaction(), conn.cursor() as cur:
-                self._set_rls_context(cur, owner_id)
+        with self._pool.connection() as conn, conn.transaction(), conn.cursor() as cur:
+            self._set_rls_context(cur, owner_id)
+            # Advisory lock serializes concurrent upserts for the same key+scope
+            lock_key = int(
+                hashlib.sha256(f"pref:{owner_id}:{key}:{scope}".encode()).hexdigest(), 16
+            ) % (2**63)
+            cur.execute("SELECT pg_advisory_xact_lock(%s)", (lock_key,))
+            cur.execute(
+                _load_sql("select_preference_for_update"),
+                (owner_id, EntryType.PREFERENCE.value, key, scope),
+            )
+            row = cur.fetchone()
+            if row:
+                e = self._row_to_entry(row)
+                e.updated = now
+                e.tags = tags
+                e.data.update(data)
                 cur.execute(
                     _load_sql("upsert_preference_update"),
                     (now, json.dumps(e.tags), json.dumps(e.data), e.id, owner_id),
                 )
-            return e
-        entry = Entry(
-            id=make_id(),
-            type=EntryType.PREFERENCE,
-            source=scope,
-            tags=tags,
-            created=now,
-            expires=None,
-            data=data,
-        )
-        with self._pool.connection() as conn, conn.transaction(), conn.cursor() as cur:
-            self._set_rls_context(cur, owner_id)
+                return e
+            entry = Entry(
+                id=make_id(),
+                type=EntryType.PREFERENCE,
+                source=scope,
+                tags=tags,
+                created=now,
+                expires=None,
+                data=data,
+            )
             self._insert_entry(cur, owner_id, entry)
         return entry
 

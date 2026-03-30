@@ -686,6 +686,29 @@ def test_upsert_preference_updates_existing(store):
     assert prefs[0].data["value"] == "light"
 
 
+def test_upsert_preference_concurrent_no_duplicates(store):
+    """Concurrent upsert_preference calls for the same key+scope must not create duplicates."""
+
+    def do_upsert(i):
+        store.upsert_preference(
+            TEST_OWNER,
+            "theme",
+            "global",
+            ["ui"],
+            {"key": "theme", "scope": "global", "value": f"dark-{i}"},
+        )
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+        futures = [executor.submit(do_upsert, i) for i in range(4)]
+        concurrent.futures.wait(futures)
+        for f in futures:
+            f.result()
+
+    prefs = store.get_knowledge(TEST_OWNER, entry_type=EntryType.PREFERENCE)
+    theme_prefs = [p for p in prefs if p.data.get("key") == "theme"]
+    assert len(theme_prefs) == 1, f"Expected 1 preference but found {len(theme_prefs)}"
+
+
 # ------------------------------------------------------------------
 # Delete by tags
 # ------------------------------------------------------------------
