@@ -21,7 +21,7 @@ name: PR Label Automation
 on:
   pull_request:
     branches: [main]
-    types: [synchronize, labeled, unlabeled]
+    types: [opened, synchronize, labeled, unlabeled]
 
 permissions:
   pull-requests: write
@@ -31,7 +31,7 @@ jobs:
   # When new commits are pushed to a PR, reset to Awaiting CI.
   # Removes any QA/review labels that are now stale.
   on-push:
-    if: github.event.action == 'synchronize'
+    if: github.event.action == 'opened' || github.event.action == 'synchronize'
     runs-on: ubuntu-latest
     steps:
       - name: Reset labels on new push
