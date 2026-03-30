@@ -21,7 +21,7 @@ LABEL org.opencontainers.image.description="MCP server for ambient system awaren
 LABEL org.opencontainers.image.source="https://github.com/cmeans/mcp-awareness"
 LABEL org.opencontainers.image.url="https://github.com/cmeans/mcp-awareness"
 LABEL org.opencontainers.image.documentation="https://github.com/cmeans/mcp-awareness/blob/main/docs/deployment-guide.md"
-LABEL org.opencontainers.image.licenses="Apache-2.0"
+LABEL org.opencontainers.image.licenses="AGPL-3.0-or-later"
 LABEL org.opencontainers.image.authors="Chris Means"
 LABEL org.opencontainers.image.vendor="Chris Means"
 

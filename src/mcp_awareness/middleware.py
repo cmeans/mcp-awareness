@@ -100,22 +100,25 @@ class WellKnownMiddleware:
         self,
         app: ASGIApp,
         oauth_issuer: str,
-        host: str,
-        port: int,
+        public_url: str = "",
+        host: str = "localhost",
+        port: int = 8420,
         mount_path: str = "",
     ) -> None:
         self.app = app
         self.oauth_issuer = oauth_issuer.rstrip("/")
-        self.host = host
-        self.port = port
-        self.mount_path = mount_path
+        # Use explicit public URL if set, otherwise derive from host:port
+        if public_url:
+            self.resource_url = f"{public_url.rstrip('/')}{mount_path}/mcp"
+        else:
+            self.resource_url = f"https://{host}:{port}{mount_path}/mcp"
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] == "http":
             path = scope.get("path", "")
             if path == "/.well-known/oauth-protected-resource":
                 metadata = {
-                    "resource": f"https://{self.host}:{self.port}{self.mount_path}/mcp",
+                    "resource": self.resource_url,
                     "authorization_servers": [self.oauth_issuer],
                     "token_methods": ["Bearer"],
                 }
@@ -163,12 +166,13 @@ class AuthMiddleware:
         # Extract Bearer token
         headers = dict(scope.get("headers", []))
         auth_header = headers.get(b"authorization", b"").decode()
-        if not auth_header.startswith("Bearer "):
+        # RFC 7235: auth scheme is case-insensitive
+        if not auth_header.lower().startswith("bearer "):
             resp = self._unauthorized("Missing or invalid Authorization header")
             await resp(scope, receive, send)
             return
 
-        token = auth_header[7:]  # Strip "Bearer "
+        token = auth_header[7:]  # Strip "Bearer " (or "bearer ", etc.)
 
         # Try self-signed JWT first
         owner_id, error = self._try_self_signed(token)
@@ -220,11 +224,13 @@ class AuthMiddleware:
 
     async def _try_oauth(self, token: str) -> str | None:
         """Validate an OAuth token against the external provider's JWKS."""
+        import asyncio
+
         from .oauth import OAuthTokenValidator
 
         validator: OAuthTokenValidator = self.oauth_validator  # type: ignore[assignment]
         try:
-            claims = validator.validate(token)
+            claims = await asyncio.to_thread(validator.validate, token)
         except Exception:
             return None
 
@@ -234,8 +240,14 @@ class AuthMiddleware:
         email = claims.get("email")
 
         # Resolve user identity: OAuth lookup → email link → auto-provision
-        resolved_id = self._resolve_user(
-            owner_id, email, claims.get("name"), oauth_subject, oauth_issuer
+        # Run in thread to avoid blocking event loop with sync DB calls
+        resolved_id = await asyncio.to_thread(
+            self._resolve_user,
+            owner_id,
+            email,
+            claims.get("name"),
+            oauth_subject,
+            oauth_issuer,
         )
 
         return resolved_id or owner_id
