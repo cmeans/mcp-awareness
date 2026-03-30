@@ -13,7 +13,7 @@
 > **Your AI's memory shouldn't be locked to one app. It should follow you everywhere.**
 
 > [!NOTE]
-> Early-stage but actively deployed — 383 tests, 14 releases, in daily use across Claude.ai, Claude Code, and Claude Desktop. See [Current status](#current-status) for what's working and what's planned.
+> Early-stage but actively deployed — 490 tests, 15 releases, in daily use across Claude.ai, Claude Code, and Claude Desktop. See [Current status](#current-status) for what's working and what's planned.
 
 ## What this is
 
@@ -208,6 +208,27 @@ The server is running on port 8420. Point any MCP client at `http://localhost:84
 | `AWARENESS_OLLAMA_URL` | `http://ollama:11434` | Ollama API endpoint. Default works with Docker Compose; change for external Ollama instances. |
 | `AWARENESS_EMBEDDING_DIMENSIONS` | `768` | Vector dimensions. Must match the model output. Only change if using a non-default model. |
 
+#### Authentication (optional)
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `AWARENESS_AUTH_REQUIRED` | `false` | Set to `true` to require Bearer tokens on all requests |
+| `AWARENESS_JWT_SECRET` | _(required for self-signed)_ | JWT signing secret. Generate with `mcp-awareness-secret` |
+| `AWARENESS_JWT_ALGORITHM` | `HS256` | JWT signing algorithm |
+| `AWARENESS_DEFAULT_OWNER` | _(system username)_ | Default owner_id for unauthenticated/stdio connections |
+
+#### OAuth provider (optional)
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `AWARENESS_OAUTH_ISSUER` | _(required for OAuth)_ | OIDC issuer URL (e.g., WorkOS AuthKit domain) |
+| `AWARENESS_OAUTH_AUDIENCE` | _(optional)_ | Expected `aud` claim in tokens |
+| `AWARENESS_OAUTH_JWKS_URI` | `{issuer}/.well-known/jwks.json` | Override JWKS endpoint |
+| `AWARENESS_OAUTH_USER_CLAIM` | `sub` | JWT claim to use as owner_id |
+| `AWARENESS_OAUTH_AUTO_PROVISION` | `false` | Auto-create user on first valid OAuth login |
+
+See the [Auth Setup Guide](docs/auth-setup.md) for complete configuration instructions.
+
 #### Docker Compose
 
 | Variable | Default | Description |
@@ -289,12 +310,16 @@ See the [Data Dictionary](docs/data-dictionary.md) for full schema documentation
 
 ## Security
 
-The awareness store may contain personal information. Securing the endpoint is not optional. The current approach uses two layers:
+The awareness store may contain personal information. Securing the endpoint is not optional.
 
-1. **Cloudflare WAF** — blocks requests at the edge if the URL path doesn't match the secret prefix. Unauthorized traffic never reaches your machine.
-2. **Server middleware** — strips the secret prefix and routes to `/mcp`. Requests without it get 404.
+| Layer | Purpose | When to use |
+|-------|---------|-------------|
+| **Cloudflare WAF** | Blocks unauthorized traffic at the edge | All deployments |
+| **Secret path** | Server returns 404 for requests without the path prefix | All deployments |
+| **JWT auth** | Self-signed tokens for scripts and edge providers | Programmatic access |
+| **OAuth 2.1** | External provider (WorkOS, Auth0, etc.) with per-user isolation | Multi-user deployments |
 
-See [Security considerations](docs/deployment-guide.md#security-considerations) in the Deployment Guide for details, limitations, and what's planned.
+For single-user deployments, secret path + WAF is sufficient. For multi-user, enable OAuth — see the [Auth Setup Guide](docs/auth-setup.md).
 
 ## Current status
 
@@ -304,6 +329,7 @@ See [Security considerations](docs/deployment-guide.md#security-considerations) 
 - **One-line demo install** — `curl | bash` sets up Awareness + Postgres + Cloudflare quick tunnel with pre-loaded demo data and a `getting-started` prompt that personalizes your instance
 - **Published Docker images** — `ghcr.io/cmeans/mcp-awareness` (GHCR) and Docker Hub, auto-built on release tags
 - **Optional semantic search** — add `AWARENESS_EMBEDDING_PROVIDER=ollama` and `docker compose --profile embeddings up -d` for vector similarity search
+- **CLI tools** — `mcp-awareness-user` (user management), `mcp-awareness-token` (JWT generation), `mcp-awareness-secret` (signing secret generation)
 
 ### Knowledge store
 - `remember`, `learn_pattern`, `add_context`, `set_preference` with filtered retrieval
@@ -344,14 +370,14 @@ See [Security considerations](docs/deployment-guide.md#security-considerations) 
 - List mode and since/until/created_after/created_before filters for lightweight queries
 - Storage abstraction: `Store` protocol — backends are swappable without changing server or collator logic
 - Alembic migration framework (version-tracked, raw SQL, auto-runs on Docker startup)
+- JWT authentication with per-user owner isolation, OAuth 2.1 resource server (provider-agnostic JWKS validation), and Postgres RLS defense-in-depth
 - Secret path auth + Cloudflare WAF for edge-level access control
 - Docker Compose with Postgres, optional Ollama, named Cloudflare Tunnel, or ephemeral quick tunnel
 - Request timing instrumentation and `/health` endpoint
-- 383 tests (all against real Postgres + Ollama in CI), strict type checking, CI pipeline with coverage, QA gate
+- 490 tests (all against real Postgres + Ollama in CI), strict type checking, CI pipeline with coverage, QA gate
 
 ### Not yet implemented
 - Layer 2 (baseline) detection — rolling averages and deviation calculation
-- OAuth / API key authentication — current auth is secret-path-based
 
 ### Planned edge providers
 
@@ -387,6 +413,7 @@ Read the full vision: **[What Knowledge Becomes When It's Ambient](docs/vision.m
 
 - [Case Studies](docs/case-studies.md) — real-world examples of awareness in practice, with agent attribution
 - [Vision](docs/vision.md) — what knowledge becomes when it's ambient: silence, estate planning, place memory, intentions, and the progression from personal to community
+- [Auth Setup Guide](docs/auth-setup.md) — JWT authentication, OAuth 2.1, CLI tools, user provisioning, provider configuration
 - [Deployment Guide](docs/deployment-guide.md) — demo install, secure deployment with Cloudflare Tunnel + WAF, client configuration
 - [From Metrics to Mental Models](docs/from-metrics-to-mental-models.md) — core spec: three-layer detection model, API design, data schema
 - [Collation Layer](docs/collation-layer.md) — briefing resource, token optimization, escalation logic
@@ -422,4 +449,4 @@ Versions prior to v0.14.0 were released under the Apache License 2.0.
 
 ---
 
-*Part of the Awareness ecosystem. Copyright (c) 2026 Chris Means.*
+Part of the <img src="docs/branding/awareness-logo-32.svg" alt="Awareness logo — a stylized eye with radiating signal lines" height="20"> Awareness ecosystem. © 2026 Chris Means

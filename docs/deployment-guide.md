@@ -248,6 +248,8 @@ https://yourdomain.com/<your-secret>/mcp
 }
 ```
 
+> **Multi-user?** If you've enabled OAuth authentication, Claude Desktop and Claude Code can authenticate via your OAuth provider. See [Auth Setup Guide](auth-setup.md#client-configuration) for configuration with OAuth Client ID/Secret.
+
 ### Step 8: Set up agent instructions
 
 If your client supports MCP prompts, the `agent_instructions` prompt provides your AI with the full awareness workflow automatically. No manual memory setup needed.
@@ -356,12 +358,13 @@ The current approach uses two layers:
 **What this does NOT protect against:**
 - Someone who obtains your secret URL has full read/write access
 - The secret is transmitted in the URL path (visible in server logs, Cloudflare logs)
-- No per-user authentication — anyone with the URL is "you"
+- Without auth enabled, anyone with the URL is "you"
 
-**For production / multi-user use**, implement proper authentication:
-- OAuth 2.0 with token validation
-- API keys in headers (requires MCP client support)
-- Cloudflare Access with compatible identity providers
+**For multi-user deployments**, enable JWT/OAuth authentication:
+- Set `AWARENESS_AUTH_REQUIRED=true` and configure `AWARENESS_OAUTH_ISSUER`
+- Each user authenticates via OAuth (WorkOS, Auth0, etc.) — data is isolated per-owner
+- Postgres RLS policies provide defense-in-depth
+- See the [Auth Setup Guide](auth-setup.md) for full instructions
 
 **Known client/platform gotchas:**
 - Claude.ai custom connectors support OAuth Client ID / Secret fields, but these follow standard OAuth flows — they are **not compatible** with Cloudflare Access service tokens (which use `CF-Access-Client-Id` / `CF-Access-Client-Secret` headers)
@@ -381,4 +384,4 @@ The current approach uses two layers:
 
 ---
 
-*[mcp-awareness](https://github.com/cmeans/mcp-awareness) is open source under the [Apache 2.0 License](../LICENSE). Copyright (c) 2026 Chris Means.*
+Part of the [<img src="../docs/branding/awareness-logo-32.svg" alt="Awareness logo — a stylized eye with radiating signal lines" height="20"> Awareness](https://github.com/cmeans/mcp-awareness) ecosystem. © 2026 Chris Means

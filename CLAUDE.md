@@ -73,13 +73,15 @@ CI runs all three (ruff, mypy, pytest) on push/PR to main via `.github/workflows
 
 ```
 src/mcp_awareness/
-├── schema.py      # Entry types (status/alert/pattern/suppression/context/preference/note),
-│                  # common envelope, validation, TTL/expiry logic, severity ranking
+├── schema.py          # Entry types, common envelope, validation, TTL/expiry logic, severity ranking
 ├── store.py           # Store protocol (interface) — backend contract
-├── postgres_store.py  # PostgresStore implementation (psycopg, JSONB, GIN indexes, pgvector)
+├── postgres_store.py  # PostgresStore (psycopg, JSONB, GIN indexes, pgvector, user ops)
 ├── embeddings.py      # Embedding provider abstraction (Ollama, Null), text composition, hashing
 ├── collator.py        # Briefing generation: applies suppressions + patterns, composes summary/mention
-└── server.py          # FastMCP server wiring — resources (read) + tools (write/update) + secret path middleware
+├── server.py          # FastMCP server wiring — resources + tools + owner context (contextvars)
+├── middleware.py      # ASGI middleware: SecretPath, Health, WellKnown, AuthMiddleware (JWT + OAuth)
+├── oauth.py           # OAuth 2.1 resource server — JWKS-based token validation for external providers
+└── cli.py             # CLI entry points: mcp-awareness-user, -token, -secret
 ```
 
 **Data flow**: Edge processes → tools (`report_status`, `report_alert`) → `store` → `collator.generate_briefing()` → `awareness://briefing` resource
@@ -104,6 +106,10 @@ src/mcp_awareness/
 - _cleanup_expired spawns a background daemon thread (never blocks the caller), debounced (10s interval), with alive-check guard to prevent thread accumulation
 - Transport: stdio (default) or streamable-http via AWARENESS_TRANSPORT env var; HTTP on AWARENESS_HOST:AWARENESS_PORT/mcp
 - Secret path auth: `AWARENESS_MOUNT_PATH` env var (e.g., `/my-secret`) rewrites `/my-secret/mcp` → `/mcp`, returns 404 for all other paths. Used with Cloudflare WAF to block unauthenticated traffic at the edge.
+- Multi-tenant: `owner_id` column on all data tables, threaded via `contextvars.ContextVar` from auth middleware through store/collator. Default owner from `AWARENESS_DEFAULT_OWNER` or `getpass.getuser()`
+- JWT auth: opt-in via `AWARENESS_AUTH_REQUIRED=true`. `AuthMiddleware` validates Bearer tokens, extracts `sub` claim. Dual auth: self-signed JWTs (HS256) + OAuth provider tokens (RS256 via JWKS). Postgres RLS policies as defense-in-depth
+- OAuth 2.1 resource server: provider-agnostic JWKS validation (WorkOS, Auth0, Cloudflare Access, Keycloak). `/.well-known/oauth-protected-resource` serves RFC 9728 metadata. User identity resolved via OAuth lookup → email linking → auto-provisioning
+- CLI tools: `mcp-awareness-user` (add/list/set-password/export/delete), `mcp-awareness-token` (JWT generation), `mcp-awareness-secret` (signing secret). All registered as console_scripts in pyproject.toml
 
 ## Deployment
 
@@ -132,6 +138,10 @@ If you have access to the awareness MCP server while working on this repo:
 - Package: `mcp-awareness-server` (PyPI)
 - Import: `mcp_awareness`
 - FastMCP name: `mcp-awareness`
-- CLI entry point: `mcp-awareness`
+- CLI entry points: `mcp-awareness` (server), `mcp-awareness-user`, `mcp-awareness-token`, `mcp-awareness-secret`
 - Repo: `cmeans/mcp-awareness`
 - Edge daemons are separate repos (e.g., `homelab-edge`) — this repo is only the generic awareness service
+
+---
+
+Part of the <img src="docs/branding/awareness-logo-32.svg" alt="Awareness logo — a stylized eye with radiating signal lines" height="20"> Awareness ecosystem. © 2026 Chris Means
