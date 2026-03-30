@@ -260,24 +260,39 @@ mcp = FastMCP(
 
 _TEMPLATE_VAR_RE = re.compile(r"\{\{(\w+)\}\}")
 
+# Debounce interval for custom prompt sync (seconds).
+_PROMPT_SYNC_INTERVAL = 60
+_last_prompt_sync: float = 0.0
 
-def _sync_custom_prompts() -> None:
+
+def _sync_custom_prompts(*, force: bool = False) -> None:
     """Sync user-defined prompts from the store into the FastMCP registry.
 
-    NOTE: Currently loads prompts for DEFAULT_OWNER only. In multi-tenant
-    deployments, custom prompts are not per-user — all users see the default
-    owner's prompts. Per-user prompt sync requires FastMCP to support
-    request-scoped prompt registration (not yet available).
+    Uses DEFAULT_OWNER (not the request-scoped owner) because prompts are
+    global server config, not per-user data.  In multi-tenant deployments,
+    all users see the default owner's prompts.  Per-user prompt sync would
+    require FastMCP to support request-scoped prompt registration.
+
+    Debounced: skips the DB query if called again within
+    ``_PROMPT_SYNC_INTERVAL`` seconds (default 60).  Pass ``force=True``
+    to bypass the debounce (used at server startup and in tests).
 
     Each entry with source="custom-prompt" becomes an MCP prompt:
     - logical_key -> prompt name (prefixed with "user/")
     - description -> prompt description
     - content -> template body ({{var}} placeholders become arguments)
     """
+    global _last_prompt_sync
+
+    now = time.monotonic()
+    if not force and (now - _last_prompt_sync) < _PROMPT_SYNC_INTERVAL:
+        return
+
     from mcp.server.fastmcp.prompts import Prompt
     from mcp.server.fastmcp.prompts.base import PromptArgument
 
-    entries = store.get_entries(_owner_id(), source="custom-prompt")
+    entries = store.get_entries(DEFAULT_OWNER, source="custom-prompt")
+    _last_prompt_sync = time.monotonic()
     # Access _prompts dict for deletion only — no public remove API exists in FastMCP.
     # add_prompt() is used for insertion (public API).
     prompts_dict = mcp._prompt_manager._prompts
@@ -338,7 +353,7 @@ def _health_response() -> dict[str, Any]:
 
 def main() -> None:
     # Sync custom prompts from the store at server start (not at import time)
-    _sync_custom_prompts()
+    _sync_custom_prompts(force=True)
     try:
         _run()
     except KeyboardInterrupt:

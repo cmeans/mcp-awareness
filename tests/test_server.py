@@ -1507,7 +1507,7 @@ class TestCustomPrompts:
             content="Summarize all active alerts and recent changes.",
             logical_key="standup",
         )
-        server_mod._sync_custom_prompts()
+        server_mod._sync_custom_prompts(force=True)
         pm = server_mod.mcp._prompt_manager
         assert "user/standup" in pm._prompts
         prompt = pm._prompts["user/standup"]
@@ -1523,7 +1523,7 @@ class TestCustomPrompts:
             content="Review project {{repo_name}} focusing on {{area}}.",
             logical_key="project-review",
         )
-        server_mod._sync_custom_prompts()
+        server_mod._sync_custom_prompts(force=True)
         pm = server_mod.mcp._prompt_manager
         prompt = pm._prompts["user/project-review"]
         arg_names = [a.name for a in (prompt.arguments or [])]
@@ -1540,7 +1540,7 @@ class TestCustomPrompts:
             content="Hello {{name}}, welcome to {{project}}!",
             logical_key="greeting",
         )
-        server_mod._sync_custom_prompts()
+        server_mod._sync_custom_prompts(force=True)
         pm = server_mod.mcp._prompt_manager
         prompt = pm._prompts["user/greeting"]
         result = await prompt.fn(name="Chris", project="awareness")
@@ -1556,14 +1556,91 @@ class TestCustomPrompts:
             content="temp",
             logical_key="temp",
         )
-        server_mod._sync_custom_prompts()
+        server_mod._sync_custom_prompts(force=True)
         pm = server_mod.mcp._prompt_manager
         assert "user/temp" in pm._prompts
         # Delete and re-sync
         entry_id = server_mod.store.get_entries(TEST_OWNER, source="custom-prompt")[0].id
         server_mod.store.soft_delete_by_id(TEST_OWNER, entry_id)
-        server_mod._sync_custom_prompts()
+        server_mod._sync_custom_prompts(force=True)
         assert "user/temp" not in pm._prompts
+
+    @pytest.mark.anyio
+    async def test_sync_uses_default_owner_not_request_owner(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """_sync_custom_prompts queries DEFAULT_OWNER, not _owner_id().
+
+        Regression test for MEDIUM #14: in a multi-tenant deployment,
+        _owner_id() returns the authenticated user, but custom prompts
+        are global server config scoped to DEFAULT_OWNER.
+        """
+        # Store a custom prompt under DEFAULT_OWNER (TEST_OWNER)
+        await server_mod.remember(
+            source="custom-prompt",
+            tags=["prompt"],
+            description="Owner test",
+            content="owned prompt",
+            logical_key="owner-test",
+        )
+        # Simulate a request context where _owner_id() returns a different user
+        monkeypatch.setattr(server_mod, "_owner_id", lambda: "user-b")
+        server_mod._sync_custom_prompts(force=True)
+        pm = server_mod.mcp._prompt_manager
+        # The prompt should still be found because sync uses DEFAULT_OWNER
+        assert "user/owner-test" in pm._prompts
+
+    @pytest.mark.anyio
+    async def test_sync_debounce_skips_when_recent(self) -> None:
+        """_sync_custom_prompts debounce skips DB hit within interval.
+
+        Regression test for MEDIUM #15: without debounce, every call to
+        agent_instructions triggers a DB round-trip.
+        """
+        await server_mod.remember(
+            source="custom-prompt",
+            tags=["prompt"],
+            description="Debounce test",
+            content="debounce",
+            logical_key="debounce-test",
+        )
+        # Force-sync to populate and set the timestamp
+        server_mod._sync_custom_prompts(force=True)
+        pm = server_mod.mcp._prompt_manager
+        assert "user/debounce-test" in pm._prompts
+
+        # Manually remove the prompt from the registry to detect re-sync
+        del pm._prompts["user/debounce-test"]
+
+        # Non-forced call should be debounced (no re-sync)
+        server_mod._sync_custom_prompts()
+        assert "user/debounce-test" not in pm._prompts
+
+    @pytest.mark.anyio
+    async def test_sync_debounce_allows_after_interval(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """_sync_custom_prompts re-syncs after the debounce interval elapses."""
+        await server_mod.remember(
+            source="custom-prompt",
+            tags=["prompt"],
+            description="Interval test",
+            content="interval",
+            logical_key="interval-test",
+        )
+        server_mod._sync_custom_prompts(force=True)
+        pm = server_mod.mcp._prompt_manager
+        assert "user/interval-test" in pm._prompts
+
+        # Remove from registry to detect re-sync
+        del pm._prompts["user/interval-test"]
+
+        # Pretend the last sync happened long ago
+        monkeypatch.setattr(server_mod, "_last_prompt_sync", 0.0)
+
+        # Non-forced call should now re-sync
+        server_mod._sync_custom_prompts()
+        assert "user/interval-test" in pm._prompts
 
 
 # ---------------------------------------------------------------------------
@@ -2956,7 +3033,7 @@ def test_owner_id_returns_contextvar():
 
 def test_main_handles_keyboard_interrupt(monkeypatch):
     """main() catches KeyboardInterrupt and exits cleanly."""
-    monkeypatch.setattr(server_mod, "_sync_custom_prompts", lambda: None)
+    monkeypatch.setattr(server_mod, "_sync_custom_prompts", lambda **kw: None)
     monkeypatch.setattr(server_mod, "_run", _raise_keyboard_interrupt)
     # Should not raise
     server_mod.main()
