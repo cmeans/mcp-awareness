@@ -1171,6 +1171,23 @@ class PostgresStore:
             (json.dumps([entry_id]),),
         )
 
+    # ------------------------------------------------------------------
+    # User operations (for OAuth auto-provisioning)
+    # ------------------------------------------------------------------
+
+    def get_user(self, user_id: str) -> dict[str, Any] | None:
+        """Look up a user by ID. Returns dict or None if not found."""
+        with self._pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
+            cur.execute(_load_sql("get_user"), (user_id,))
+            return cur.fetchone()
+
+    def create_user_if_not_exists(
+        self, user_id: str, email: str | None = None, display_name: str | None = None
+    ) -> None:
+        """Auto-provision a user on first OAuth login. No-op if user exists."""
+        with self._pool.connection() as conn, conn.transaction(), conn.cursor() as cur:
+            cur.execute(_load_sql("create_user_auto"), (user_id, email, display_name))
+
     def clear(self, owner_id: str) -> None:
         with self._pool.connection() as conn, conn.transaction(), conn.cursor() as cur:
             self._set_rls_context(cur, owner_id)
