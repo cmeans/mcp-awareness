@@ -184,22 +184,3 @@ class Entry:
     def age_sec(self) -> float:
         ref = self.updated or self.created
         return (datetime.now(timezone.utc) - ref).total_seconds()
-
-
-def validate_entry_data(data: dict[str, Any]) -> list[str]:
-    """Validate raw entry data before creating an Entry. Returns list of errors."""
-    errors = []
-    for f in ("type", "source"):
-        if f not in data:
-            errors.append(f"Missing required field: {f}")
-    if "type" in data:
-        try:
-            EntryType(data["type"])
-        except ValueError:
-            valid = [e.value for e in EntryType]
-            errors.append(f"Invalid type: {data['type']}. Must be one of: {valid}")
-    if "data" in data and not isinstance(data["data"], dict):
-        errors.append("'data' must be a dict")
-    if "tags" in data and not isinstance(data["tags"], list):
-        errors.append("'tags' must be a list")
-    return errors
