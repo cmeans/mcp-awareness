@@ -25,6 +25,7 @@ Requires: pip install psycopg[binary] psycopg_pool
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
@@ -253,37 +254,46 @@ class PostgresStore:
     def upsert_alert(
         self, owner_id: str, source: str, tags: list[str], alert_id: str, data: dict[str, Any]
     ) -> Entry:
-        """Upsert an alert by source + alert_id."""
+        """Upsert an alert by source + alert_id.
+
+        Uses pg_advisory_xact_lock to serialize concurrent upserts for the same
+        (owner_id, source, alert_id) key, then SELECT FOR UPDATE to safely lock
+        any existing row before deciding whether to UPDATE or INSERT.
+        """
         self._cleanup_expired()
         now = now_utc()
-        existing = self._query_entries(
-            owner_id,
-            "type = %s AND source = %s AND data->>'alert_id' = %s",
-            (EntryType.ALERT.value, source, alert_id),
-        )
-        if existing:
-            e = existing[0]
-            e.updated = now
-            e.tags = tags
-            e.data.update(data)
-            with self._pool.connection() as conn, conn.transaction(), conn.cursor() as cur:
-                self._set_rls_context(cur, owner_id)
+        # Derive a stable 64-bit advisory lock key from the logical upsert key.
+        # hashlib gives a stable cross-process hash; mask to signed int64 range.
+        raw = hashlib.sha256(f"{owner_id}:{source}:{alert_id}".encode()).digest()
+        lock_key = int.from_bytes(raw[:8], "big") % (2**63)
+        with self._pool.connection() as conn, conn.transaction(), conn.cursor() as cur:
+            self._set_rls_context(cur, owner_id)
+            # Acquire advisory lock — serializes concurrent upserts for this key.
+            cur.execute("SELECT pg_advisory_xact_lock(%s)", (lock_key,))
+            cur.execute(
+                _load_sql("select_alert_for_update"),
+                (owner_id, EntryType.ALERT.value, source, alert_id),
+            )
+            row = cur.fetchone()
+            if row:
+                e = self._row_to_entry(row)
+                e.updated = now
+                e.tags = tags
+                e.data.update(data)
                 cur.execute(
                     _load_sql("upsert_alert_update"),
                     (now, json.dumps(e.tags), json.dumps(e.data), e.id, owner_id),
                 )
-            return e
-        entry = Entry(
-            id=make_id(),
-            type=EntryType.ALERT,
-            source=source,
-            tags=tags,
-            created=now,
-            expires=None,
-            data=data,
-        )
-        with self._pool.connection() as conn, conn.transaction(), conn.cursor() as cur:
-            self._set_rls_context(cur, owner_id)
+                return e
+            entry = Entry(
+                id=make_id(),
+                type=EntryType.ALERT,
+                source=source,
+                tags=tags,
+                created=now,
+                expires=None,
+                data=data,
+            )
             self._insert_entry(cur, owner_id, entry)
         return entry
 
