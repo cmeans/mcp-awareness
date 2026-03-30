@@ -32,7 +32,7 @@ CREATE INDEX IF NOT EXISTS ix_users_oauth_subject
 
 CREATE TABLE IF NOT EXISTS entries (
     id       TEXT PRIMARY KEY,
-    owner_id TEXT NOT NULL DEFAULT '{default_owner}',
+    owner_id TEXT NOT NULL DEFAULT {default_owner},
     type     TEXT NOT NULL,
     source   TEXT NOT NULL,
     created  TIMESTAMPTZ NOT NULL,
@@ -59,7 +59,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_entries_source_logical_key
 
 CREATE TABLE IF NOT EXISTS reads (
     id       SERIAL PRIMARY KEY,
-    owner_id TEXT NOT NULL DEFAULT '{default_owner}',
+    owner_id TEXT NOT NULL DEFAULT {default_owner},
     entry_id TEXT NOT NULL REFERENCES entries(id) ON DELETE CASCADE,
     timestamp TIMESTAMPTZ NOT NULL DEFAULT now(),
     platform TEXT,
@@ -71,7 +71,7 @@ CREATE INDEX IF NOT EXISTS idx_reads_timestamp ON reads(timestamp);
 
 CREATE TABLE IF NOT EXISTS actions (
     id       SERIAL PRIMARY KEY,
-    owner_id TEXT NOT NULL DEFAULT '{default_owner}',
+    owner_id TEXT NOT NULL DEFAULT {default_owner},
     entry_id TEXT NOT NULL REFERENCES entries(id) ON DELETE CASCADE,
     timestamp TIMESTAMPTZ NOT NULL DEFAULT now(),
     platform TEXT,
@@ -88,7 +88,7 @@ CREATE EXTENSION IF NOT EXISTS vector;
 
 CREATE TABLE IF NOT EXISTS embeddings (
     id          SERIAL PRIMARY KEY,
-    owner_id    TEXT NOT NULL DEFAULT '{default_owner}',
+    owner_id    TEXT NOT NULL DEFAULT {default_owner},
     entry_id    TEXT NOT NULL REFERENCES entries(id) ON DELETE CASCADE,
     model       TEXT NOT NULL,
     dimensions  INTEGER NOT NULL,

@@ -249,7 +249,12 @@ def _user_export(dsn: str, args: argparse.Namespace) -> None:
 
     with psycopg.connect(dsn, row_factory=dict_row) as conn, conn.cursor() as cur:
         # User record
-        cur.execute("SELECT * FROM users WHERE id = %s", (args.user_id,))
+        cur.execute(
+            "SELECT id, email, canonical_email, display_name, phone, timezone, "
+            "preferences, oauth_subject, oauth_issuer, created, updated "
+            "FROM users WHERE id = %s",
+            (args.user_id,),
+        )
         user_row = cur.fetchone()
         if user_row is None:
             print(f"Error: user '{args.user_id}' not found", file=sys.stderr)

@@ -41,10 +41,8 @@ from psycopg_pool import ConnectionPool
 from .schema import Entry, EntryType, ensure_dt, ensure_dt_optional, make_id, now_utc, to_iso
 
 # Default owner for backward compatibility — used as column DEFAULT in DDL
-# so inserts without explicit owner_id still work (PR 1: schema only).
-# PR 2 will thread owner_id through all store methods explicitly.
+# so inserts without explicit owner_id still work.
 _DEFAULT_OWNER = os.environ.get("AWARENESS_DEFAULT_OWNER", "system")
-_escaped_default_owner = _DEFAULT_OWNER.replace("'", "''")
 
 logger = logging.getLogger(__name__)
 
@@ -86,9 +84,11 @@ class PostgresStore:
         self._create_tables()
 
     def _create_tables(self) -> None:
-        ddl = _load_sql("create_tables").format(
-            default_owner=_escaped_default_owner,
-            embedding_dimensions=self._embedding_dimensions,
+        from psycopg import sql
+
+        ddl = sql.SQL(_load_sql("create_tables")).format(
+            default_owner=sql.Literal(_DEFAULT_OWNER),
+            embedding_dimensions=sql.SQL(str(self._embedding_dimensions)),
         )
         with self._pool.connection() as conn, conn.cursor() as cur:
             cur.execute(ddl)

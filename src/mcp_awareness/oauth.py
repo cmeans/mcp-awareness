@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+import threading
 import time
 
 import jwt
@@ -52,6 +53,7 @@ class OAuthTokenValidator:
         self._jwk_client = PyJWKClient(self._jwks_uri, cache_jwk_set=True)
         self._jwks_cache_ttl = jwks_cache_ttl
         self._last_jwks_fetch: float = 0.0
+        self._jwks_lock = threading.Lock()
 
     def validate(self, token: str) -> dict[str, str]:
         """Validate an OAuth JWT and return extracted identity claims.
@@ -62,11 +64,14 @@ class OAuthTokenValidator:
         Raises:
             jwt.InvalidTokenError: if token is invalid, expired, or unverifiable.
         """
-        # Refresh JWKS cache if stale
+        # Refresh JWKS cache if stale (lock prevents thundering herd)
         now = time.monotonic()
         if now - self._last_jwks_fetch > self._jwks_cache_ttl:
-            self._jwk_client = PyJWKClient(self._jwks_uri, cache_jwk_set=True)
-            self._last_jwks_fetch = now
+            with self._jwks_lock:
+                # Double-check after acquiring lock
+                if now - self._last_jwks_fetch > self._jwks_cache_ttl:
+                    self._jwk_client = PyJWKClient(self._jwks_uri, cache_jwk_set=True)
+                    self._last_jwks_fetch = time.monotonic()
 
         signing_key = self._jwk_client.get_signing_key_from_jwt(token)
 
