@@ -229,37 +229,60 @@ class AuthMiddleware:
             return None
 
         owner_id = claims["owner_id"]
+        oauth_subject = claims.get("oauth_subject")
+        oauth_issuer = claims.get("oauth_issuer")
+        email = claims.get("email")
 
-        # Auto-provision user if enabled
-        if self.auto_provision:
-            self._ensure_user(
-                owner_id,
-                claims.get("email"),
-                claims.get("name"),
-                claims.get("oauth_subject"),
-                claims.get("oauth_issuer"),
-            )
+        # Resolve user identity: OAuth lookup → email link → auto-provision
+        resolved_id = self._resolve_user(
+            owner_id, email, claims.get("name"), oauth_subject, oauth_issuer
+        )
 
-        return owner_id
+        return resolved_id or owner_id
 
-    def _ensure_user(
+    def _resolve_user(
         self,
-        user_id: str,
+        owner_id: str,
         email: str | None,
         display_name: str | None,
         oauth_subject: str | None,
         oauth_issuer: str | None,
-    ) -> None:
-        """Create user record on first OAuth login (if auto-provisioning enabled)."""
+    ) -> str | None:
+        """Resolve OAuth token to a local user, linking or creating as needed.
+
+        Resolution order:
+        1. Look up by OAuth identity (issuer + subject) — already linked user
+        2. If email present, try to link to a pre-provisioned user by email
+        3. If auto_provision enabled, create a new user
+        4. Otherwise return None (use owner_id from token as-is)
+        """
         try:
             from .server import store
 
-            store.create_user_if_not_exists(
-                user_id, email, display_name, oauth_subject, oauth_issuer
-            )
+            # 1. Already linked?
+            if oauth_issuer and oauth_subject:
+                existing = store.get_user_by_oauth(oauth_issuer, oauth_subject)
+                if existing:
+                    return str(existing["id"])
+
+            # 2. Pre-provisioned user with matching email? Link on first login.
+            if email and oauth_subject and oauth_issuer:
+                linked_id = store.link_oauth_identity(oauth_subject, oauth_issuer, email)
+                if linked_id:
+                    return str(linked_id)
+
+            # 3. Auto-provision new user
+            if self.auto_provision:
+                store.create_user_if_not_exists(
+                    owner_id, email, display_name, oauth_subject, oauth_issuer
+                )
+                return owner_id
+
         except Exception:
-            # Don't fail the request if auto-provisioning fails
+            # Don't fail the request if user resolution fails
             pass
+
+        return None
 
     def _unauthorized(self, message: str) -> JSONResponse:
         """Build a 401 response with proper WWW-Authenticate header."""

@@ -1202,6 +1202,21 @@ class PostgresStore:
             cur.execute(_load_sql("get_user_by_oauth"), (oauth_issuer, oauth_subject))
             return cur.fetchone()
 
+    def link_oauth_identity(self, oauth_subject: str, oauth_issuer: str, email: str) -> str | None:
+        """Link an OAuth identity to a pre-provisioned user matched by email.
+
+        Returns the user ID if linked, None if no matching user found.
+        Only links if the user's oauth_subject is currently NULL (first-time link).
+        """
+        with (
+            self._pool.connection() as conn,
+            conn.transaction(),
+            conn.cursor(row_factory=dict_row) as cur,
+        ):
+            cur.execute(_load_sql("link_oauth_identity"), (oauth_subject, oauth_issuer, email))
+            row = cur.fetchone()
+            return str(row["id"]) if row else None
+
     def clear(self, owner_id: str) -> None:
         with self._pool.connection() as conn, conn.transaction(), conn.cursor() as cur:
             self._set_rls_context(cur, owner_id)

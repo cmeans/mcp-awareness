@@ -367,8 +367,8 @@ class TestDualAuth:
         assert 401 not in status_codes
 
     @pytest.mark.anyio
-    async def test_auto_provision_called_on_oauth(self) -> None:
-        """When auto_provision=True, _ensure_user is called with OAuth claims."""
+    async def test_resolve_user_called_on_oauth(self) -> None:
+        """When OAuth succeeds, _resolve_user is called with claims."""
         mock_oauth = MagicMock()
         mock_oauth.validate.return_value = {
             "owner_id": "new-user",
@@ -378,23 +378,19 @@ class TestDualAuth:
             "oauth_issuer": TEST_ISSUER,
         }
 
+        called_with_owner: list[str] = []
+
         async def inner_app(scope: Any, receive: Any, send: Any) -> None:
-            pass
+            from mcp_awareness.server import _owner_ctx
+
+            called_with_owner.append(_owner_ctx.get())
 
         app = AuthMiddleware(
             inner_app,
             jwt_secret="",
             oauth_validator=mock_oauth,
-            auto_provision=True,
+            auto_provision=False,
         )
-
-        # Patch _ensure_user to verify it's called
-        ensure_calls: list[tuple[Any, ...]] = []
-
-        def tracking_ensure(*args: Any) -> None:
-            ensure_calls.append(args)
-
-        app._ensure_user = tracking_ensure  # type: ignore[assignment]
 
         scope = {
             "type": "http",
@@ -410,9 +406,7 @@ class TestDualAuth:
             pass
 
         await app(scope, noop_receive, noop_send)
-        assert len(ensure_calls) == 1
-        assert ensure_calls[0][0] == "new-user"
-        assert ensure_calls[0][1] == "new@example.com"
+        assert called_with_owner == ["new-user"]
 
     @pytest.mark.anyio
     async def test_401_includes_www_authenticate(self) -> None:
@@ -518,6 +512,8 @@ class TestAutoProvisionFailure:
         import mcp_awareness.server as server_mod
 
         broken_store = MagicMock()
+        broken_store.get_user_by_oauth.return_value = None
+        broken_store.link_oauth_identity.return_value = None
         broken_store.create_user_if_not_exists.side_effect = RuntimeError("db down")
         monkeypatch.setattr(server_mod, "store", broken_store)
 
@@ -651,3 +647,29 @@ class TestAutoProvisioning:
     def test_get_user_returns_none_for_unknown(self, store: Any) -> None:
         user = store.get_user("nonexistent-user")
         assert user is None
+
+    def test_link_oauth_identity_by_email(self, store: Any) -> None:
+        """Pre-provisioned user (CLI) gets linked on first OAuth login by email match."""
+        # Pre-provision via CLI (no OAuth identity yet)
+        store.create_user_if_not_exists("pre-user", "pre@example.com", "Pre User")
+        # First OAuth login — link by email
+        linked_id = store.link_oauth_identity("pre-sub-789", TEST_ISSUER, "pre@example.com")
+        assert linked_id == "pre-user"
+        # Verify OAuth columns populated
+        user = store.get_user_by_oauth(TEST_ISSUER, "pre-sub-789")
+        assert user is not None
+        assert user["id"] == "pre-user"
+
+    def test_link_oauth_identity_no_match(self, store: Any) -> None:
+        """Linking returns None when no user has the given email."""
+        linked_id = store.link_oauth_identity("orphan-sub", TEST_ISSUER, "nobody@example.com")
+        assert linked_id is None
+
+    def test_link_oauth_identity_already_linked(self, store: Any) -> None:
+        """Linking is a no-op if user already has an OAuth identity."""
+        store.create_user_if_not_exists(
+            "linked-user", "linked@example.com", "Linked", "existing-sub", TEST_ISSUER
+        )
+        # Try to link again with different sub — should not overwrite
+        linked_id = store.link_oauth_identity("new-sub", TEST_ISSUER, "linked@example.com")
+        assert linked_id is None  # Already linked, no update
