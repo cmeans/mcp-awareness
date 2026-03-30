@@ -78,10 +78,17 @@ src/mcp_awareness/
 ├── postgres_store.py  # PostgresStore (psycopg, JSONB, GIN indexes, pgvector, user ops)
 ├── embeddings.py      # Embedding provider abstraction (Ollama, Null), text composition, hashing
 ├── collator.py        # Briefing generation: applies suppressions + patterns, composes summary/mention
-├── server.py          # FastMCP server wiring — resources + tools + owner context (contextvars)
+├── server.py          # FastMCP server wiring — initialization, owner context (contextvars), custom prompt sync
+├── tools.py           # MCP tool handlers (29 tools: CRUD, search, lifecycle, analytics)
+├── resources.py       # MCP resource handlers (briefing, status, knowledge, alerts, intentions, activity)
+├── prompts.py         # MCP prompt handlers (briefing, catchup, diagnostics, knowledge-audit, onboarding)
 ├── middleware.py      # ASGI middleware: SecretPath, Health, WellKnown, AuthMiddleware (JWT + OAuth)
 ├── oauth.py           # OAuth 2.1 resource server — JWKS-based token validation for external providers
-└── cli.py             # CLI entry points: mcp-awareness-user, -token, -secret
+├── cli.py             # CLI entry points: mcp-awareness-user, -token, -secret
+├── migrate.py         # Alembic migration CLI (mcp-awareness-migrate entry point)
+├── helpers.py         # Shared utilities: canonical_email, entry type parsing, pagination, timing
+├── instructions.md    # Server instruction text embedded in MCP metadata
+└── sql/               # Externalized SQL queries (one file per operation)
 ```
 
 **Data flow**: Edge processes → tools (`report_status`, `report_alert`) → `store` → `collator.generate_briefing()` → `awareness://briefing` resource
@@ -109,7 +116,7 @@ src/mcp_awareness/
 - Multi-tenant: `owner_id` column on all data tables, threaded via `contextvars.ContextVar` from auth middleware through store/collator. Default owner from `AWARENESS_DEFAULT_OWNER` or `getpass.getuser()`
 - JWT auth: opt-in via `AWARENESS_AUTH_REQUIRED=true`. `AuthMiddleware` validates Bearer tokens, extracts `sub` claim. Dual auth: self-signed JWTs (HS256) + OAuth provider tokens (RS256 via JWKS). Postgres RLS policies as defense-in-depth
 - OAuth 2.1 resource server: provider-agnostic JWKS validation (WorkOS, Auth0, Cloudflare Access, Keycloak). `/.well-known/oauth-protected-resource` serves RFC 9728 metadata. User identity resolved via OAuth lookup → email linking → auto-provisioning
-- CLI tools: `mcp-awareness-user` (add/list/set-password/export/delete), `mcp-awareness-token` (JWT generation), `mcp-awareness-secret` (signing secret). All registered as console_scripts in pyproject.toml
+- CLI tools: `mcp-awareness-user` (add/list/set-password/export/delete), `mcp-awareness-token` (JWT generation), `mcp-awareness-secret` (signing secret), `mcp-awareness-migrate` (Alembic migrations). All registered as console_scripts in pyproject.toml
 
 ## Deployment
 
@@ -138,7 +145,7 @@ If you have access to the awareness MCP server while working on this repo:
 - Package: `mcp-awareness-server` (PyPI)
 - Import: `mcp_awareness`
 - FastMCP name: `mcp-awareness`
-- CLI entry points: `mcp-awareness` (server), `mcp-awareness-user`, `mcp-awareness-token`, `mcp-awareness-secret`
+- CLI entry points: `mcp-awareness` (server), `mcp-awareness-migrate`, `mcp-awareness-user`, `mcp-awareness-token`, `mcp-awareness-secret`
 - Repo: `cmeans/mcp-awareness`
 - Edge daemons are separate repos (e.g., `homelab-edge`) — this repo is only the generic awareness service
 
