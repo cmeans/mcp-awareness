@@ -264,8 +264,9 @@ class PostgresStore:
         now = now_utc()
         # Derive a stable 64-bit advisory lock key from the logical upsert key.
         # hashlib gives a stable cross-process hash; mask to signed int64 range.
-        raw = hashlib.sha256(f"{owner_id}:{source}:{alert_id}".encode()).digest()
-        lock_key = int.from_bytes(raw[:8], "big") % (2**63)
+        lock_key = int(
+            hashlib.sha256(f"alert:{owner_id}:{source}:{alert_id}".encode()).hexdigest(), 16
+        ) % (2**63)
         with self._pool.connection() as conn, conn.transaction(), conn.cursor() as cur:
             self._set_rls_context(cur, owner_id)
             # Acquire advisory lock — serializes concurrent upserts for this key.
@@ -300,7 +301,12 @@ class PostgresStore:
     def upsert_preference(
         self, owner_id: str, key: str, scope: str, tags: list[str], data: dict[str, Any]
     ) -> Entry:
-        """Upsert a preference by key + scope."""
+        """Upsert a preference by key + scope.
+
+        Uses pg_advisory_xact_lock to serialize concurrent upserts for the same
+        (owner_id, key, scope) key, then SELECT FOR UPDATE to safely lock
+        any existing row before deciding whether to UPDATE or INSERT.
+        """
         self._cleanup_expired()
         now = now_utc()
         with self._pool.connection() as conn, conn.transaction(), conn.cursor() as cur:

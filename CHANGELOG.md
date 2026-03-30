@@ -34,6 +34,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Argon2 time_cost bumped to 3**: stronger password hashing for new and changed passwords (existing hashes remain valid)
 
 ### Fixed
+- **`update_intention_state` owner isolation**: SQL WHERE clause now enforces `owner_id`, consistent with all other UPDATE statements (defense-in-depth alongside RLS)
+- **`upsert_alert` race condition**: rewritten to use single connection with `pg_advisory_xact_lock` + `SELECT FOR UPDATE`, eliminating TOCTOU duplicate/lost-update window
+- **`upsert_preference` race condition**: rewritten to use single connection with `pg_advisory_xact_lock` + `SELECT FOR UPDATE`, eliminating TOCTOU duplicate/lost-update window
 - **PR label automation**: `Dev Active` is now a proper hold state — `on-push` and `on-ci-pass` skip pipeline transitions while it's present, `on-unlabel` handles promotion when it's removed
 - **PR label automation**: `on-ci-pass` no longer fails on force-pushed PRs — `gh api` 404 errors handled gracefully
 - **PR label automation**: removing `Dev Active` checks CI status (via workflow runs API, job-name-agnostic) and promotes to `Ready for QA` or `Awaiting CI` accordingly
