@@ -211,7 +211,7 @@ class TestWellKnownMiddleware:
         async def inner_app(scope: Any, receive: Any, send: Any) -> None:
             pass
 
-        app = WellKnownMiddleware(inner_app, TEST_ISSUER, "localhost", 8420)
+        app = WellKnownMiddleware(inner_app, TEST_ISSUER, host="localhost", port=8420)
         scope = {
             "type": "http",
             "path": "/.well-known/oauth-protected-resource",
@@ -243,7 +243,7 @@ class TestWellKnownMiddleware:
             nonlocal called
             called = True
 
-        app = WellKnownMiddleware(inner_app, TEST_ISSUER, "localhost", 8420)
+        app = WellKnownMiddleware(inner_app, TEST_ISSUER, host="localhost", port=8420)
         scope = {"type": "http", "path": "/mcp", "method": "POST", "headers": []}
 
         async def noop_receive() -> dict[str, Any]:
@@ -254,6 +254,39 @@ class TestWellKnownMiddleware:
 
         await app(scope, noop_receive, noop_send)
         assert called
+
+    @pytest.mark.anyio
+    async def test_public_url_used_in_metadata(self) -> None:
+        """When public_url is set, resource URL uses it instead of host:port."""
+
+        async def inner_app(scope: Any, receive: Any, send: Any) -> None:
+            pass
+
+        app = WellKnownMiddleware(
+            inner_app, TEST_ISSUER, public_url="https://mcpawareness.com"
+        )
+        scope = {
+            "type": "http",
+            "path": "/.well-known/oauth-protected-resource",
+            "method": "GET",
+            "headers": [],
+        }
+
+        sent: list[dict[str, Any]] = []
+
+        async def noop_receive() -> dict[str, Any]:
+            return {"type": "http.request", "body": b""}
+
+        async def capture_send(msg: dict[str, Any]) -> None:
+            sent.append(msg)
+
+        await app(scope, noop_receive, capture_send)
+
+        body = b"".join(
+            m.get("body", b"") for m in sent if m["type"] == "http.response.body"
+        )
+        data = json.loads(body)
+        assert data["resource"] == "https://mcpawareness.com/mcp"
 
 
 # ---------------------------------------------------------------------------
