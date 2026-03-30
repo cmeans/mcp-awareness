@@ -25,6 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`AWARENESS_DEFAULT_OWNER`**: env var (falls back to system username) sets the default owner for stdio and unauthenticated HTTP
 
 ### Changed
+- **Briefing batch queries**: `generate_briefing` now uses 5 fixed queries instead of 3-4 per source (N+1 → batch), reducing DB round trips from 80+ to 5 for 20 sources
 - **Dependency version caps**: all runtime dependencies now have upper-bound constraints (e.g., `mcp[cli]>=1.0.0,<2.0`) to prevent breaking major version upgrades
 - **`entries.updated` nullable**: column is now NULL on insert, set only on actual updates — aligns with `users.updated` semantics; sort and filter queries use `COALESCE(updated, created)` for consistency
 
@@ -38,6 +39,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`upsert_alert` race condition**: rewritten to use single connection with `pg_advisory_xact_lock` + `SELECT FOR UPDATE`, eliminating TOCTOU duplicate/lost-update window
 - **`upsert_preference` race condition**: rewritten to use single connection with `pg_advisory_xact_lock` + `SELECT FOR UPDATE`, eliminating TOCTOU duplicate/lost-update window
 - **Date validation**: all tools now return structured JSON errors for malformed date parameters instead of crashing with `ValueError`
+- **Global patterns**: patterns with empty source are now applied during briefing generation, matching existing global suppression behavior
 - **PR label automation**: `Dev Active` is now a proper hold state — `on-push` and `on-ci-pass` skip pipeline transitions while it's present, `on-unlabel` handles promotion when it's removed
 - **PR label automation**: `on-ci-pass` no longer fails on force-pushed PRs — `gh api` 404 errors handled gracefully
 - **PR label automation**: removing `Dev Active` checks CI status (via workflow runs API, job-name-agnostic) and promotes to `Ready for QA` or `Awaiting CI` accordingly

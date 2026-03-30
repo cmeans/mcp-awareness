@@ -2675,3 +2675,129 @@ class TestOwnerIsolation:
         store.add("alice", entry)
         assert store.soft_delete_by_id("bob", entry.id) is False
         assert store.soft_delete_by_id("alice", entry.id) is True
+
+
+# ---------------------------------------------------------------------------
+# Batch query methods
+# ---------------------------------------------------------------------------
+
+
+def test_get_all_statuses(store):
+    """get_all_statuses returns {source: Entry} for all sources."""
+    store.upsert_status(TEST_OWNER, "nas", ["infra"], {"metrics": {"cpu": 50}, "ttl_sec": 3600})
+    store.upsert_status(TEST_OWNER, "ci", ["cicd"], {"metrics": {}, "ttl_sec": 3600})
+    result = store.get_all_statuses(TEST_OWNER)
+    assert set(result.keys()) == {"nas", "ci"}
+    assert result["nas"].source == "nas"
+    assert result["ci"].source == "ci"
+
+
+def test_get_all_statuses_empty(store):
+    """get_all_statuses returns empty dict when no statuses exist."""
+    assert store.get_all_statuses(TEST_OWNER) == {}
+
+
+def test_get_all_active_alerts(store):
+    """get_all_active_alerts returns {source: [Entry]} for all sources."""
+    store.upsert_alert(
+        TEST_OWNER,
+        "nas",
+        ["infra"],
+        "a1",
+        {"alert_id": "a1", "level": "warning", "message": "NAS issue", "resolved": False},
+    )
+    store.upsert_alert(
+        TEST_OWNER,
+        "ci",
+        ["cicd"],
+        "a2",
+        {"alert_id": "a2", "level": "warning", "message": "CI issue", "resolved": False},
+    )
+    store.upsert_alert(
+        TEST_OWNER,
+        "nas",
+        ["infra"],
+        "a3",
+        {"alert_id": "a3", "level": "critical", "message": "NAS critical", "resolved": False},
+    )
+    result = store.get_all_active_alerts(TEST_OWNER)
+    assert set(result.keys()) == {"nas", "ci"}
+    assert len(result["nas"]) == 2
+    assert len(result["ci"]) == 1
+
+
+def test_get_all_active_alerts_excludes_resolved(store):
+    """get_all_active_alerts excludes resolved alerts."""
+    store.upsert_alert(
+        TEST_OWNER,
+        "nas",
+        ["infra"],
+        "a1",
+        {"alert_id": "a1", "level": "warning", "message": "resolved", "resolved": True},
+    )
+    result = store.get_all_active_alerts(TEST_OWNER)
+    assert result == {}
+
+
+def test_get_all_active_suppressions(store):
+    """get_all_active_suppressions groups by source, includes global."""
+    store.add(
+        TEST_OWNER,
+        Entry(
+            id=make_id(),
+            type=EntryType.SUPPRESSION,
+            source="nas",
+            tags=["infra"],
+            created=now_utc(),
+            expires=None,
+            data={"metric": "cpu", "reason": "maintenance"},
+        ),
+    )
+    store.add(
+        TEST_OWNER,
+        Entry(
+            id=make_id(),
+            type=EntryType.SUPPRESSION,
+            source="",
+            tags=[],
+            created=now_utc(),
+            expires=None,
+            data={"metric": "all", "reason": "global"},
+        ),
+    )
+    result = store.get_all_active_suppressions(TEST_OWNER)
+    assert "nas" in result
+    assert "" in result
+    assert len(result["nas"]) == 1
+    assert len(result[""]) == 1
+
+
+def test_get_all_patterns(store):
+    """get_all_patterns groups by source, includes global."""
+    store.add(
+        TEST_OWNER,
+        Entry(
+            id=make_id(),
+            type=EntryType.PATTERN,
+            source="nas",
+            tags=["infra"],
+            created=now_utc(),
+            expires=None,
+            data={"effect": "CPU spike during backup", "conditions": {"hour_range": "02:00-04:00"}},
+        ),
+    )
+    store.add(
+        TEST_OWNER,
+        Entry(
+            id=make_id(),
+            type=EntryType.PATTERN,
+            source="",
+            tags=[],
+            created=now_utc(),
+            expires=None,
+            data={"effect": "Global pattern", "conditions": {}},
+        ),
+    )
+    result = store.get_all_patterns(TEST_OWNER)
+    assert "nas" in result
+    assert "" in result
