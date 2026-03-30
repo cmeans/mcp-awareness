@@ -29,7 +29,7 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Any
 
 from . import server as _srv
@@ -44,9 +44,18 @@ from .helpers import (
     _timed,
     _validate_pagination,
 )
-from .schema import Entry, EntryType, ensure_dt, make_id, now_utc, parse_iso, to_iso
+from .schema import Entry, EntryType, ensure_dt, make_id, now_utc, to_iso
 
 logger = logging.getLogger(__name__)
+
+
+def _safe_ensure_dt(val: str | datetime) -> tuple[datetime | None, str | None]:
+    """Wrap ensure_dt with error handling. Returns (datetime, None) or (None, error_message)."""
+    try:
+        return ensure_dt(val), None
+    except (ValueError, TypeError) as exc:
+        return None, f"Invalid date format: {exc}"
+
 
 # ---------------------------------------------------------------------------
 # Read tools (mirrors of resources, for MCP clients that only support tools)
@@ -89,7 +98,12 @@ async def get_alerts(
     limit, offset = pv
     if since is not None and not since:
         return json.dumps({"error": "since cannot be empty; omit or provide an ISO 8601 timestamp"})
-    since_dt = ensure_dt(since) if since else None
+    if since:
+        since_dt, err = _safe_ensure_dt(since)
+        if err:
+            return json.dumps({"status": "error", "message": err})
+    else:
+        since_dt = None
     alerts = _srv.store.get_active_alerts(
         _srv._owner_id(), source, since=since_dt, limit=limit, offset=offset
     )
@@ -166,10 +180,30 @@ async def get_knowledge(
     if isinstance(pv, str):
         return json.dumps({"error": pv})
     limit, offset = pv
-    since_dt = ensure_dt(since) if since else None
-    until_dt = ensure_dt(until) if until else None
-    created_after_dt = ensure_dt(created_after) if created_after else None
-    created_before_dt = ensure_dt(created_before) if created_before else None
+    if since:
+        since_dt, err = _safe_ensure_dt(since)
+        if err:
+            return json.dumps({"status": "error", "message": err})
+    else:
+        since_dt = None
+    if until:
+        until_dt, err = _safe_ensure_dt(until)
+        if err:
+            return json.dumps({"status": "error", "message": err})
+    else:
+        until_dt = None
+    if created_after:
+        created_after_dt, err = _safe_ensure_dt(created_after)
+        if err:
+            return json.dumps({"status": "error", "message": err})
+    else:
+        created_after_dt = None
+    if created_before:
+        created_before_dt, err = _safe_ensure_dt(created_before)
+        if err:
+            return json.dumps({"status": "error", "message": err})
+    else:
+        created_before_dt = None
     et, et_err = _parse_entry_type(entry_type)
     if et_err:
         return json.dumps({"error": et_err})
@@ -712,7 +746,12 @@ async def get_deleted(
     limit, offset = pv
     if since is not None and not since:
         return json.dumps({"error": "since cannot be empty; omit or provide an ISO 8601 timestamp"})
-    since_dt = ensure_dt(since) if since else None
+    if since:
+        since_dt, err = _safe_ensure_dt(since)
+        if err:
+            return json.dumps({"status": "error", "message": err})
+    else:
+        since_dt = None
     entries = _srv.store.get_deleted(_srv._owner_id(), since=since_dt, limit=limit, offset=offset)
     if mode == "list":
         return json.dumps([e.to_list_dict() for e in entries], indent=2)
@@ -771,7 +810,12 @@ async def get_reads(
     This tool always returns structured JSON."""
     if limit is None:
         limit = DEFAULT_QUERY_LIMIT
-    since_dt = ensure_dt(since) if since else None
+    if since:
+        since_dt, err = _safe_ensure_dt(since)
+        if err:
+            return json.dumps({"status": "error", "message": err})
+    else:
+        since_dt = None
     reads = _srv.store.get_reads(
         _srv._owner_id(), entry_id=entry_id, since=since_dt, platform=platform, limit=limit
     )
@@ -793,7 +837,12 @@ async def get_actions(
     This tool always returns structured JSON."""
     if limit is None:
         limit = DEFAULT_QUERY_LIMIT
-    since_dt = ensure_dt(since) if since else None
+    if since:
+        since_dt, err = _safe_ensure_dt(since)
+        if err:
+            return json.dumps({"status": "error", "message": err})
+    else:
+        since_dt = None
     actions = _srv.store.get_actions(
         _srv._owner_id(),
         entry_id=entry_id,
@@ -817,7 +866,12 @@ async def get_unread(since: str | None = None, limit: int | None = None) -> str:
     This tool always returns structured JSON."""
     if limit is None:
         limit = DEFAULT_QUERY_LIMIT
-    since_dt = ensure_dt(since) if since else None
+    if since:
+        since_dt, err = _safe_ensure_dt(since)
+        if err:
+            return json.dumps({"status": "error", "message": err})
+    else:
+        since_dt = None
     entries = _srv.store.get_unread(_srv._owner_id(), since=since_dt, limit=limit)
     return json.dumps([e.to_list_dict() for e in entries], indent=2)
 
@@ -836,7 +890,12 @@ async def get_activity(
     This tool always returns structured JSON."""
     if limit is None:
         limit = DEFAULT_QUERY_LIMIT
-    since_dt = ensure_dt(since) if since else None
+    if since:
+        since_dt, err = _safe_ensure_dt(since)
+        if err:
+            return json.dumps({"status": "error", "message": err})
+    else:
+        since_dt = None
     activity = _srv.store.get_activity(
         _srv._owner_id(), since=since_dt, platform=platform, limit=limit
     )
@@ -876,7 +935,12 @@ async def remind(
             {"error": f"invalid urgency '{urgency}', must be one of: {sorted(VALID_URGENCY)}"}
         )
     now = now_utc()
-    deliver_at_dt = ensure_dt(deliver_at) if deliver_at else None
+    if deliver_at:
+        deliver_at_dt, err = _safe_ensure_dt(deliver_at)
+        if err:
+            return json.dumps({"status": "error", "message": err})
+    else:
+        deliver_at_dt = None
     entry = Entry(
         id=make_id(),
         type=EntryType.INTENTION,
@@ -990,8 +1054,18 @@ async def semantic_search(
     except Exception as exc:
         return json.dumps({"status": "error", "message": f"Embedding error: {exc}"})
 
-    since_dt = parse_iso(since) if since else None
-    until_dt = parse_iso(until) if until else None
+    if since:
+        since_dt, err = _safe_ensure_dt(since)
+        if err:
+            return json.dumps({"status": "error", "message": err})
+    else:
+        since_dt = None
+    if until:
+        until_dt, err = _safe_ensure_dt(until)
+        if err:
+            return json.dumps({"status": "error", "message": err})
+    else:
+        until_dt = None
 
     results = _srv.store.semantic_search(
         _srv._owner_id(),

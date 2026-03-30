@@ -2976,3 +2976,61 @@ def test_fallback_user_on_getpass_failure(monkeypatch):
     assert server_mod.DEFAULT_OWNER == "system"
     # Restore
     importlib.reload(server_mod)
+
+
+# ---------------------------------------------------------------------------
+# Date validation tests
+# ---------------------------------------------------------------------------
+
+
+class TestDateValidation:
+    @pytest.mark.anyio
+    async def test_get_alerts_malformed_since(self) -> None:
+        result = await server_mod.get_alerts(since="not-a-date")
+        parsed = json.loads(result)
+        assert "error" in parsed or parsed.get("status") == "error"
+        assert "date" in parsed.get("message", parsed.get("error", "")).lower()
+
+    @pytest.mark.anyio
+    async def test_get_knowledge_malformed_since(self) -> None:
+        result = await server_mod.get_knowledge(since="not-a-date")
+        parsed = json.loads(result)
+        assert "error" in parsed or parsed.get("status") == "error"
+
+    @pytest.mark.anyio
+    async def test_get_knowledge_malformed_until(self) -> None:
+        result = await server_mod.get_knowledge(until="2026-13-45")
+        parsed = json.loads(result)
+        assert "error" in parsed or parsed.get("status") == "error"
+
+    @pytest.mark.anyio
+    async def test_get_knowledge_malformed_created_after(self) -> None:
+        result = await server_mod.get_knowledge(created_after="bad")
+        parsed = json.loads(result)
+        assert "error" in parsed or parsed.get("status") == "error"
+
+    @pytest.mark.anyio
+    async def test_remind_malformed_deliver_at(self) -> None:
+        result = await server_mod.remind(
+            goal="test", source="test", tags=["test"], deliver_at="not-a-date"
+        )
+        parsed = json.loads(result)
+        assert "error" in parsed or parsed.get("status") == "error"
+
+    @pytest.mark.anyio
+    async def test_get_deleted_malformed_since(self) -> None:
+        result = await server_mod.get_deleted(since="not-a-date")
+        parsed = json.loads(result)
+        assert "error" in parsed or parsed.get("status") == "error"
+
+    @pytest.mark.anyio
+    async def test_semantic_search_malformed_since(self) -> None:
+        result = await server_mod.semantic_search(query="test", since="not-a-date")
+        parsed = json.loads(result)
+        assert "error" in parsed or parsed.get("status") == "error"
+
+    @pytest.mark.anyio
+    async def test_get_alerts_valid_date_still_works(self) -> None:
+        result = await server_mod.get_alerts(since="2026-03-30T00:00:00Z")
+        parsed = json.loads(result)
+        assert isinstance(parsed, list)
