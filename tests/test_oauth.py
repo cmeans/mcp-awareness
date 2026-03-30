@@ -236,6 +236,90 @@ class TestWellKnownMiddleware:
         assert "/mcp" in data["resource"]
 
     @pytest.mark.anyio
+    async def test_mount_path_included_in_resource_url(self) -> None:
+        """When mount_path is set, resource URL includes it."""
+
+        async def inner_app(scope: Any, receive: Any, send: Any) -> None:
+            pass
+
+        app = WellKnownMiddleware(
+            inner_app,
+            TEST_ISSUER,
+            public_url="https://mcpawareness.com",
+            mount_path="/secret",
+        )
+        scope = {
+            "type": "http",
+            "path": "/.well-known/oauth-protected-resource",
+            "method": "GET",
+            "headers": [],
+        }
+
+        sent: list[dict[str, Any]] = []
+
+        async def noop_receive() -> dict[str, Any]:
+            return {"type": "http.request", "body": b""}
+
+        async def capture_send(msg: dict[str, Any]) -> None:
+            sent.append(msg)
+
+        await app(scope, noop_receive, capture_send)
+
+        body = b"".join(m.get("body", b"") for m in sent if m["type"] == "http.response.body")
+        data = json.loads(body)
+        assert data["resource"] == "https://mcpawareness.com/secret/mcp"
+
+    @pytest.mark.anyio
+    async def test_mount_path_in_host_fallback(self) -> None:
+        """Mount path is included in resource URL derived from Host header."""
+
+        async def inner_app(scope: Any, receive: Any, send: Any) -> None:
+            pass
+
+        app = WellKnownMiddleware(inner_app, TEST_ISSUER, mount_path="/my-secret")
+        scope = {
+            "type": "http",
+            "path": "/.well-known/oauth-protected-resource",
+            "method": "GET",
+            "headers": [(b"host", b"example.com")],
+        }
+
+        sent: list[dict[str, Any]] = []
+
+        async def noop_receive() -> dict[str, Any]:
+            return {"type": "http.request", "body": b""}
+
+        async def capture_send(msg: dict[str, Any]) -> None:
+            sent.append(msg)
+
+        await app(scope, noop_receive, capture_send)
+
+        body = b"".join(m.get("body", b"") for m in sent if m["type"] == "http.response.body")
+        data = json.loads(body)
+        assert data["resource"] == "https://example.com/my-secret/mcp"
+
+    @pytest.mark.anyio
+    async def test_non_http_passthrough(self) -> None:
+        """Non-HTTP scopes (websocket, lifespan) pass through to inner app."""
+        called = False
+
+        async def inner_app(scope: Any, receive: Any, send: Any) -> None:
+            nonlocal called
+            called = True
+
+        app = WellKnownMiddleware(inner_app, TEST_ISSUER, host="localhost", port=8420)
+        scope = {"type": "lifespan"}
+
+        async def noop_receive() -> dict[str, Any]:
+            return {"type": "lifespan.startup"}
+
+        async def noop_send(msg: dict[str, Any]) -> None:
+            pass
+
+        await app(scope, noop_receive, noop_send)
+        assert called
+
+    @pytest.mark.anyio
     async def test_passes_through_other_paths(self) -> None:
         called = False
 
@@ -528,6 +612,161 @@ class TestDualAuth:
 
         await app(scope, noop_receive, noop_send)
         assert called_with_owner == ["new-user"]
+
+    @pytest.mark.anyio
+    async def test_bearer_case_insensitive(self) -> None:
+        """RFC 7235: 'bearer' scheme is case-insensitive."""
+        secret = "test-secret-at-least-32-chars-long!"
+        token = jwt.encode({"sub": "alice"}, secret, algorithm="HS256")
+
+        called_with_owner: list[str] = []
+
+        async def inner_app(scope: Any, receive: Any, send: Any) -> None:
+            from mcp_awareness.server import _owner_ctx
+
+            called_with_owner.append(_owner_ctx.get())
+
+        app = AuthMiddleware(inner_app, jwt_secret=secret)
+
+        scope = {
+            "type": "http",
+            "path": "/mcp",
+            "method": "POST",
+            "headers": [(b"authorization", f"bearer {token}".encode())],
+        }
+
+        async def noop_receive() -> dict[str, Any]:
+            return {"type": "http.request", "body": b""}
+
+        async def noop_send(msg: dict[str, Any]) -> None:
+            pass
+
+        await app(scope, noop_receive, noop_send)
+        assert called_with_owner == ["alice"]
+
+    @pytest.mark.anyio
+    async def test_resolve_user_without_oauth_identity(self) -> None:
+        """OAuth claims missing oauth_subject/oauth_issuer skip lookup and link steps."""
+        mock_oauth = MagicMock()
+        mock_oauth.validate.return_value = {
+            "owner_id": "minimal-user",
+            "email": "min@example.com",
+        }
+
+        called_with_owner: list[str] = []
+
+        async def inner_app(scope: Any, receive: Any, send: Any) -> None:
+            from mcp_awareness.server import _owner_ctx
+
+            called_with_owner.append(_owner_ctx.get())
+
+        app = AuthMiddleware(
+            inner_app,
+            jwt_secret="",
+            oauth_validator=mock_oauth,
+            auto_provision=False,
+        )
+
+        scope = {
+            "type": "http",
+            "path": "/mcp",
+            "method": "POST",
+            "headers": [(b"authorization", b"Bearer oauth-token")],
+        }
+
+        async def noop_receive() -> dict[str, Any]:
+            return {"type": "http.request", "body": b""}
+
+        async def noop_send(msg: dict[str, Any]) -> None:
+            pass
+
+        await app(scope, noop_receive, noop_send)
+        # Falls back to raw owner_id from claims
+        assert called_with_owner == ["minimal-user"]
+
+    @pytest.mark.anyio
+    async def test_try_oauth_logs_validation_failure(self, caplog: Any) -> None:
+        """OAuth validation exceptions are logged at WARNING level."""
+        import logging
+
+        mock_oauth = MagicMock()
+        mock_oauth.validate.side_effect = RuntimeError("JWKS fetch failed")
+
+        sent: list[dict[str, Any]] = []
+
+        async def inner_app(scope: Any, receive: Any, send: Any) -> None:
+            pass
+
+        app = AuthMiddleware(inner_app, jwt_secret="", oauth_validator=mock_oauth)
+
+        scope = {
+            "type": "http",
+            "path": "/mcp",
+            "method": "POST",
+            "headers": [(b"authorization", b"Bearer bad-token")],
+        }
+
+        async def noop_receive() -> dict[str, Any]:
+            return {"type": "http.request", "body": b""}
+
+        async def capture_send(msg: dict[str, Any]) -> None:
+            sent.append(msg)
+
+        with caplog.at_level(logging.WARNING, logger="mcp_awareness.middleware"):
+            await app(scope, noop_receive, capture_send)
+
+        assert any("OAuth token validation failed" in r.message for r in caplog.records)
+        # Should still return 401
+        response_start = next(m for m in sent if m["type"] == "http.response.start")
+        assert response_start["status"] == 401
+
+    @pytest.mark.anyio
+    async def test_resolve_user_logs_failure(self, monkeypatch: Any, caplog: Any) -> None:
+        """User resolution exceptions are logged at WARNING level."""
+        import logging
+
+        import mcp_awareness.server as server_mod
+
+        broken_store = MagicMock()
+        broken_store.get_user_by_oauth.side_effect = RuntimeError("db down")
+        monkeypatch.setattr(server_mod, "store", broken_store)
+
+        mock_oauth = MagicMock()
+        mock_oauth.validate.return_value = {
+            "owner_id": "log-test-user",
+            "oauth_subject": "sub",
+            "oauth_issuer": TEST_ISSUER,
+        }
+
+        called_with_owner: list[str] = []
+
+        async def inner_app(scope: Any, receive: Any, send: Any) -> None:
+            from mcp_awareness.server import _owner_ctx
+
+            called_with_owner.append(_owner_ctx.get())
+
+        app = AuthMiddleware(
+            inner_app, jwt_secret="", oauth_validator=mock_oauth, auto_provision=False
+        )
+        scope = {
+            "type": "http",
+            "path": "/mcp",
+            "method": "POST",
+            "headers": [(b"authorization", b"Bearer token")],
+        }
+
+        async def noop_receive() -> dict[str, Any]:
+            return {"type": "http.request", "body": b""}
+
+        async def noop_send(msg: dict[str, Any]) -> None:
+            pass
+
+        with caplog.at_level(logging.WARNING, logger="mcp_awareness.middleware"):
+            await app(scope, noop_receive, noop_send)
+
+        assert any("User resolution failed" in r.message for r in caplog.records)
+        # Request should still succeed with raw owner_id
+        assert called_with_owner == ["log-test-user"]
 
     @pytest.mark.anyio
     async def test_401_includes_www_authenticate(self) -> None:
