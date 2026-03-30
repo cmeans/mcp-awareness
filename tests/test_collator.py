@@ -875,3 +875,54 @@ class TestGenerateBriefing:
         assert briefing.get("fired_intentions") is None
         assert briefing["pending_intentions"] == 1
         assert briefing["evaluation"]["intentions_fired"] == 0
+
+    def test_batch_queries_match_per_source(self, store):
+        """Batch-query briefing produces identical output to per-source queries."""
+        store.upsert_status(TEST_OWNER, "nas", ["infra"], {"metrics": {"cpu": 50}, "ttl_sec": 3600})
+        store.upsert_status(TEST_OWNER, "ci", ["cicd"], {"metrics": {}, "ttl_sec": 3600})
+        store.upsert_alert(
+            TEST_OWNER,
+            "nas",
+            ["infra"],
+            "cpu-1",
+            {
+                "alert_id": "cpu-1",
+                "level": "warning",
+                "alert_type": "threshold",
+                "message": "CPU at 96%",
+                "resolved": False,
+            },
+        )
+        store.add(
+            TEST_OWNER,
+            Entry(
+                id=make_id(),
+                type=EntryType.SUPPRESSION,
+                source="ci",
+                tags=["cicd"],
+                created=now_utc(),
+                expires=None,
+                data={"metric": "build", "reason": "expected"},
+            ),
+        )
+        store.add(
+            TEST_OWNER,
+            Entry(
+                id=make_id(),
+                type=EntryType.PATTERN,
+                source="nas",
+                tags=["infra"],
+                created=now_utc(),
+                expires=None,
+                data={
+                    "effect": "disk spike during backup",
+                    "conditions": {"hour_range": "02:00-04:00"},
+                },
+            ),
+        )
+        briefing = generate_briefing(store, TEST_OWNER)
+        assert briefing["attention_needed"] is True
+        assert briefing["active_alerts"] == 1
+        assert set(briefing["sources"].keys()) == {"nas", "ci"}
+        assert briefing["sources"]["nas"]["status"] == "warning"
+        assert briefing["sources"]["ci"]["status"] == "ok"

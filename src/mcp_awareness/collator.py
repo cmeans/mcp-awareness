@@ -280,10 +280,19 @@ def generate_briefing(store: Store, owner_id: str) -> dict[str, Any]:
     eval_pattern_matched = 0
     eval_stale_sources = 0
 
+    # Batch-fetch all data in 4 queries (fixed cost regardless of source count)
+    all_statuses = store.get_all_statuses(owner_id)
+    all_alerts = store.get_all_active_alerts(owner_id)
+    all_suppressions = store.get_all_active_suppressions(owner_id)
+    all_patterns = store.get_all_patterns(owner_id)
+    global_suppressions = all_suppressions.get("", [])
+    global_patterns = all_patterns.get("", [])
+
     for source in store.get_sources(owner_id):
-        status = store.get_latest_status(owner_id, source)
-        alerts = store.get_active_alerts(owner_id, source)
-        suppressions = store.get_active_suppressions(owner_id, source)
+        status = all_statuses.get(source)
+        alerts = all_alerts.get(source, [])
+        suppressions = all_suppressions.get(source, []) + global_suppressions
+        patterns = all_patterns.get(source, []) + global_patterns
 
         # Check for stale sources (TTL expired) — alerts from stale sources
         # are not evaluated (suppression/pattern filtering is skipped)
@@ -308,7 +317,6 @@ def generate_briefing(store: Store, owner_id: str) -> dict[str, Any]:
         eval_suppressed += pre_suppression - len(active_alerts)
 
         # Apply learned patterns — filter out expected anomalies
-        patterns = store.get_patterns(owner_id, source)
         pre_pattern = len(active_alerts)
         active_alerts = [a for a in active_alerts if not matches_pattern(a, patterns)]
         eval_pattern_matched += pre_pattern - len(active_alerts)
