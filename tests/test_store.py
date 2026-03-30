@@ -102,6 +102,57 @@ def test_resolved_alert_not_active(store):
     assert store.get_active_alerts(TEST_OWNER) == []
 
 
+def test_expired_alert_not_active(store):
+    """Expired alerts are excluded from get_active_alerts."""
+    from datetime import datetime, timedelta, timezone
+
+    past = datetime.now(timezone.utc) - timedelta(hours=1)
+    future = datetime.now(timezone.utc) + timedelta(hours=1)
+
+    # Expired alert — should not appear
+    expired_alert = Entry(
+        id=make_id(),
+        type=EntryType.ALERT,
+        source="nas",
+        tags=["infra"],
+        created=past,
+        expires=past,
+        data={"alert_id": "exp-1", "level": "warning", "message": "old", "resolved": False},
+    )
+    store.add(TEST_OWNER, expired_alert)
+
+    # Non-expired alert — should appear
+    active_alert = Entry(
+        id=make_id(),
+        type=EntryType.ALERT,
+        source="nas",
+        tags=["infra"],
+        created=past,
+        expires=future,
+        data={"alert_id": "act-1", "level": "warning", "message": "current", "resolved": False},
+    )
+    store.add(TEST_OWNER, active_alert)
+
+    # No-expiry alert — should appear
+    no_expiry = Entry(
+        id=make_id(),
+        type=EntryType.ALERT,
+        source="nas",
+        tags=["infra"],
+        created=past,
+        expires=None,
+        data={"alert_id": "nox-1", "level": "warning", "message": "forever", "resolved": False},
+    )
+    store.add(TEST_OWNER, no_expiry)
+
+    alerts = store.get_active_alerts(TEST_OWNER)
+    alert_ids = [a.data["alert_id"] for a in alerts]
+    assert "exp-1" not in alert_ids, "Expired alert should be filtered out"
+    assert "act-1" in alert_ids, "Non-expired alert should be included"
+    assert "nox-1" in alert_ids, "Alert without expiry should be included"
+    assert len(alerts) == 2
+
+
 def test_get_active_alerts_by_source(store):
     store.upsert_alert(
         TEST_OWNER,
