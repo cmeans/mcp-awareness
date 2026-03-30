@@ -404,6 +404,7 @@ class PostgresStore:
         clauses = [
             "type = %s",
             "NOT (data @> '{\"resolved\": true}'::jsonb)",
+            "(expires IS NULL OR expires > NOW())",
         ]
         params: list[Any] = [EntryType.ALERT.value]
         if source:
