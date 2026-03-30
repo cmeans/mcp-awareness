@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import pathlib
 from collections.abc import Callable
 from typing import Any
@@ -100,22 +101,36 @@ class WellKnownMiddleware:
         self,
         app: ASGIApp,
         oauth_issuer: str,
-        host: str,
-        port: int,
+        public_url: str = "",
         mount_path: str = "",
+        host: str = "localhost",
+        port: int = 8420,
     ) -> None:
         self.app = app
         self.oauth_issuer = oauth_issuer.rstrip("/")
-        self.host = host
-        self.port = port
         self.mount_path = mount_path
+        # Static resource URL if public_url is configured
+        self._static_resource_url = (
+            f"{public_url.rstrip('/')}{mount_path}/mcp" if public_url else ""
+        )
+
+    def _resource_url(self, scope: Scope) -> str:
+        """Derive the resource URL from config or request headers."""
+        if self._static_resource_url:
+            return self._static_resource_url
+        # Fallback: derive from Host header in the request
+        headers = dict(scope.get("headers", []))
+        host_header = headers.get(b"host", b"").decode()
+        if host_header:
+            return f"https://{host_header}{self.mount_path}/mcp"
+        return f"https://localhost{self.mount_path}/mcp"
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] == "http":
             path = scope.get("path", "")
             if path == "/.well-known/oauth-protected-resource":
                 metadata = {
-                    "resource": f"https://{self.host}:{self.port}{self.mount_path}/mcp",
+                    "resource": self._resource_url(scope),
                     "authorization_servers": [self.oauth_issuer],
                     "token_methods": ["Bearer"],
                 }
@@ -131,6 +146,9 @@ class AuthMiddleware:
     Supports dual auth: self-signed JWTs (via shared secret) and OAuth provider
     tokens (via JWKS). Self-signed is tried first; if it fails and an OAuth
     validator is configured, the token is validated against the provider's keys.
+
+    Includes per-owner concurrency limiting to prevent a single aggressive
+    client from saturating the connection pool and DOSing other tenants.
     """
 
     def __init__(
@@ -141,6 +159,7 @@ class AuthMiddleware:
         oauth_validator: object | None = None,
         auto_provision: bool = False,
         resource_metadata_url: str = "",
+        max_concurrent_per_owner: int = 3,
     ) -> None:
         self.app = app
         self.jwt_secret = jwt_secret
@@ -148,6 +167,8 @@ class AuthMiddleware:
         self.oauth_validator = oauth_validator
         self.auto_provision = auto_provision
         self.resource_metadata_url = resource_metadata_url
+        self._max_concurrent = max_concurrent_per_owner
+        self._owner_semaphores: dict[str, asyncio.Semaphore] = {}
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http":
@@ -163,12 +184,13 @@ class AuthMiddleware:
         # Extract Bearer token
         headers = dict(scope.get("headers", []))
         auth_header = headers.get(b"authorization", b"").decode()
-        if not auth_header.startswith("Bearer "):
+        # RFC 7235: auth scheme is case-insensitive
+        if not auth_header.lower().startswith("bearer "):
             resp = self._unauthorized("Missing or invalid Authorization header")
             await resp(scope, receive, send)
             return
 
-        token = auth_header[7:]  # Strip "Bearer "
+        token = auth_header[7:]  # Strip "Bearer " (or "bearer ", etc.)
 
         # Try self-signed JWT first
         owner_id, error = self._try_self_signed(token)
@@ -184,14 +206,26 @@ class AuthMiddleware:
             await resp(scope, receive, send)
             return
 
+        # Per-owner concurrency limit — prevents one client from DOSing others
+        sem = self._owner_semaphores.get(owner_id)
+        if sem is None:
+            sem = asyncio.Semaphore(self._max_concurrent)
+            self._owner_semaphores[owner_id] = sem
+
+        if not sem._value:  # All slots taken — reject immediately
+            resp = JSONResponse({"error": "Too many concurrent requests"}, status_code=429)
+            await resp(scope, receive, send)
+            return
+
         # Set owner context for downstream handlers
         from .server import _owner_ctx
 
-        token_reset = _owner_ctx.set(owner_id)
-        try:
-            await self.app(scope, receive, send)
-        finally:
-            _owner_ctx.reset(token_reset)
+        async with sem:
+            token_reset = _owner_ctx.set(owner_id)
+            try:
+                await self.app(scope, receive, send)
+            finally:
+                _owner_ctx.reset(token_reset)
 
     def _try_self_signed(self, token: str) -> tuple[str | None, str | None]:
         """Validate a self-signed JWT (from mcp-awareness-token CLI).
@@ -220,11 +254,13 @@ class AuthMiddleware:
 
     async def _try_oauth(self, token: str) -> str | None:
         """Validate an OAuth token against the external provider's JWKS."""
+        import asyncio
+
         from .oauth import OAuthTokenValidator
 
         validator: OAuthTokenValidator = self.oauth_validator  # type: ignore[assignment]
         try:
-            claims = validator.validate(token)
+            claims = await asyncio.to_thread(validator.validate, token)
         except Exception:
             return None
 
@@ -234,8 +270,14 @@ class AuthMiddleware:
         email = claims.get("email")
 
         # Resolve user identity: OAuth lookup → email link → auto-provision
-        resolved_id = self._resolve_user(
-            owner_id, email, claims.get("name"), oauth_subject, oauth_issuer
+        # Run in thread to avoid blocking event loop with sync DB calls
+        resolved_id = await asyncio.to_thread(
+            self._resolve_user,
+            owner_id,
+            email,
+            claims.get("name"),
+            oauth_subject,
+            oauth_issuer,
         )
 
         return resolved_id or owner_id

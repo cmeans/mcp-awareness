@@ -86,6 +86,7 @@ OAUTH_AUDIENCE = os.environ.get("AWARENESS_OAUTH_AUDIENCE", "")
 OAUTH_JWKS_URI = os.environ.get("AWARENESS_OAUTH_JWKS_URI", "")
 OAUTH_USER_CLAIM = os.environ.get("AWARENESS_OAUTH_USER_CLAIM", "sub")
 OAUTH_AUTO_PROVISION = os.environ.get("AWARENESS_OAUTH_AUTO_PROVISION", "false").lower() == "true"
+PUBLIC_URL = os.environ.get("AWARENESS_PUBLIC_URL", "")
 
 # Embedding provider — optional, configured via env vars
 EMBEDDING_PROVIDER = os.environ.get("AWARENESS_EMBEDDING_PROVIDER", "")
@@ -263,6 +264,11 @@ _TEMPLATE_VAR_RE = re.compile(r"\{\{(\w+)\}\}")
 def _sync_custom_prompts() -> None:
     """Sync user-defined prompts from the store into the FastMCP registry.
 
+    NOTE: Currently loads prompts for DEFAULT_OWNER only. In multi-tenant
+    deployments, custom prompts are not per-user — all users see the default
+    owner's prompts. Per-user prompt sync requires FastMCP to support
+    request-scoped prompt registration (not yet available).
+
     Each entry with source="custom-prompt" becomes an MCP prompt:
     - logical_key -> prompt name (prefixed with "user/")
     - description -> prompt description
@@ -397,7 +403,14 @@ def _run() -> None:
         app: _ASGIApp = SecretPathMiddleware(inner_app, MOUNT_PATH, _health_response)
 
         if OAUTH_ISSUER:
-            app = WellKnownMiddleware(app, OAUTH_ISSUER, HOST, PORT, MOUNT_PATH)
+            app = WellKnownMiddleware(
+                app,
+                OAUTH_ISSUER,
+                public_url=PUBLIC_URL,
+                host=HOST,
+                port=PORT,
+                mount_path=MOUNT_PATH,
+            )
 
         app = _wrap_with_auth(app)
 
@@ -418,7 +431,14 @@ def _run() -> None:
         if OAUTH_ISSUER:
             from mcp_awareness.middleware import WellKnownMiddleware
 
-            health_app = WellKnownMiddleware(health_app, OAUTH_ISSUER, HOST, PORT, MOUNT_PATH)
+            health_app = WellKnownMiddleware(
+                health_app,
+                OAUTH_ISSUER,
+                public_url=PUBLIC_URL,
+                host=HOST,
+                port=PORT,
+                mount_path=MOUNT_PATH,
+            )
 
         health_app = _wrap_with_auth(health_app)
 
