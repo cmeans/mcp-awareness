@@ -19,12 +19,15 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import pathlib
 from collections.abc import Callable
 from typing import Any
 
 from starlette.responses import JSONResponse, Response
 from starlette.types import ASGIApp, Receive, Scope, Send
+
+logger = logging.getLogger(__name__)
 
 # The health response builder is injected so middleware doesn't depend on server globals.
 HealthBuilder = Callable[[], dict[str, Any]]
@@ -262,6 +265,7 @@ class AuthMiddleware:
         try:
             claims = await asyncio.to_thread(validator.validate, token)
         except Exception:
+            logger.warning("OAuth token validation failed", exc_info=True)
             return None
 
         owner_id = claims["owner_id"]
@@ -322,7 +326,7 @@ class AuthMiddleware:
 
         except Exception:
             # Don't fail the request if user resolution fails
-            pass
+            logger.warning("User resolution failed for owner_id=%s", owner_id, exc_info=True)
 
         return None
 
