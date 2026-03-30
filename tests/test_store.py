@@ -617,6 +617,34 @@ def test_do_cleanup_logs_errors(store, capsys):
 # ------------------------------------------------------------------
 
 
+def test_upsert_alert_concurrent_no_duplicates(store):
+    """Concurrent upsert_alert calls for the same alert_id must not create duplicates."""
+
+    def do_upsert(i):
+        store.upsert_alert(
+            TEST_OWNER,
+            "nas",
+            ["infra"],
+            "cpu-race",
+            {
+                "alert_id": "cpu-race",
+                "level": "warning",
+                "message": f"CPU high (attempt {i})",
+                "resolved": False,
+            },
+        )
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+        futures = [executor.submit(do_upsert, i) for i in range(4)]
+        concurrent.futures.wait(futures)
+        for f in futures:
+            f.result()  # raise any exceptions
+
+    alerts = store.get_active_alerts(TEST_OWNER, source="nas")
+    cpu_race = [a for a in alerts if a.data.get("alert_id") == "cpu-race"]
+    assert len(cpu_race) == 1, f"Expected 1 alert but found {len(cpu_race)}"
+
+
 def test_upsert_alert_different_sources_same_alert_id(store):
     """Two sources can have alerts with the same alert_id independently."""
     store.upsert_alert(
@@ -656,6 +684,29 @@ def test_upsert_preference_updates_existing(store):
     prefs = store.get_entries(TEST_OWNER, entry_type=EntryType.PREFERENCE)
     assert len(prefs) == 1
     assert prefs[0].data["value"] == "light"
+
+
+def test_upsert_preference_concurrent_no_duplicates(store):
+    """Concurrent upsert_preference calls for the same key+scope must not create duplicates."""
+
+    def do_upsert(i):
+        store.upsert_preference(
+            TEST_OWNER,
+            "theme",
+            "global",
+            ["ui"],
+            {"key": "theme", "scope": "global", "value": f"dark-{i}"},
+        )
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+        futures = [executor.submit(do_upsert, i) for i in range(4)]
+        concurrent.futures.wait(futures)
+        for f in futures:
+            f.result()
+
+    prefs = store.get_knowledge(TEST_OWNER, entry_type=EntryType.PREFERENCE)
+    theme_prefs = [p for p in prefs if p.data.get("key") == "theme"]
+    assert len(theme_prefs) == 1, f"Expected 1 preference but found {len(theme_prefs)}"
 
 
 # ------------------------------------------------------------------
@@ -1367,6 +1418,23 @@ def test_update_intention_state_wrong_type(store):
     )
     store.add(TEST_OWNER, entry)
     assert store.update_intention_state(TEST_OWNER, entry.id, "fired") is None
+
+
+def test_update_intention_state_wrong_owner(store):
+    """update_intention_state rejects updates from a different owner."""
+    now = now_utc()
+    entry = Entry(
+        id=make_id(),
+        type=EntryType.INTENTION,
+        source="test",
+        tags=[],
+        created=now,
+        expires=None,
+        data={"goal": "test goal", "state": "pending"},
+    )
+    store.add(TEST_OWNER, entry)
+    result = store.update_intention_state("wrong-owner", entry.id, "fired")
+    assert result is None
 
 
 def test_get_fired_intentions(store):
