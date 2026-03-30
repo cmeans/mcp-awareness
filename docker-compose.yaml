@@ -80,6 +80,8 @@ services:
       - wal_level=logical
       - -c
       - max_replication_slots=4
+      - -c
+      - shared_preload_libraries=pg_stat_statements
     deploy:
       resources:
         limits:
