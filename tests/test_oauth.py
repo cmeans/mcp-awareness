@@ -502,6 +502,104 @@ class TestAutoProvisionIntegration:
         assert user is not None
         assert user["email"] == "int@example.com"
 
+    @pytest.mark.anyio
+    async def test_resolve_finds_already_linked_user(self, store: Any, monkeypatch: Any) -> None:
+        """OAuth login resolves to existing user via oauth_subject lookup."""
+        import mcp_awareness.server as server_mod
+
+        monkeypatch.setattr(server_mod, "store", store)
+
+        # Pre-create a linked user
+        store.create_user_if_not_exists(
+            "linked-alice", "alice@example.com", "Alice", "alice-sub", TEST_ISSUER
+        )
+
+        called_with_owner: list[str] = []
+
+        async def inner_app(scope: Any, receive: Any, send: Any) -> None:
+            from mcp_awareness.server import _owner_ctx
+
+            called_with_owner.append(_owner_ctx.get())
+
+        mock_oauth = MagicMock()
+        mock_oauth.validate.return_value = {
+            "owner_id": "alice-sub",
+            "email": "alice@example.com",
+            "oauth_subject": "alice-sub",
+            "oauth_issuer": TEST_ISSUER,
+        }
+
+        app = AuthMiddleware(
+            inner_app, jwt_secret="", oauth_validator=mock_oauth, auto_provision=False
+        )
+        scope = {
+            "type": "http",
+            "path": "/mcp",
+            "method": "POST",
+            "headers": [(b"authorization", b"Bearer oauth-token")],
+        }
+
+        async def noop_receive() -> dict[str, Any]:
+            return {"type": "http.request", "body": b""}
+
+        async def noop_send(msg: dict[str, Any]) -> None:
+            pass
+
+        await app(scope, noop_receive, noop_send)
+        # Should resolve to the existing user's ID, not the raw sub claim
+        assert called_with_owner == ["linked-alice"]
+
+    @pytest.mark.anyio
+    async def test_resolve_links_pre_provisioned_user_by_email(
+        self, store: Any, monkeypatch: Any
+    ) -> None:
+        """First OAuth login links to a pre-provisioned user matched by email."""
+        import mcp_awareness.server as server_mod
+
+        monkeypatch.setattr(server_mod, "store", store)
+
+        # Pre-provision via CLI (no OAuth identity)
+        store.create_user_if_not_exists("cli-bob", "bob@example.com", "Bob")
+
+        called_with_owner: list[str] = []
+
+        async def inner_app(scope: Any, receive: Any, send: Any) -> None:
+            from mcp_awareness.server import _owner_ctx
+
+            called_with_owner.append(_owner_ctx.get())
+
+        mock_oauth = MagicMock()
+        mock_oauth.validate.return_value = {
+            "owner_id": "bob-sub-xyz",
+            "email": "bob@example.com",
+            "oauth_subject": "bob-sub-xyz",
+            "oauth_issuer": TEST_ISSUER,
+        }
+
+        app = AuthMiddleware(
+            inner_app, jwt_secret="", oauth_validator=mock_oauth, auto_provision=False
+        )
+        scope = {
+            "type": "http",
+            "path": "/mcp",
+            "method": "POST",
+            "headers": [(b"authorization", b"Bearer oauth-token")],
+        }
+
+        async def noop_receive() -> dict[str, Any]:
+            return {"type": "http.request", "body": b""}
+
+        async def noop_send(msg: dict[str, Any]) -> None:
+            pass
+
+        await app(scope, noop_receive, noop_send)
+        # Should resolve to the pre-provisioned user's ID via email linking
+        assert called_with_owner == ["cli-bob"]
+        # Verify OAuth identity was linked
+        user = store.get_user_by_oauth(TEST_ISSUER, "bob-sub-xyz")
+        assert user is not None
+        assert user["id"] == "cli-bob"
+
 
 class TestAutoProvisionFailure:
     """Verify _ensure_user swallows exceptions gracefully."""
