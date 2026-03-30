@@ -128,7 +128,7 @@ jobs:
   on-label:
     if: >-
       github.event.action == 'labeled'
-      && contains(fromJSON('["QA Active","Dev Active","Ready for QA Signoff","QA Failed","QA Approved"]'), github.event.label.name)
+      && contains(fromJSON('["Ready for QA","QA Active","Dev Active","Ready for QA Signoff","QA Failed","QA Approved"]'), github.event.label.name)
     runs-on: ubuntu-latest
     steps:
       - name: Clean up stale labels
@@ -147,6 +147,9 @@ jobs:
           }
 
           case "$ADDED_LABEL" in
+            "Ready for QA")
+              remove_if_present "Awaiting CI"
+              ;;
             "QA Active")
               remove_if_present "Ready for QA"
               ;;
