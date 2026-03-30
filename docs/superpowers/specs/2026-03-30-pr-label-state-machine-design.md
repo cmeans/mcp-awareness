@@ -49,6 +49,7 @@ stateDiagram-v2
     Ready_for_QA --> QA_Active : QA starts
     QA_Active --> Ready_for_QA_Signoff : signoff
     QA_Active --> QA_Failed : fail
+    Ready_for_QA_Signoff --> QA_Failed : fail at signoff
     Ready_for_QA_Signoff --> QA_Approved : approved
     QA_Approved --> [*] : merge
     QA_Failed --> Dev_Active : dev picks up
@@ -137,7 +138,7 @@ File: `pr-labels.yml`
 | `QA Active` | `Ready for QA` |
 | `Dev Active` | `QA Failed`, `CI Failed`, `Awaiting CI`, `Ready for QA` |
 | `Ready for QA Signoff` | `QA Active` |
-| `QA Failed` | `QA Active` |
+| `QA Failed` | `QA Active`, `Ready for QA Signoff` |
 | `QA Approved` | `Ready for QA Signoff` |
 
 ### Edge Cases
@@ -152,6 +153,7 @@ File: `pr-labels.yml`
 | QA fails, dev adds `Dev Active`, pushes fix | `Dev Active` cleans up `QA Failed`, push adds `Awaiting CI`, flow restarts |
 | New PR opened without `Dev Active` | Straight to `Awaiting CI` |
 | Codecov fails but GitHub doesn't block | `CI Failed` label makes stricter standard visible |
+| QA fails at signoff stage | `QA Failed` removes `Ready for QA Signoff`, back to dev |
 
 ### File Structure
 

@@ -159,6 +159,7 @@ jobs:
               ;;
             "QA Failed")
               remove_if_present "QA Active"
+              remove_if_present "Ready for QA Signoff"
               ;;
             "QA Approved")
               remove_if_present "Ready for QA Signoff"
