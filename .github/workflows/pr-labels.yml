@@ -62,12 +62,14 @@ jobs:
             gh pr edit "$PR" --repo "$REPO" --remove-label "$REMOVE"
           fi
 
-          # Only add Awaiting CI if Dev Active is NOT present.
-          # If Dev Active is on, the dev isn't done yet — on-unlabel will
-          # handle the transition when they remove it.
+          # Remove Dev Active if present — pushing means dev work is done,
+          # now waiting for CI. Add to the removal batch above if needed.
           if echo "$PR_LABELS" | grep -q '"Dev Active"'; then
-            echo "Dev Active present — skipping Awaiting CI (dev still working)"
-          elif ! echo "$PR_LABELS" | grep -q '"Awaiting CI"'; then
+            gh pr edit "$PR" --repo "$REPO" --remove-label "Dev Active"
+          fi
+
+          # Always add Awaiting CI (unless already present)
+          if ! echo "$PR_LABELS" | grep -q '"Awaiting CI"'; then
             gh pr edit "$PR" --repo "$REPO" --add-label "Awaiting CI"
           fi
 
