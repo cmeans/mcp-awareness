@@ -262,9 +262,7 @@ class TestWellKnownMiddleware:
         async def inner_app(scope: Any, receive: Any, send: Any) -> None:
             pass
 
-        app = WellKnownMiddleware(
-            inner_app, TEST_ISSUER, public_url="https://mcpawareness.com"
-        )
+        app = WellKnownMiddleware(inner_app, TEST_ISSUER, public_url="https://mcpawareness.com")
         scope = {
             "type": "http",
             "path": "/.well-known/oauth-protected-resource",
@@ -282,9 +280,7 @@ class TestWellKnownMiddleware:
 
         await app(scope, noop_receive, capture_send)
 
-        body = b"".join(
-            m.get("body", b"") for m in sent if m["type"] == "http.response.body"
-        )
+        body = b"".join(m.get("body", b"") for m in sent if m["type"] == "http.response.body")
         data = json.loads(body)
         assert data["resource"] == "https://mcpawareness.com/mcp"
 
