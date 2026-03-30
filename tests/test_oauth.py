@@ -165,6 +165,29 @@ class TestOAuthTokenValidator:
         result = validator.validate(token)
         assert result["owner_id"] == "alice@example.com"
 
+    def test_explicit_jwks_uri(self) -> None:
+        """Explicit jwks_uri overrides the default derived from issuer."""
+        validator = OAuthTokenValidator(
+            issuer=TEST_ISSUER,
+            audience=TEST_AUDIENCE,
+            jwks_uri="https://custom.example.com/keys",
+            user_claim="sub",
+        )
+        assert validator._jwks_uri == "https://custom.example.com/keys"
+
+    def test_jwks_cache_refresh(self) -> None:
+        """JWKS client is refreshed when cache TTL expires."""
+        validator = self._make_validator()
+        self._mock_jwk_client(validator)
+        # Force cache to be expired
+        validator._last_jwks_fetch = 0.0
+        validator._jwks_cache_ttl = 0  # instant expiry
+        token = _make_token()
+        # This triggers cache refresh (creates new PyJWKClient) which fails
+        # because it tries to fetch from a fake URL. That's expected.
+        with pytest.raises(jwt.exceptions.PyJWKClientConnectionError):
+            validator.validate(token)
+
     def test_no_audience_skips_validation(self) -> None:
         validator = OAuthTokenValidator(
             issuer=TEST_ISSUER,
@@ -344,6 +367,54 @@ class TestDualAuth:
         assert 401 not in status_codes
 
     @pytest.mark.anyio
+    async def test_auto_provision_called_on_oauth(self) -> None:
+        """When auto_provision=True, _ensure_user is called with OAuth claims."""
+        mock_oauth = MagicMock()
+        mock_oauth.validate.return_value = {
+            "owner_id": "new-user",
+            "email": "new@example.com",
+            "name": "New User",
+            "oauth_subject": "sub-123",
+            "oauth_issuer": TEST_ISSUER,
+        }
+
+        async def inner_app(scope: Any, receive: Any, send: Any) -> None:
+            pass
+
+        app = AuthMiddleware(
+            inner_app,
+            jwt_secret="",
+            oauth_validator=mock_oauth,
+            auto_provision=True,
+        )
+
+        # Patch _ensure_user to verify it's called
+        ensure_calls: list[tuple[Any, ...]] = []
+
+        def tracking_ensure(*args: Any) -> None:
+            ensure_calls.append(args)
+
+        app._ensure_user = tracking_ensure  # type: ignore[assignment]
+
+        scope = {
+            "type": "http",
+            "path": "/mcp",
+            "method": "POST",
+            "headers": [(b"authorization", b"Bearer oauth-token")],
+        }
+
+        async def noop_receive() -> dict[str, Any]:
+            return {"type": "http.request", "body": b""}
+
+        async def noop_send(msg: dict[str, Any]) -> None:
+            pass
+
+        await app(scope, noop_receive, noop_send)
+        assert len(ensure_calls) == 1
+        assert ensure_calls[0][0] == "new-user"
+        assert ensure_calls[0][1] == "new@example.com"
+
+    @pytest.mark.anyio
     async def test_401_includes_www_authenticate(self) -> None:
         """401 responses include WWW-Authenticate with resource_metadata URL."""
         sent: list[dict[str, Any]] = []
@@ -387,7 +458,57 @@ class TestDualAuth:
 # ---------------------------------------------------------------------------
 
 
+class TestServerWiring:
+    def test_build_oauth_validator_returns_none_without_issuer(self) -> None:
+        """No OAuth validator when OAUTH_ISSUER is empty."""
+        from mcp_awareness import server as server_mod
+
+        original = server_mod.OAUTH_ISSUER
+        try:
+            server_mod.OAUTH_ISSUER = ""
+            assert server_mod._build_oauth_validator() is None
+        finally:
+            server_mod.OAUTH_ISSUER = original
+
+    def test_build_oauth_validator_returns_validator_with_issuer(self) -> None:
+        """OAuth validator created when OAUTH_ISSUER is set."""
+        from mcp_awareness import server as server_mod
+
+        original = server_mod.OAUTH_ISSUER
+        try:
+            server_mod.OAUTH_ISSUER = TEST_ISSUER
+            validator = server_mod._build_oauth_validator()
+            assert validator is not None
+            from mcp_awareness.oauth import OAuthTokenValidator
+
+            assert isinstance(validator, OAuthTokenValidator)
+        finally:
+            server_mod.OAUTH_ISSUER = original
+
+
 class TestAutoProvisioning:
+    def test_create_user_with_oauth_identity(self, store: Any) -> None:
+        """Auto-provisioning stores OAuth identity fields."""
+        store.create_user_if_not_exists(
+            "oauth-carol", "carol@example.com", "Carol", "carol-sub-123", TEST_ISSUER
+        )
+        user = store.get_user("oauth-carol")
+        assert user is not None
+        assert user["id"] == "oauth-carol"
+
+    def test_get_user_by_oauth(self, store: Any) -> None:
+        """Look up user by OAuth issuer + subject pair."""
+        store.create_user_if_not_exists(
+            "oauth-dan", "dan@example.com", "Dan", "dan-sub-456", TEST_ISSUER
+        )
+        user = store.get_user_by_oauth(TEST_ISSUER, "dan-sub-456")
+        assert user is not None
+        assert user["id"] == "oauth-dan"
+
+    def test_get_user_by_oauth_not_found(self, store: Any) -> None:
+        user = store.get_user_by_oauth(TEST_ISSUER, "nonexistent-sub")
+        assert user is None
+
     def test_create_user_if_not_exists(self, store: Any) -> None:
         """Auto-provisioning creates a user that didn't exist."""
         store.create_user_if_not_exists("oauth-alice", "alice@example.com", "Alice")
