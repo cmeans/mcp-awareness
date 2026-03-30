@@ -42,17 +42,9 @@ def _parse_duration(s: str) -> timedelta:
 
 def _canonical_email(email: str) -> str:
     """Normalize email for uniqueness: strip +tags, dots for gmail, lowercase."""
-    email = email.lower().strip()
-    local, _, domain = email.partition("@")
-    if not domain:
-        return email
-    # Strip +tag
-    local = local.split("+")[0]
-    # Gmail/Googlemail: strip dots
-    if domain in ("gmail.com", "googlemail.com"):
-        local = local.replace(".", "")
-        domain = "gmail.com"
-    return f"{local}@{domain}"
+    from .helpers import canonical_email
+
+    return canonical_email(email)
 
 
 def _validate_phone(phone: str) -> str:

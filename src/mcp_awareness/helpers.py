@@ -39,6 +39,22 @@ VALID_URGENCY = {"low", "normal", "high"}
 
 DEFAULT_QUERY_LIMIT = 200
 
+
+def canonical_email(email: str) -> str:
+    """Normalize email for uniqueness: strip +tags, dots for gmail, lowercase."""
+    email = email.lower().strip()
+    local, _, domain = email.partition("@")
+    if not domain:
+        return email
+    # Strip +tag
+    local = local.split("+")[0]
+    # Gmail/Googlemail: strip dots
+    if domain in ("gmail.com", "googlemail.com"):
+        local = local.replace(".", "")
+        domain = "gmail.com"
+    return f"{local}@{domain}"
+
+
 _VALID_ENTRY_TYPES = [e.value for e in EntryType]
 
 

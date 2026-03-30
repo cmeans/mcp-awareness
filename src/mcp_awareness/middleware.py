@@ -139,7 +139,7 @@ class AuthMiddleware:
         jwt_secret: str,
         algorithm: str = "HS256",
         oauth_validator: object | None = None,
-        auto_provision: bool = True,
+        auto_provision: bool = False,
         resource_metadata_url: str = "",
     ) -> None:
         self.app = app

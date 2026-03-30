@@ -455,6 +455,15 @@ class TestDualAuth:
 class TestAutoProvisionIntegration:
     """Integration test: middleware auto-provision with a real store."""
 
+    @pytest.fixture(autouse=True)
+    def _cleanup_integration_users(self, store: Any) -> Any:
+        yield
+        with store._pool.connection() as conn, conn.transaction(), conn.cursor() as cur:
+            cur.execute(
+                "DELETE FROM users WHERE id IN "
+                "('integration-user', 'linked-alice', 'cli-bob', 'failing-user')"
+            )
+
     @pytest.mark.anyio
     async def test_ensure_user_creates_record(self, store: Any, monkeypatch: Any) -> None:
         """_ensure_user calls store.create_user_if_not_exists through the server module."""
@@ -702,6 +711,15 @@ class TestServerWiring:
 
 
 class TestAutoProvisioning:
+    @pytest.fixture(autouse=True)
+    def _cleanup_oauth_users(self, store: Any) -> Any:
+        yield
+        # Clean up OAuth test users that aren't covered by conftest clear(TEST_OWNER)
+        with store._pool.connection() as conn, conn.transaction(), conn.cursor() as cur:
+            cur.execute(
+                "DELETE FROM users WHERE id LIKE 'oauth-%' OR id LIKE 'pre-%' OR id LIKE 'linked-%'"
+            )
+
     def test_create_user_with_oauth_identity(self, store: Any) -> None:
         """Auto-provisioning stores OAuth identity fields."""
         store.create_user_if_not_exists(
