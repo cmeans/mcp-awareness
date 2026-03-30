@@ -3,7 +3,7 @@
 /* Get combined read + action activity feed as a chronological UNION.
    {{where_r}} — WHERE clauses for the reads subquery (owner_id, optionally timestamp/platform)
    {{where_a}} — WHERE clauses for the actions subquery (owner_id, optionally timestamp/platform)
-   {{limit_clause}} — "LIMIT %s" with bind param, or empty string
+   {{limit_clause}} — "LIMIT ?" with bind param, or empty string
    Params: ...reads params (owner_id, [since], [platform]),
            ...actions params (owner_id, [since], [platform])
 */
