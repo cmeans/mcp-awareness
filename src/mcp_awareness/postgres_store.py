@@ -31,6 +31,7 @@ import logging
 import os
 import threading
 import time
+from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -431,6 +432,51 @@ class PostgresStore:
                 (EntryType.PATTERN.value, source),
             )
         return self._query_entries(owner_id, "type = %s", (EntryType.PATTERN.value,))
+
+    def get_all_statuses(self, owner_id: str) -> dict[str, Entry]:
+        with self._pool.connection() as conn, conn.transaction(), conn.cursor() as cur:
+            self._set_rls_context(cur, owner_id)
+            cur.execute(
+                _load_sql("get_all_statuses"),
+                (owner_id, EntryType.STATUS.value),
+            )
+            return {row["source"]: self._row_to_entry(row) for row in cur.fetchall()}
+
+    def get_all_active_alerts(self, owner_id: str) -> dict[str, list[Entry]]:
+        with self._pool.connection() as conn, conn.transaction(), conn.cursor() as cur:
+            self._set_rls_context(cur, owner_id)
+            cur.execute(
+                _load_sql("get_all_active_alerts"),
+                (owner_id, EntryType.ALERT.value),
+            )
+            result: dict[str, list[Entry]] = defaultdict(list)
+            for row in cur.fetchall():
+                result[row["source"]].append(self._row_to_entry(row))
+            return dict(result)
+
+    def get_all_active_suppressions(self, owner_id: str) -> dict[str, list[Entry]]:
+        with self._pool.connection() as conn, conn.transaction(), conn.cursor() as cur:
+            self._set_rls_context(cur, owner_id)
+            cur.execute(
+                _load_sql("get_all_active_suppressions"),
+                (owner_id, EntryType.SUPPRESSION.value),
+            )
+            result: dict[str, list[Entry]] = defaultdict(list)
+            for row in cur.fetchall():
+                result[row["source"]].append(self._row_to_entry(row))
+            return dict(result)
+
+    def get_all_patterns(self, owner_id: str) -> dict[str, list[Entry]]:
+        with self._pool.connection() as conn, conn.transaction(), conn.cursor() as cur:
+            self._set_rls_context(cur, owner_id)
+            cur.execute(
+                _load_sql("get_all_patterns"),
+                (owner_id, EntryType.PATTERN.value),
+            )
+            result: dict[str, list[Entry]] = defaultdict(list)
+            for row in cur.fetchall():
+                result[row["source"]].append(self._row_to_entry(row))
+            return dict(result)
 
     def count_active_suppressions(self, owner_id: str) -> int:
         with self._pool.connection() as conn, conn.transaction(), conn.cursor() as cur:

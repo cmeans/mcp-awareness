@@ -97,6 +97,25 @@ class Store(Protocol):
         """Get all pattern entries, optionally filtered by source."""
         ...
 
+    def get_all_statuses(self, owner_id: str) -> dict[str, Entry]:
+        """Get latest status for every source. Returns {source: Entry}."""
+        ...
+
+    def get_all_active_alerts(self, owner_id: str) -> dict[str, list[Entry]]:
+        """Get all non-resolved alerts grouped by source. Returns {source: [Entry]}."""
+        ...
+
+    def get_all_active_suppressions(self, owner_id: str) -> dict[str, list[Entry]]:
+        """Get all active suppressions grouped by source.
+
+        Includes global suppressions (empty source) under key ''.
+        """
+        ...
+
+    def get_all_patterns(self, owner_id: str) -> dict[str, list[Entry]]:
+        """Get all patterns grouped by source. Includes global (empty source) under key ''."""
+        ...
+
     def count_active_suppressions(self, owner_id: str) -> int:
         """Return the count of non-expired suppression entries."""
         ...
