@@ -16,15 +16,12 @@
 
 name: PR Label Automation
 
-# NOTE: The workflow_run trigger references the CI workflow by name ("CI").
-# If the CI workflow in ci.yml is ever renamed, update the name here too.
+# Handles label transitions triggered by PR events (push, label, unlabel).
+# CI-completion promotion lives in pr-labels-ci.yml (separate workflow_run trigger).
 on:
   pull_request:
     branches: [main]
     types: [synchronize, labeled, unlabeled]
-  workflow_run:
-    workflows: [CI]
-    types: [completed]
 
 permissions:
   pull-requests: write
@@ -34,7 +31,7 @@ jobs:
   # When new commits are pushed to a PR, reset to Awaiting CI.
   # Removes any QA/review labels that are now stale.
   on-push:
-    if: github.event_name == 'pull_request' && github.event.action == 'synchronize'
+    if: github.event.action == 'synchronize'
     runs-on: ubuntu-latest
     steps:
       - name: Reset labels on new push
@@ -81,67 +78,12 @@ jobs:
               --body "New commits pushed while QA was active. QA review invalidated — resetting to Awaiting CI."
           fi
 
-  # When CI completes successfully, move from Awaiting CI to Ready for QA.
-  # Only works for same-origin PRs — fork PRs must be promoted manually
-  # because the workflow_run pull_requests array is empty for forks.
-  on-ci-pass:
-    if: >-
-      github.event_name == 'workflow_run'
-      && github.event.workflow_run.conclusion == 'success'
-      && github.event.workflow_run.event == 'pull_request'
-    runs-on: ubuntu-latest
-    steps:
-      - name: Promote to Ready for QA
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          REPO=${{ github.repository }}
-
-          # Get the PR number from the workflow run.
-          # This can 404 after a force-push (the old commit's run is orphaned).
-          PR=$(gh api repos/$REPO/actions/runs/${{ github.event.workflow_run.id }}/pull_requests \
-            --jq '.[0].number // empty' 2>/dev/null) || true
-
-          # Fallback: pull_requests array is empty for dependabot and other
-          # non-default-branch PRs. Search by head branch instead.
-          if [ -z "$PR" ]; then
-            HEAD_BRANCH=${{ github.event.workflow_run.head_branch }}
-            PR=$(gh pr list --repo "$REPO" --head "$HEAD_BRANCH" --state open \
-              --json number --jq '.[0].number // empty' 2>/dev/null) || true
-          fi
-
-          if [ -z "$PR" ]; then
-            echo "No PR associated with this workflow run (may be a fork PR or force-pushed away)"
-            exit 0
-          fi
-
-          LABELS=$(gh pr view "$PR" --repo "$REPO" --json labels --jq '.labels[].name')
-
-          # Don't promote if Dev Active is present — dev isn't done yet.
-          # When they remove Dev Active, on-unlabel will check CI and promote.
-          if echo "$LABELS" | grep -q "^Dev Active$"; then
-            echo "Dev Active present — skipping promotion (dev still working)"
-            exit 0
-          fi
-
-          # Only promote if Awaiting CI is present
-          if echo "$LABELS" | grep -q "^Awaiting CI$"; then
-            # Also clean up QA Invalidated if it lingered from a previous push
-            REMOVE="Awaiting CI"
-            if echo "$LABELS" | grep -q "^QA Invalidated$"; then
-              REMOVE="Awaiting CI,QA Invalidated"
-            fi
-            gh pr edit "$PR" --repo "$REPO" --remove-label "$REMOVE"
-            gh pr edit "$PR" --repo "$REPO" --add-label "Ready for QA"
-          fi
-
   # When Dev Active is removed, transition to Awaiting CI — or straight
   # to Ready for QA if CI already passed (avoids stuck state when CI
   # finishes before the label is removed).
   on-unlabel:
     if: >-
-      github.event_name == 'pull_request'
-      && github.event.action == 'unlabeled'
+      github.event.action == 'unlabeled'
       && github.event.label.name == 'Dev Active'
     runs-on: ubuntu-latest
     steps:
@@ -183,8 +125,7 @@ jobs:
   # to avoid wasted runner invocations.
   on-label:
     if: >-
-      github.event_name == 'pull_request'
-      && github.event.action == 'labeled'
+      github.event.action == 'labeled'
       && contains(fromJSON('["QA Active","Dev Active","Ready for QA Signoff","QA Failed","QA Approved"]'), github.event.label.name)
     runs-on: ubuntu-latest
     steps:

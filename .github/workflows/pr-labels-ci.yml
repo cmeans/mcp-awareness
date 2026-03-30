@@ -1,0 +1,88 @@
+# mcp-awareness — ambient system awareness for AI agents
+# Copyright (C) 2026 Chris Means
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Affero General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU Affero General Public License for more details.
+#
+# You should have received a copy of the GNU Affero General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+name: PR Label Automation (CI)
+
+# Promotes PRs from Awaiting CI to Ready for QA when CI passes.
+# Split from pr-labels.yml because workflow_run fires on every CI
+# completion (including merges to main), which caused noisy failures
+# when the job couldn't find an associated PR.
+#
+# NOTE: References the CI workflow by name ("CI").
+# If the CI workflow in ci.yml is ever renamed, update the name here too.
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+
+permissions:
+  pull-requests: write
+  checks: read
+
+jobs:
+  on-ci-pass:
+    # Only run for successful CI on PR branches (not merges to main).
+    if: >-
+      github.event.workflow_run.conclusion == 'success'
+      && github.event.workflow_run.event == 'pull_request'
+      && github.event.workflow_run.head_branch != github.event.repository.default_branch
+    runs-on: ubuntu-latest
+    steps:
+      - name: Promote to Ready for QA
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          REPO=${{ github.repository }}
+
+          # Get the PR number from the workflow run.
+          # This can 404 after a force-push (the old commit's run is orphaned).
+          # Capture exit code separately so a 404 body doesn't leak into $PR.
+          PR=""
+          API_OUT=$(gh api repos/$REPO/actions/runs/${{ github.event.workflow_run.id }}/pull_requests \
+            --jq '.[0].number // empty' 2>&1) && PR="$API_OUT" || true
+
+          # Fallback: pull_requests array is empty for dependabot and other
+          # non-default-branch PRs. Search by head branch instead.
+          if [ -z "$PR" ]; then
+            HEAD_BRANCH=${{ github.event.workflow_run.head_branch }}
+            PR=$(gh pr list --repo "$REPO" --head "$HEAD_BRANCH" --state open \
+              --json number --jq '.[0].number // empty' 2>/dev/null) || true
+          fi
+
+          if [ -z "$PR" ]; then
+            echo "No PR associated with this workflow run (may be a fork PR or force-pushed away)"
+            exit 0
+          fi
+
+          LABELS=$(gh pr view "$PR" --repo "$REPO" --json labels --jq '.labels[].name')
+
+          # Don't promote if Dev Active is present — dev isn't done yet.
+          # When they remove Dev Active, on-unlabel will check CI and promote.
+          if echo "$LABELS" | grep -q "^Dev Active$"; then
+            echo "Dev Active present — skipping promotion (dev still working)"
+            exit 0
+          fi
+
+          # Only promote if Awaiting CI is present
+          if echo "$LABELS" | grep -q "^Awaiting CI$"; then
+            # Also clean up QA Invalidated if it lingered from a previous push
+            REMOVE="Awaiting CI"
+            if echo "$LABELS" | grep -q "^QA Invalidated$"; then
+              REMOVE="Awaiting CI,QA Invalidated"
+            fi
+            gh pr edit "$PR" --repo "$REPO" --remove-label "$REMOVE"
+            gh pr edit "$PR" --repo "$REPO" --add-label "Ready for QA"
+          fi
