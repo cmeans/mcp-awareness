@@ -2976,3 +2976,140 @@ def test_fallback_user_on_getpass_failure(monkeypatch):
     assert server_mod.DEFAULT_OWNER == "system"
     # Restore
     importlib.reload(server_mod)
+
+
+# ---------------------------------------------------------------------------
+# Date validation tests
+# ---------------------------------------------------------------------------
+
+
+class TestDateValidation:
+    @pytest.mark.anyio
+    async def test_get_alerts_malformed_since(self) -> None:
+        result = await server_mod.get_alerts(since="not-a-date")
+        parsed = json.loads(result)
+        assert "error" in parsed or parsed.get("status") == "error"
+        assert "date" in parsed.get("message", parsed.get("error", "")).lower()
+
+    @pytest.mark.anyio
+    async def test_get_knowledge_malformed_since(self) -> None:
+        result = await server_mod.get_knowledge(since="not-a-date")
+        parsed = json.loads(result)
+        assert "error" in parsed or parsed.get("status") == "error"
+
+    @pytest.mark.anyio
+    async def test_get_knowledge_malformed_until(self) -> None:
+        result = await server_mod.get_knowledge(until="2026-13-45")
+        parsed = json.loads(result)
+        assert "error" in parsed or parsed.get("status") == "error"
+
+    @pytest.mark.anyio
+    async def test_get_knowledge_malformed_created_after(self) -> None:
+        result = await server_mod.get_knowledge(created_after="bad")
+        parsed = json.loads(result)
+        assert "error" in parsed or parsed.get("status") == "error"
+
+    @pytest.mark.anyio
+    async def test_remind_malformed_deliver_at(self) -> None:
+        result = await server_mod.remind(
+            goal="test", source="test", tags=["test"], deliver_at="not-a-date"
+        )
+        parsed = json.loads(result)
+        assert "error" in parsed or parsed.get("status") == "error"
+
+    @pytest.mark.anyio
+    async def test_get_deleted_malformed_since(self) -> None:
+        result = await server_mod.get_deleted(since="not-a-date")
+        parsed = json.loads(result)
+        assert "error" in parsed or parsed.get("status") == "error"
+
+    @pytest.mark.anyio
+    async def test_semantic_search_malformed_since(self) -> None:
+        result = await server_mod.semantic_search(query="test", since="not-a-date")
+        parsed = json.loads(result)
+        assert "error" in parsed or parsed.get("status") == "error"
+
+    @pytest.mark.anyio
+    async def test_get_knowledge_malformed_created_before(self) -> None:
+        result = await server_mod.get_knowledge(created_before="nope")
+        parsed = json.loads(result)
+        assert parsed.get("status") == "error"
+        assert "date" in parsed["message"].lower()
+
+    @pytest.mark.anyio
+    async def test_get_reads_malformed_since(self) -> None:
+        result = await server_mod.get_reads(since="not-a-date")
+        parsed = json.loads(result)
+        assert parsed.get("status") == "error"
+        assert "date" in parsed["message"].lower()
+
+    @pytest.mark.anyio
+    async def test_get_actions_malformed_since(self) -> None:
+        result = await server_mod.get_actions(since="not-a-date")
+        parsed = json.loads(result)
+        assert parsed.get("status") == "error"
+        assert "date" in parsed["message"].lower()
+
+    @pytest.mark.anyio
+    async def test_get_unread_malformed_since(self) -> None:
+        result = await server_mod.get_unread(since="not-a-date")
+        parsed = json.loads(result)
+        assert parsed.get("status") == "error"
+        assert "date" in parsed["message"].lower()
+
+    @pytest.mark.anyio
+    async def test_get_activity_malformed_since(self) -> None:
+        result = await server_mod.get_activity(since="not-a-date")
+        parsed = json.loads(result)
+        assert parsed.get("status") == "error"
+        assert "date" in parsed["message"].lower()
+
+    @pytest.mark.anyio
+    async def test_semantic_search_malformed_since_with_provider(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Date validation in semantic_search requires a working embedding provider."""
+
+        class MockProvider:
+            model_name = "mock"
+            dimensions = 768
+
+            def embed(self, texts: list[str]) -> list[list[float]]:
+                return [[0.0] * 768 for _ in texts]
+
+            def is_available(self) -> bool:
+                return True
+
+        monkeypatch.setattr(server_mod, "_embedding_provider", MockProvider())
+        result = await server_mod.semantic_search(query="test", since="not-a-date")
+        parsed = json.loads(result)
+        assert parsed.get("status") == "error"
+        assert "date" in parsed["message"].lower()
+
+    @pytest.mark.anyio
+    async def test_semantic_search_malformed_until_with_provider(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Date validation for until in semantic_search requires a working embedding provider."""
+
+        class MockProvider:
+            model_name = "mock"
+            dimensions = 768
+
+            def embed(self, texts: list[str]) -> list[list[float]]:
+                return [[0.0] * 768 for _ in texts]
+
+            def is_available(self) -> bool:
+                return True
+
+        monkeypatch.setattr(server_mod, "_embedding_provider", MockProvider())
+        result = await server_mod.semantic_search(query="test", until="2026-99-99")
+        parsed = json.loads(result)
+        assert parsed.get("status") == "error"
+        assert "date" in parsed["message"].lower()
+
+    @pytest.mark.anyio
+    async def test_get_alerts_valid_date_still_works(self) -> None:
+        result = await server_mod.get_alerts(since="2026-03-30T00:00:00Z")
+        parsed = json.loads(result)
+        assert isinstance(parsed, list)
