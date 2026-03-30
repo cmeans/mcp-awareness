@@ -93,13 +93,61 @@ class HealthMiddleware:
         await self.app(scope, receive, send)
 
 
-class AuthMiddleware:
-    """Validate JWT Bearer token and set owner context."""
+class WellKnownMiddleware:
+    """Serve /.well-known/oauth-protected-resource (RFC 9728)."""
 
-    def __init__(self, app: ASGIApp, jwt_secret: str, algorithm: str = "HS256") -> None:
+    def __init__(
+        self,
+        app: ASGIApp,
+        oauth_issuer: str,
+        host: str,
+        port: int,
+        mount_path: str = "",
+    ) -> None:
+        self.app = app
+        self.oauth_issuer = oauth_issuer.rstrip("/")
+        self.host = host
+        self.port = port
+        self.mount_path = mount_path
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] == "http":
+            path = scope.get("path", "")
+            if path == "/.well-known/oauth-protected-resource":
+                metadata = {
+                    "resource": f"https://{self.host}:{self.port}{self.mount_path}/mcp",
+                    "authorization_servers": [self.oauth_issuer],
+                    "token_methods": ["Bearer"],
+                }
+                resp = JSONResponse(metadata)
+                await resp(scope, receive, send)
+                return
+        await self.app(scope, receive, send)
+
+
+class AuthMiddleware:
+    """Validate JWT Bearer token and set owner context.
+
+    Supports dual auth: self-signed JWTs (via shared secret) and OAuth provider
+    tokens (via JWKS). Self-signed is tried first; if it fails and an OAuth
+    validator is configured, the token is validated against the provider's keys.
+    """
+
+    def __init__(
+        self,
+        app: ASGIApp,
+        jwt_secret: str,
+        algorithm: str = "HS256",
+        oauth_validator: object | None = None,
+        auto_provision: bool = True,
+        resource_metadata_url: str = "",
+    ) -> None:
         self.app = app
         self.jwt_secret = jwt_secret
         self.algorithm = algorithm
+        self.oauth_validator = oauth_validator
+        self.auto_provision = auto_provision
+        self.resource_metadata_url = resource_metadata_url
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http":
@@ -107,8 +155,8 @@ class AuthMiddleware:
             return
 
         path = scope.get("path", "")
-        # Skip auth for health, favicon, and non-MCP paths
-        if path in ("/health", "/favicon.ico"):
+        # Skip auth for health, favicon, well-known, and non-MCP paths
+        if path in ("/health", "/favicon.ico") or path.startswith("/.well-known/"):
             await self.app(scope, receive, send)
             return
 
@@ -116,32 +164,23 @@ class AuthMiddleware:
         headers = dict(scope.get("headers", []))
         auth_header = headers.get(b"authorization", b"").decode()
         if not auth_header.startswith("Bearer "):
-            resp = JSONResponse(
-                {"error": "Missing or invalid Authorization header"}, status_code=401
-            )
+            resp = self._unauthorized("Missing or invalid Authorization header")
             await resp(scope, receive, send)
             return
 
         token = auth_header[7:]  # Strip "Bearer "
-        try:
-            import jwt
 
-            payload = jwt.decode(token, self.jwt_secret, algorithms=[self.algorithm])
-            owner_id: str | None = payload.get("sub")
-            if not owner_id:
-                resp = JSONResponse({"error": "JWT missing 'sub' claim"}, status_code=401)
-                await resp(scope, receive, send)
-                return
-        except Exception as exc:
-            # Handle both ExpiredSignatureError and InvalidTokenError
-            import jwt as jwt_mod
+        # Try self-signed JWT first
+        owner_id, error = self._try_self_signed(token)
 
-            if isinstance(exc, jwt_mod.ExpiredSignatureError):
-                resp = JSONResponse({"error": "Token expired"}, status_code=401)
-            elif isinstance(exc, jwt_mod.InvalidTokenError):
-                resp = JSONResponse({"error": "Invalid token"}, status_code=401)
-            else:
-                raise
+        # Fall back to OAuth provider validation
+        if owner_id is None and self.oauth_validator is not None:
+            owner_id = await self._try_oauth(token)
+            if owner_id is not None:
+                error = None
+
+        if owner_id is None:
+            resp = self._unauthorized(error or "Invalid token")
             await resp(scope, receive, send)
             return
 
@@ -153,3 +192,103 @@ class AuthMiddleware:
             await self.app(scope, receive, send)
         finally:
             _owner_ctx.reset(token_reset)
+
+    def _try_self_signed(self, token: str) -> tuple[str | None, str | None]:
+        """Validate a self-signed JWT (from mcp-awareness-token CLI).
+
+        Returns (owner_id, error_message). On success error is None.
+        On failure owner_id is None and error carries the reason.
+        """
+        if not self.jwt_secret:
+            return None, None
+        try:
+            import jwt
+
+            payload = jwt.decode(token, self.jwt_secret, algorithms=[self.algorithm])
+            owner_id: str | None = payload.get("sub")
+            if owner_id:
+                return owner_id, None
+            return None, "JWT missing 'sub' claim"
+        except Exception as exc:
+            import jwt as jwt_mod
+
+            if isinstance(exc, jwt_mod.ExpiredSignatureError):
+                return None, "Token expired"
+            if isinstance(exc, jwt_mod.InvalidTokenError):
+                return None, "Invalid token"
+            return None, None
+
+    async def _try_oauth(self, token: str) -> str | None:
+        """Validate an OAuth token against the external provider's JWKS."""
+        from .oauth import OAuthTokenValidator
+
+        validator: OAuthTokenValidator = self.oauth_validator  # type: ignore[assignment]
+        try:
+            claims = validator.validate(token)
+        except Exception:
+            return None
+
+        owner_id = claims["owner_id"]
+        oauth_subject = claims.get("oauth_subject")
+        oauth_issuer = claims.get("oauth_issuer")
+        email = claims.get("email")
+
+        # Resolve user identity: OAuth lookup → email link → auto-provision
+        resolved_id = self._resolve_user(
+            owner_id, email, claims.get("name"), oauth_subject, oauth_issuer
+        )
+
+        return resolved_id or owner_id
+
+    def _resolve_user(
+        self,
+        owner_id: str,
+        email: str | None,
+        display_name: str | None,
+        oauth_subject: str | None,
+        oauth_issuer: str | None,
+    ) -> str | None:
+        """Resolve OAuth token to a local user, linking or creating as needed.
+
+        Resolution order:
+        1. Look up by OAuth identity (issuer + subject) — already linked user
+        2. If email present, try to link to a pre-provisioned user by email
+        3. If auto_provision enabled, create a new user
+        4. Otherwise return None (use owner_id from token as-is)
+        """
+        try:
+            from .server import store
+
+            # 1. Already linked?
+            if oauth_issuer and oauth_subject:
+                existing = store.get_user_by_oauth(oauth_issuer, oauth_subject)
+                if existing:
+                    return str(existing["id"])
+
+            # 2. Pre-provisioned user with matching email? Link on first login.
+            if email and oauth_subject and oauth_issuer:
+                linked_id = store.link_oauth_identity(oauth_subject, oauth_issuer, email)
+                if linked_id:
+                    return str(linked_id)
+
+            # 3. Auto-provision new user
+            if self.auto_provision:
+                store.create_user_if_not_exists(
+                    owner_id, email, display_name, oauth_subject, oauth_issuer
+                )
+                return owner_id
+
+        except Exception:
+            # Don't fail the request if user resolution fails
+            pass
+
+        return None
+
+    def _unauthorized(self, message: str) -> JSONResponse:
+        """Build a 401 response with proper WWW-Authenticate header."""
+        headers: dict[str, str] = {}
+        if self.resource_metadata_url:
+            headers["WWW-Authenticate"] = f'Bearer resource_metadata="{self.resource_metadata_url}"'
+        else:
+            headers["WWW-Authenticate"] = "Bearer"
+        return JSONResponse({"error": message}, status_code=401, headers=headers)

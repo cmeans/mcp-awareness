@@ -334,7 +334,7 @@ class TestRunTransportWiring:
         mock_app = MagicMock()
         monkeypatch.setattr(server_mod.mcp, "streamable_http_app", lambda: mock_app)
 
-        with pytest.raises(ValueError, match="AWARENESS_JWT_SECRET is required"):
+        with pytest.raises(ValueError, match="AWARENESS_AUTH_REQUIRED=true requires"):
             server_mod._run()
 
 
@@ -528,11 +528,18 @@ class TestAuthMiddleware:
         async def noop_send(msg: dict[str, Any]) -> None:
             pass
 
-        with (
-            patch("jwt.decode", side_effect=RuntimeError("boom")),
-            pytest.raises(RuntimeError, match="boom"),
-        ):
-            await app(scope, noop_receive, noop_send)
+        sent: list[dict[str, Any]] = []
+
+        async def capture_send(msg: dict[str, Any]) -> None:
+            sent.append(msg)
+
+        with patch("jwt.decode", side_effect=RuntimeError("boom")):
+            await app(scope, noop_receive, capture_send)
+
+        # With dual auth, unexpected errors in self-signed validation
+        # fall through gracefully (returns 401, not a crash)
+        body = b"".join(m.get("body", b"") for m in sent if m["type"] == "http.response.body")
+        assert b"Invalid token" in body
 
 
 class TestServerAuthWiring:
@@ -552,7 +559,7 @@ class TestServerAuthWiring:
         mock_app = MagicMock()
         monkeypatch.setattr(server_mod.mcp, "streamable_http_app", lambda: mock_app)
 
-        with pytest.raises(ValueError, match="AWARENESS_JWT_SECRET is required"):
+        with pytest.raises(ValueError, match="AWARENESS_AUTH_REQUIRED=true requires"):
             server_mod._run()
 
     def test_http_no_mount_path_auth_required_wraps_with_auth_middleware(

@@ -16,10 +16,19 @@ CREATE TABLE IF NOT EXISTS users (
     display_name    TEXT,
     timezone        TEXT DEFAULT 'UTC',
     preferences     JSONB NOT NULL DEFAULT '{{}}'::jsonb,
+    oauth_subject   TEXT,
+    oauth_issuer    TEXT,
     created         TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated         TIMESTAMPTZ,
     deleted         TIMESTAMPTZ
 );
+/* Ensure OAuth columns exist on tables created before migration i4d5e6f7g8h9 */
+ALTER TABLE users ADD COLUMN IF NOT EXISTS oauth_subject TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS oauth_issuer TEXT;
+CREATE UNIQUE INDEX IF NOT EXISTS ix_users_oauth_identity
+    ON users (oauth_issuer, oauth_subject) WHERE oauth_issuer IS NOT NULL;
+CREATE INDEX IF NOT EXISTS ix_users_oauth_subject
+    ON users (oauth_subject) WHERE oauth_subject IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS entries (
     id       TEXT PRIMARY KEY,

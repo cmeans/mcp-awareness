@@ -1171,6 +1171,52 @@ class PostgresStore:
             (json.dumps([entry_id]),),
         )
 
+    # ------------------------------------------------------------------
+    # User operations (for OAuth auto-provisioning)
+    # ------------------------------------------------------------------
+
+    def get_user(self, user_id: str) -> dict[str, Any] | None:
+        """Look up a user by ID. Returns dict or None if not found."""
+        with self._pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
+            cur.execute(_load_sql("get_user"), (user_id,))
+            return cur.fetchone()
+
+    def create_user_if_not_exists(
+        self,
+        user_id: str,
+        email: str | None = None,
+        display_name: str | None = None,
+        oauth_subject: str | None = None,
+        oauth_issuer: str | None = None,
+    ) -> None:
+        """Auto-provision a user on first OAuth login. No-op if user exists."""
+        with self._pool.connection() as conn, conn.transaction(), conn.cursor() as cur:
+            cur.execute(
+                _load_sql("create_user_auto"),
+                (user_id, email, display_name, oauth_subject, oauth_issuer),
+            )
+
+    def get_user_by_oauth(self, oauth_issuer: str, oauth_subject: str) -> dict[str, Any] | None:
+        """Look up a user by OAuth identity. Returns dict or None."""
+        with self._pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
+            cur.execute(_load_sql("get_user_by_oauth"), (oauth_issuer, oauth_subject))
+            return cur.fetchone()
+
+    def link_oauth_identity(self, oauth_subject: str, oauth_issuer: str, email: str) -> str | None:
+        """Link an OAuth identity to a pre-provisioned user matched by email.
+
+        Returns the user ID if linked, None if no matching user found.
+        Only links if the user's oauth_subject is currently NULL (first-time link).
+        """
+        with (
+            self._pool.connection() as conn,
+            conn.transaction(),
+            conn.cursor(row_factory=dict_row) as cur,
+        ):
+            cur.execute(_load_sql("link_oauth_identity"), (oauth_subject, oauth_issuer, email))
+            row = cur.fetchone()
+            return str(row["id"]) if row else None
+
     def clear(self, owner_id: str) -> None:
         with self._pool.connection() as conn, conn.transaction(), conn.cursor() as cur:
             self._set_rls_context(cur, owner_id)

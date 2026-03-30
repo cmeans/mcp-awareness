@@ -80,6 +80,13 @@ AUTH_REQUIRED = os.environ.get("AWARENESS_AUTH_REQUIRED", "false").lower() == "t
 JWT_SECRET = os.environ.get("AWARENESS_JWT_SECRET", "")
 JWT_ALGORITHM = os.environ.get("AWARENESS_JWT_ALGORITHM", "HS256")
 
+# OAuth — external provider (WorkOS, Auth0, Cloudflare Access, Keycloak, etc.)
+OAUTH_ISSUER = os.environ.get("AWARENESS_OAUTH_ISSUER", "")
+OAUTH_AUDIENCE = os.environ.get("AWARENESS_OAUTH_AUDIENCE", "")
+OAUTH_JWKS_URI = os.environ.get("AWARENESS_OAUTH_JWKS_URI", "")
+OAUTH_USER_CLAIM = os.environ.get("AWARENESS_OAUTH_USER_CLAIM", "sub")
+OAUTH_AUTO_PROVISION = os.environ.get("AWARENESS_OAUTH_AUTO_PROVISION", "false").lower() == "true"
+
 # Embedding provider — optional, configured via env vars
 EMBEDDING_PROVIDER = os.environ.get("AWARENESS_EMBEDDING_PROVIDER", "")
 EMBEDDING_MODEL = os.environ.get("AWARENESS_EMBEDDING_MODEL", "nomic-embed-text")
@@ -332,24 +339,67 @@ def main() -> None:
         print("Shutdown requested — exiting.", flush=True)
 
 
+def _build_oauth_validator() -> object | None:
+    """Create an OAuthTokenValidator if an external issuer is configured."""
+    if not OAUTH_ISSUER:
+        return None
+    from mcp_awareness.oauth import OAuthTokenValidator
+
+    return OAuthTokenValidator(
+        issuer=OAUTH_ISSUER,
+        audience=OAUTH_AUDIENCE,
+        jwks_uri=OAUTH_JWKS_URI,
+        user_claim=OAUTH_USER_CLAIM,
+    )
+
+
+def _build_resource_metadata_url() -> str:
+    """Build the well-known resource metadata URL for WWW-Authenticate headers."""
+    if MOUNT_PATH:
+        return f"{MOUNT_PATH}/.well-known/oauth-protected-resource"
+    return "/.well-known/oauth-protected-resource"
+
+
+def _wrap_with_auth(app: Any) -> Any:
+    """Wrap an ASGI app with AuthMiddleware if auth is required."""
+    if not AUTH_REQUIRED:
+        return app
+
+    oauth_validator = _build_oauth_validator()
+    if not JWT_SECRET and not oauth_validator:
+        raise ValueError(
+            "AWARENESS_AUTH_REQUIRED=true requires either "
+            "AWARENESS_JWT_SECRET or AWARENESS_OAUTH_ISSUER (or both)"
+        )
+    from mcp_awareness.middleware import AuthMiddleware
+
+    return AuthMiddleware(
+        app,
+        jwt_secret=JWT_SECRET,
+        algorithm=JWT_ALGORITHM,
+        oauth_validator=oauth_validator,
+        auto_provision=OAUTH_AUTO_PROVISION,
+        resource_metadata_url=_build_resource_metadata_url(),
+    )
+
+
 def _run() -> None:
     if TRANSPORT == "streamable-http" and MOUNT_PATH:
         import uvicorn
         from starlette.types import ASGIApp as _ASGIApp
 
-        from mcp_awareness.middleware import SecretPathMiddleware
+        from mcp_awareness.middleware import (
+            SecretPathMiddleware,
+            WellKnownMiddleware,
+        )
 
         inner_app = mcp.streamable_http_app()
         app: _ASGIApp = SecretPathMiddleware(inner_app, MOUNT_PATH, _health_response)
 
-        if AUTH_REQUIRED:
-            if not JWT_SECRET:
-                raise ValueError(
-                    "AWARENESS_JWT_SECRET is required when AWARENESS_AUTH_REQUIRED=true"
-                )
-            from mcp_awareness.middleware import AuthMiddleware
+        if OAUTH_ISSUER:
+            app = WellKnownMiddleware(app, OAUTH_ISSUER, HOST, PORT, MOUNT_PATH)
 
-            app = AuthMiddleware(app, JWT_SECRET, JWT_ALGORITHM)
+        app = _wrap_with_auth(app)
 
         config = uvicorn.Config(app, host=HOST, port=PORT)
         server = uvicorn.Server(config)
@@ -363,16 +413,14 @@ def _run() -> None:
         from mcp_awareness.middleware import HealthMiddleware
 
         inner_app = mcp.streamable_http_app()
-        health_app = HealthMiddleware(inner_app, _health_response)
+        health_app: Any = HealthMiddleware(inner_app, _health_response)
 
-        if AUTH_REQUIRED:
-            if not JWT_SECRET:
-                raise ValueError(
-                    "AWARENESS_JWT_SECRET is required when AWARENESS_AUTH_REQUIRED=true"
-                )
-            from mcp_awareness.middleware import AuthMiddleware
+        if OAUTH_ISSUER:
+            from mcp_awareness.middleware import WellKnownMiddleware
 
-            health_app = AuthMiddleware(health_app, JWT_SECRET, JWT_ALGORITHM)  # type: ignore[assignment]
+            health_app = WellKnownMiddleware(health_app, OAUTH_ISSUER, HOST, PORT, MOUNT_PATH)
+
+        health_app = _wrap_with_auth(health_app)
 
         config = uvicorn.Config(health_app, host=HOST, port=PORT)
         server = uvicorn.Server(config)
