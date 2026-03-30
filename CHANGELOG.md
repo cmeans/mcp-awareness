@@ -40,6 +40,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **PR label automation**: added explicit `checks: read` permission
 - **PR label automation**: `on-ci-pass` now finds PRs from dependabot and other non-default branches by falling back to head branch search when the `pull_requests` array is empty
 
+### Documentation
+- **Auth setup guide** (`docs/auth-setup.md`): JWT authentication, OAuth 2.1, CLI tools reference, user provisioning, WorkOS walkthrough, known limitations
+- **README**: auth/OAuth env vars tables, CLI tools, security section rewritten (4-layer table), test count 383→490, removed stale "not yet implemented" auth line
+- **CLAUDE.md**: architecture section updated with middleware.py, oauth.py, cli.py, multi-tenant design decisions
+- **Deployment guide**: security section updated for JWT/OAuth, license footer fixed (Apache 2.0 → AGPL-3.0)
+- **All docs**: branded footer with logo, consistent copyright format
+
 ## [0.14.0] - 2026-03-28
 
 ### Changed

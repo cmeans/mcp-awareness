@@ -205,4 +205,4 @@ Each finding led to a prompt update. The current prompts reflect these lessons �
 
 ---
 
-*[mcp-awareness](https://github.com/cmeans/mcp-awareness) is open source under the [Apache 2.0 License](../LICENSE). Copyright (c) 2026 Chris Means.*
+Part of the [<img src="../docs/branding/awareness-logo-32.svg" alt="Awareness logo — a stylized eye with radiating signal lines" height="20"> Awareness](https://github.com/cmeans/mcp-awareness) ecosystem. © 2026 Chris Means
