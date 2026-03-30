@@ -102,24 +102,35 @@ class WellKnownMiddleware:
         app: ASGIApp,
         oauth_issuer: str,
         public_url: str = "",
+        mount_path: str = "",
         host: str = "localhost",
         port: int = 8420,
-        mount_path: str = "",
     ) -> None:
         self.app = app
         self.oauth_issuer = oauth_issuer.rstrip("/")
-        # Use explicit public URL if set, otherwise derive from host:port
-        if public_url:
-            self.resource_url = f"{public_url.rstrip('/')}{mount_path}/mcp"
-        else:
-            self.resource_url = f"https://{host}:{port}{mount_path}/mcp"
+        self.mount_path = mount_path
+        # Static resource URL if public_url is configured
+        self._static_resource_url = (
+            f"{public_url.rstrip('/')}{mount_path}/mcp" if public_url else ""
+        )
+
+    def _resource_url(self, scope: Scope) -> str:
+        """Derive the resource URL from config or request headers."""
+        if self._static_resource_url:
+            return self._static_resource_url
+        # Fallback: derive from Host header in the request
+        headers = dict(scope.get("headers", []))
+        host_header = headers.get(b"host", b"").decode()
+        if host_header:
+            return f"https://{host_header}{self.mount_path}/mcp"
+        return f"https://localhost{self.mount_path}/mcp"
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] == "http":
             path = scope.get("path", "")
             if path == "/.well-known/oauth-protected-resource":
                 metadata = {
-                    "resource": self.resource_url,
+                    "resource": self._resource_url(scope),
                     "authorization_servers": [self.oauth_issuer],
                     "token_methods": ["Bearer"],
                 }
