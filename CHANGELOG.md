@@ -40,6 +40,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **PR label automation**: added explicit `checks: read` permission
 - **PR label automation**: `on-ci-pass` now finds PRs from dependabot and other non-default branches by falling back to head branch search when the `pull_requests` array is empty
 
+### Security
+- **FORCE ROW LEVEL SECURITY**: RLS policies now enforced on table owner role — previously `ENABLE` without `FORCE` allowed the connection pool role to bypass all policies
+- **UPDATE SQL owner scoping**: `update_entry`, `upsert_alert_update`, `upsert_preference_update` now include `AND owner_id = %s` in WHERE clause — prevents cross-tenant updates
+- **OAuth canonical_email matching**: auto-provisioning and identity linking now use `canonical_email` (strips Gmail dots/+tags) — prevents duplicate accounts from email variants
+- **AuthMiddleware default**: `auto_provision` parameter defaults to `False` (was `True`) — prevents accidental auto-provisioning when instantiated directly
+
 ### Documentation
 - **Auth setup guide** (`docs/auth-setup.md`): JWT authentication, OAuth 2.1, CLI tools reference, user provisioning, WorkOS walkthrough, known limitations
 - **README**: auth/OAuth env vars tables, CLI tools, security section rewritten (4-layer table), test count 383→490, removed stale "not yet implemented" auth line

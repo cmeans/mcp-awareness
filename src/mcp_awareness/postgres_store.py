@@ -270,7 +270,7 @@ class PostgresStore:
                 self._set_rls_context(cur, owner_id)
                 cur.execute(
                     _load_sql("upsert_alert_update"),
-                    (now, json.dumps(e.tags), json.dumps(e.data), e.id),
+                    (now, json.dumps(e.tags), json.dumps(e.data), e.id, owner_id),
                 )
             return e
         entry = Entry(
@@ -307,7 +307,7 @@ class PostgresStore:
                 self._set_rls_context(cur, owner_id)
                 cur.execute(
                     _load_sql("upsert_preference_update"),
-                    (now, json.dumps(e.tags), json.dumps(e.data), e.id),
+                    (now, json.dumps(e.tags), json.dumps(e.data), e.id, owner_id),
                 )
             return e
         entry = Entry(
@@ -545,6 +545,7 @@ class PostgresStore:
                     json.dumps(entry.tags),
                     json.dumps(entry.data),
                     entry.id,
+                    owner_id,
                 ),
             )
         return entry
@@ -1190,10 +1191,13 @@ class PostgresStore:
         oauth_issuer: str | None = None,
     ) -> None:
         """Auto-provision a user on first OAuth login. No-op if user exists."""
+        from .helpers import canonical_email
+
+        canon = canonical_email(email) if email else None
         with self._pool.connection() as conn, conn.transaction(), conn.cursor() as cur:
             cur.execute(
                 _load_sql("create_user_auto"),
-                (user_id, email, display_name, oauth_subject, oauth_issuer),
+                (user_id, email, canon, display_name, oauth_subject, oauth_issuer),
             )
 
     def get_user_by_oauth(self, oauth_issuer: str, oauth_subject: str) -> dict[str, Any] | None:
@@ -1203,17 +1207,21 @@ class PostgresStore:
             return cur.fetchone()
 
     def link_oauth_identity(self, oauth_subject: str, oauth_issuer: str, email: str) -> str | None:
-        """Link an OAuth identity to a pre-provisioned user matched by email.
+        """Link an OAuth identity to a pre-provisioned user matched by canonical email.
 
         Returns the user ID if linked, None if no matching user found.
         Only links if the user's oauth_subject is currently NULL (first-time link).
+        Uses canonical_email for matching (handles Gmail dot/+tag variants).
         """
+        from .helpers import canonical_email
+
+        canon = canonical_email(email)
         with (
             self._pool.connection() as conn,
             conn.transaction(),
             conn.cursor(row_factory=dict_row) as cur,
         ):
-            cur.execute(_load_sql("link_oauth_identity"), (oauth_subject, oauth_issuer, email))
+            cur.execute(_load_sql("link_oauth_identity"), (oauth_subject, oauth_issuer, canon))
             row = cur.fetchone()
             return str(row["id"]) if row else None
 
