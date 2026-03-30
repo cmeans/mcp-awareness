@@ -1032,6 +1032,10 @@ async def semantic_search(
     Requires an embedding provider (AWARENESS_EMBEDDING_PROVIDER env var).
     mode: omit for full entries, 'list' for metadata only + similarity."""
     limit = max(1, min(limit, 100))
+    if since is not None and not since:
+        return json.dumps({"error": "since cannot be empty; omit or provide an ISO 8601 timestamp"})
+    if until is not None and not until:
+        return json.dumps({"error": "until cannot be empty; omit or provide an ISO 8601 timestamp"})
     et, et_err = _parse_entry_type(entry_type)
     if et_err:
         return json.dumps({"status": "error", "message": et_err})

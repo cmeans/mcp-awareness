@@ -1835,6 +1835,18 @@ class TestListModeAndSince:
         result = json.loads(await server_mod.get_deleted(since=""))
         assert "error" in result
 
+    @pytest.mark.anyio
+    async def test_semantic_search_empty_since_returns_error(self) -> None:
+        result = json.loads(await server_mod.semantic_search(query="test", since=""))
+        assert "error" in result
+        assert "since" in result["error"]
+
+    @pytest.mark.anyio
+    async def test_semantic_search_empty_until_returns_error(self) -> None:
+        result = json.loads(await server_mod.semantic_search(query="test", until=""))
+        assert "error" in result
+        assert "until" in result["error"]
+
 
 # ---------------------------------------------------------------------------
 # Read / action tracking tools
