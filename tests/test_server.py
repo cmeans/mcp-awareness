@@ -3029,7 +3029,6 @@ class TestDateValidation:
         parsed = json.loads(result)
         assert "error" in parsed or parsed.get("status") == "error"
 
-
     @pytest.mark.anyio
     async def test_get_knowledge_malformed_created_before(self) -> None:
         result = await server_mod.get_knowledge(created_before="nope")
