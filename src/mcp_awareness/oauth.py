@@ -90,7 +90,11 @@ class OAuthTokenValidator:
 
         result: dict[str, str] = {"owner_id": str(owner_id)}
 
-        # Extract optional identity fields for auto-provisioning
+        # Extract identity fields for auto-provisioning and lookup
+        if "sub" in payload:
+            result["oauth_subject"] = str(payload["sub"])
+        if "iss" in payload:
+            result["oauth_issuer"] = str(payload["iss"])
         if "email" in payload:
             result["email"] = str(payload["email"])
         if "name" in payload:

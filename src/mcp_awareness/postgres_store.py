@@ -1182,11 +1182,25 @@ class PostgresStore:
             return cur.fetchone()
 
     def create_user_if_not_exists(
-        self, user_id: str, email: str | None = None, display_name: str | None = None
+        self,
+        user_id: str,
+        email: str | None = None,
+        display_name: str | None = None,
+        oauth_subject: str | None = None,
+        oauth_issuer: str | None = None,
     ) -> None:
         """Auto-provision a user on first OAuth login. No-op if user exists."""
         with self._pool.connection() as conn, conn.transaction(), conn.cursor() as cur:
-            cur.execute(_load_sql("create_user_auto"), (user_id, email, display_name))
+            cur.execute(
+                _load_sql("create_user_auto"),
+                (user_id, email, display_name, oauth_subject, oauth_issuer),
+            )
+
+    def get_user_by_oauth(self, oauth_issuer: str, oauth_subject: str) -> dict[str, Any] | None:
+        """Look up a user by OAuth identity. Returns dict or None."""
+        with self._pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
+            cur.execute(_load_sql("get_user_by_oauth"), (oauth_issuer, oauth_subject))
+            return cur.fetchone()
 
     def clear(self, owner_id: str) -> None:
         with self._pool.connection() as conn, conn.transaction(), conn.cursor() as cur:

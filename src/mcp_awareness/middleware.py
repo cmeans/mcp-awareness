@@ -232,16 +232,31 @@ class AuthMiddleware:
 
         # Auto-provision user if enabled
         if self.auto_provision:
-            self._ensure_user(owner_id, claims.get("email"), claims.get("name"))
+            self._ensure_user(
+                owner_id,
+                claims.get("email"),
+                claims.get("name"),
+                claims.get("oauth_subject"),
+                claims.get("oauth_issuer"),
+            )
 
         return owner_id
 
-    def _ensure_user(self, user_id: str, email: str | None, display_name: str | None) -> None:
+    def _ensure_user(
+        self,
+        user_id: str,
+        email: str | None,
+        display_name: str | None,
+        oauth_subject: str | None,
+        oauth_issuer: str | None,
+    ) -> None:
         """Create user record on first OAuth login (if auto-provisioning enabled)."""
         try:
             from .server import store
 
-            store.create_user_if_not_exists(user_id, email, display_name)
+            store.create_user_if_not_exists(
+                user_id, email, display_name, oauth_subject, oauth_issuer
+            )
         except Exception:
             # Don't fail the request if auto-provisioning fails
             pass
