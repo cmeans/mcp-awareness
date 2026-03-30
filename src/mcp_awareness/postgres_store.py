@@ -68,7 +68,7 @@ class PostgresStore:
         self,
         dsn: str,
         min_pool: int = 2,
-        max_pool: int = 5,
+        max_pool: int = 10,
         embedding_dimensions: int = 768,
     ) -> None:
         self.dsn = dsn

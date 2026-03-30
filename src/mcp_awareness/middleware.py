@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import pathlib
 from collections.abc import Callable
 from typing import Any
@@ -134,6 +135,9 @@ class AuthMiddleware:
     Supports dual auth: self-signed JWTs (via shared secret) and OAuth provider
     tokens (via JWKS). Self-signed is tried first; if it fails and an OAuth
     validator is configured, the token is validated against the provider's keys.
+
+    Includes per-owner concurrency limiting to prevent a single aggressive
+    client from saturating the connection pool and DOSing other tenants.
     """
 
     def __init__(
@@ -144,6 +148,7 @@ class AuthMiddleware:
         oauth_validator: object | None = None,
         auto_provision: bool = False,
         resource_metadata_url: str = "",
+        max_concurrent_per_owner: int = 3,
     ) -> None:
         self.app = app
         self.jwt_secret = jwt_secret
@@ -151,6 +156,8 @@ class AuthMiddleware:
         self.oauth_validator = oauth_validator
         self.auto_provision = auto_provision
         self.resource_metadata_url = resource_metadata_url
+        self._max_concurrent = max_concurrent_per_owner
+        self._owner_semaphores: dict[str, asyncio.Semaphore] = {}
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http":
@@ -188,14 +195,26 @@ class AuthMiddleware:
             await resp(scope, receive, send)
             return
 
+        # Per-owner concurrency limit — prevents one client from DOSing others
+        sem = self._owner_semaphores.get(owner_id)
+        if sem is None:
+            sem = asyncio.Semaphore(self._max_concurrent)
+            self._owner_semaphores[owner_id] = sem
+
+        if not sem._value:  # All slots taken — reject immediately
+            resp = JSONResponse({"error": "Too many concurrent requests"}, status_code=429)
+            await resp(scope, receive, send)
+            return
+
         # Set owner context for downstream handlers
         from .server import _owner_ctx
 
-        token_reset = _owner_ctx.set(owner_id)
-        try:
-            await self.app(scope, receive, send)
-        finally:
-            _owner_ctx.reset(token_reset)
+        async with sem:
+            token_reset = _owner_ctx.set(owner_id)
+            try:
+                await self.app(scope, receive, send)
+            finally:
+                _owner_ctx.reset(token_reset)
 
     def _try_self_signed(self, token: str) -> tuple[str | None, str | None]:
         """Validate a self-signed JWT (from mcp-awareness-token CLI).

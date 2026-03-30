@@ -51,6 +51,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`AWARENESS_PUBLIC_URL`**: new env var for `/.well-known/oauth-protected-resource` resource URL — required for Cloudflare tunnel deployments where `0.0.0.0:8420` is not the public address
 - **docker-compose.yaml**: auth/OAuth env vars now passed through (AUTH_REQUIRED, JWT_SECRET, OAUTH_ISSUER, etc.)
 - **Dockerfile license**: corrected from `Apache-2.0` to `AGPL-3.0-or-later`
+- **Per-owner concurrency limit**: `AuthMiddleware` enforces max 3 concurrent requests per owner_id — prevents a single aggressive client from saturating the connection pool and DOSing other tenants (returns 429)
+- **Connection pool default**: bumped from 5 to 10 for multi-tenant deployments
 - **Sync DB I/O off event loop**: `_try_oauth` and `_resolve_user` now run in `asyncio.to_thread()` to avoid blocking the async event loop with sync psycopg calls
 
 ### Documentation
