@@ -351,6 +351,12 @@ def generate_briefing(store: Store, owner_id: str) -> dict[str, Any]:
     # Evaluate time-based intentions — fire pending intentions whose deliver_at has passed
     fired_intentions = store.get_fired_intentions(owner_id)
     if fired_intentions:
+        # Transition each matched intention from "pending" to "fired" so they
+        # don't fire again on subsequent briefing reads
+        for intention in fired_intentions:
+            store.update_intention_state(
+                owner_id, intention.id, "fired", reason="Delivered via briefing"
+            )
         briefing["fired_intentions"] = [
             {
                 "id": i.id,

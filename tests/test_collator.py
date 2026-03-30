@@ -842,6 +842,70 @@ class TestGenerateBriefing:
         assert briefing["evaluation"]["intentions_pending"] == 0
         assert "intention" in briefing["summary"].lower()
 
+    def test_fired_intention_transitions_to_fired_state(self, store):
+        """After generate_briefing, fired intentions transition from pending to fired."""
+        from datetime import timedelta
+
+        past = now_utc() - timedelta(hours=1)
+        intention_id = make_id()
+        store.add(
+            TEST_OWNER,
+            Entry(
+                id=intention_id,
+                type=EntryType.INTENTION,
+                source="personal",
+                tags=["errands"],
+                created=now_utc(),
+                expires=None,
+                data={
+                    "goal": "Pick up milk",
+                    "state": "pending",
+                    "deliver_at": past.isoformat(),
+                },
+            ),
+        )
+        # Before briefing: intention is pending
+        pending = store.get_intentions(TEST_OWNER, state="pending")
+        assert any(i.id == intention_id for i in pending)
+
+        generate_briefing(store, TEST_OWNER)
+
+        # After briefing: intention is no longer pending — it transitioned to fired
+        pending_after = store.get_intentions(TEST_OWNER, state="pending")
+        assert not any(i.id == intention_id for i in pending_after)
+        fired_after = store.get_intentions(TEST_OWNER, state="fired")
+        assert any(i.id == intention_id for i in fired_after)
+
+    def test_fired_intention_not_surfaced_on_second_briefing(self, store):
+        """Once an intention fires and transitions, it doesn't appear in subsequent briefings."""
+        from datetime import timedelta
+
+        past = now_utc() - timedelta(hours=1)
+        store.add(
+            TEST_OWNER,
+            Entry(
+                id=make_id(),
+                type=EntryType.INTENTION,
+                source="personal",
+                tags=["errands"],
+                created=now_utc(),
+                expires=None,
+                data={
+                    "goal": "Pick up milk",
+                    "state": "pending",
+                    "deliver_at": past.isoformat(),
+                },
+            ),
+        )
+        # First briefing fires the intention
+        briefing1 = generate_briefing(store, TEST_OWNER)
+        assert len(briefing1.get("fired_intentions", [])) == 1
+
+        # Second briefing should not fire it again
+        briefing2 = generate_briefing(store, TEST_OWNER)
+        assert briefing2.get("fired_intentions") is None
+        assert briefing2["evaluation"]["intentions_fired"] == 0
+
     def test_briefing_no_intentions_when_none_pending(self, store):
         """Briefing doesn't include intentions when none exist."""
         briefing = generate_briefing(store, TEST_OWNER)
