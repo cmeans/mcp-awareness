@@ -509,6 +509,53 @@ class TestAutoProvisionIntegration:
         assert user["email"] == "int@example.com"
 
 
+class TestAutoProvisionFailure:
+    """Verify _ensure_user swallows exceptions gracefully."""
+
+    @pytest.mark.anyio
+    async def test_ensure_user_exception_swallowed(self, monkeypatch: Any) -> None:
+        """Auto-provisioning failure must not block the request."""
+        import mcp_awareness.server as server_mod
+
+        broken_store = MagicMock()
+        broken_store.create_user_if_not_exists.side_effect = RuntimeError("db down")
+        monkeypatch.setattr(server_mod, "store", broken_store)
+
+        mock_oauth = MagicMock()
+        mock_oauth.validate.return_value = {
+            "owner_id": "failing-user",
+            "oauth_subject": "sub",
+            "oauth_issuer": TEST_ISSUER,
+        }
+
+        called_with_owner: list[str] = []
+
+        async def inner_app(scope: Any, receive: Any, send: Any) -> None:
+            from mcp_awareness.server import _owner_ctx
+
+            called_with_owner.append(_owner_ctx.get())
+
+        app = AuthMiddleware(
+            inner_app, jwt_secret="", oauth_validator=mock_oauth, auto_provision=True
+        )
+        scope = {
+            "type": "http",
+            "path": "/mcp",
+            "method": "POST",
+            "headers": [(b"authorization", b"Bearer token")],
+        }
+
+        async def noop_receive() -> dict[str, Any]:
+            return {"type": "http.request", "body": b""}
+
+        async def noop_send(msg: dict[str, Any]) -> None:
+            pass
+
+        await app(scope, noop_receive, noop_send)
+        # Request should succeed despite provisioning failure
+        assert called_with_owner == ["failing-user"]
+
+
 class TestServerWiring:
     def test_build_oauth_validator_returns_none_without_issuer(self) -> None:
         """No OAuth validator when OAUTH_ISSUER is empty."""
