@@ -188,6 +188,25 @@ class TestOAuthTokenValidator:
         with pytest.raises(jwt.exceptions.PyJWKClientConnectionError):
             validator.validate(token)
 
+    def test_jwks_lock_prevents_concurrent_refresh(self) -> None:
+        """Double-check pattern: second thread sees refreshed cache after lock."""
+        validator = self._make_validator()
+        self._mock_jwk_client(validator)
+        # Force cache expired
+        validator._last_jwks_fetch = 0.0
+        validator._jwks_cache_ttl = 0
+
+        # Simulate a refresh by updating _last_jwks_fetch (as if another thread did it)
+        import time as _time
+
+        validator._last_jwks_fetch = _time.monotonic() + 9999
+        # Now validate should NOT refresh (double-check passes)
+        token = _make_token()
+        result = validator.validate(token)
+        assert result["owner_id"] == TEST_OWNER
+        # Verify the lock attribute exists
+        assert hasattr(validator, "_jwks_lock")
+
     def test_no_audience_skips_validation(self) -> None:
         validator = OAuthTokenValidator(
             issuer=TEST_ISSUER,

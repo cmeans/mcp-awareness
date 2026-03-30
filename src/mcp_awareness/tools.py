@@ -967,6 +967,7 @@ async def semantic_search(
     Returns entries sorted by relevance with similarity scores.
     Requires an embedding provider (AWARENESS_EMBEDDING_PROVIDER env var).
     mode: omit for full entries, 'list' for metadata only + similarity."""
+    limit = max(1, min(limit, 100))
     et, et_err = _parse_entry_type(entry_type)
     if et_err:
         return json.dumps({"status": "error", "message": et_err})

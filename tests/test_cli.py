@@ -533,6 +533,7 @@ class TestUserExport:
         data = json.loads(output)
         assert data["user_id"] == "export-user"
         assert data["user"]["email"] == "export@example.com"
+        assert "password_hash" not in data["user"]
         assert "entries" in data
         assert "reads" in data
         assert "actions" in data

@@ -42,6 +42,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 - **Auth exception logging**: `_try_oauth` and `_resolve_user` now log warnings on failure instead of silently swallowing exceptions — operators get visibility into OAuth/user-resolution errors
+- **Password hash excluded from GDPR export**: `mcp-awareness-user export` now uses explicit column list instead of `SELECT *` — password hashes are no longer included in export output
+- **Semantic search limit clamped**: `semantic_search` limit parameter now clamped to 1–100 range, preventing unbounded result sets
+- **JWKS cache thread-safe**: OAuth token validator now uses a threading lock with double-check pattern to prevent thundering herd on cache refresh
+- **DDL uses `psycopg.sql.Literal`**: default owner value in `CREATE TABLE` DDL now uses proper SQL escaping via `psycopg.sql` instead of manual string replacement
 - **FORCE ROW LEVEL SECURITY**: RLS policies now enforced on table owner role — previously `ENABLE` without `FORCE` allowed the connection pool role to bypass all policies
 - **UPDATE SQL owner scoping**: `update_entry`, `upsert_alert_update`, `upsert_preference_update` now include `AND owner_id = %s` in WHERE clause — prevents cross-tenant updates
 - **OAuth canonical_email matching**: auto-provisioning and identity linking now use `canonical_email` (strips Gmail dots/+tags) — prevents duplicate accounts from email variants
