@@ -268,10 +268,11 @@ _last_prompt_sync: float = 0.0
 def _sync_custom_prompts(*, force: bool = False) -> None:
     """Sync user-defined prompts from the store into the FastMCP registry.
 
-    Uses DEFAULT_OWNER (not the request-scoped owner) because prompts are
-    global server config, not per-user data.  In multi-tenant deployments,
-    all users see the default owner's prompts.  Per-user prompt sync would
-    require FastMCP to support request-scoped prompt registration.
+    Uses DEFAULT_OWNER (not the request-scoped owner) because this syncs
+    prompt *names* into FastMCP's global registry — it controls which
+    prompts appear in the list, not their content.  Prompt content is
+    per-user: each prompt handler queries the store with the request-scoped
+    owner_id (e.g., agent_instructions returns the calling user's entries).
 
     Debounced: skips the DB query if called again within
     ``_PROMPT_SYNC_INTERVAL`` seconds (default 60).  Pass ``force=True``
