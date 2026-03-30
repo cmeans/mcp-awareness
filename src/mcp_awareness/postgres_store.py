@@ -188,7 +188,7 @@ class PostgresStore:
                 now = datetime.now(timezone.utc)
                 cur.execute(_load_sql("cleanup_expired"), (now,))
         except Exception as exc:
-            print(f"[awareness] cleanup failed: {type(exc).__name__}: {exc}")
+            logger.error("Cleanup failed: %s: %s", type(exc).__name__, exc)
 
     def _query_entries(
         self,
