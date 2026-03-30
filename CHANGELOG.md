@@ -63,7 +63,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Documentation
 - **Auth setup guide** (`docs/auth-setup.md`): JWT authentication, OAuth 2.1, CLI tools reference, user provisioning, WorkOS walkthrough, known limitations
 - **README**: auth/OAuth env vars tables, CLI tools, security section rewritten (4-layer table), test count 383→490, removed stale "not yet implemented" auth line
-- **CLAUDE.md**: architecture section updated with middleware.py, oauth.py, cli.py, multi-tenant design decisions
+- **CLAUDE.md**: architecture file tree updated with all 16 modules (added tools.py, resources.py, prompts.py, helpers.py, migrate.py, instructions.md, sql/), server.py description corrected, mcp-awareness-migrate CLI added
 - **Deployment guide**: security section updated for JWT/OAuth, license footer fixed (Apache 2.0 → AGPL-3.0)
 - **All docs**: branded footer with logo, consistent copyright format
 
