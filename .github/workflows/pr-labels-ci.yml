@@ -19,10 +19,14 @@ name: PR Label Automation (CI)
 # Handles label transitions when CI completes (pass or fail).
 # Split from pr-labels.yml because workflow_run fires on every CI
 # completion (including merges to main), which caused noisy failures
-# when the job couldn't find an associated PR.
+# when there was no associated PR.
 #
 # NOTE: References the CI workflow by name ("CI").
 # If the CI workflow in ci.yml is ever renamed, update the name here too.
+#
+# LIMITATION: workflow_run triggers always run from the default branch
+# (main), not the PR branch. Changes to this file cannot be tested
+# on a PR — they take effect only after merge.
 on:
   workflow_run:
     workflows: [CI]
@@ -33,7 +37,8 @@ permissions:
   checks: read
 
 jobs:
-  # When CI passes, promote from Awaiting CI to Ready for QA.
+  # When CI passes on a PR branch, promote from Awaiting CI to Ready for QA.
+  # Skips if Dev Active is present (dev isn't done yet).
   on-ci-pass:
     if: >-
       github.event.workflow_run.conclusion == 'success'
@@ -47,15 +52,15 @@ jobs:
         run: |
           REPO=${{ github.repository }}
 
-          # Get the PR number from the workflow run.
-          # This can 404 after a force-push (the old commit's run is orphaned).
-          # Capture exit code separately so a 404 body doesn't leak into $PR.
+          # Look up the associated PR.
+          # The API can 404 after a force-push (orphaned run).
+          # Capture output only on success so 404 body doesn't leak into $PR.
           PR=""
-          API_OUT=$(gh api repos/$REPO/actions/runs/${{ github.event.workflow_run.id }}/pull_requests \
+          API_OUT=$(gh api "repos/$REPO/actions/runs/${{ github.event.workflow_run.id }}/pull_requests" \
             --jq '.[0].number // empty' 2>&1) && PR="$API_OUT" || true
 
-          # Fallback: pull_requests array is empty for dependabot and other
-          # non-default-branch PRs. Search by head branch instead.
+          # Fallback: pull_requests array is empty for dependabot PRs.
+          # Search by head branch instead.
           if [ -z "$PR" ]; then
             HEAD_BRANCH=${{ github.event.workflow_run.head_branch }}
             PR=$(gh pr list --repo "$REPO" --head "$HEAD_BRANCH" --state open \
@@ -63,31 +68,31 @@ jobs:
           fi
 
           if [ -z "$PR" ]; then
-            echo "No PR associated with this workflow run (may be a fork PR or force-pushed away)"
+            echo "No PR associated with this workflow run — exiting"
             exit 0
           fi
 
           LABELS=$(gh pr view "$PR" --repo "$REPO" --json labels --jq '.labels[].name')
 
-          # Don't promote if Dev Active is present — dev isn't done yet.
-          # When they remove Dev Active, on-unlabel will check CI and promote.
+          # Dev Active means dev isn't done — don't promote.
+          # on-unlabel will handle promotion when Dev Active is removed.
           if echo "$LABELS" | grep -q "^Dev Active$"; then
-            echo "Dev Active present — skipping promotion (dev still working)"
+            echo "Dev Active present — skipping promotion"
             exit 0
           fi
 
-          # Only promote if Awaiting CI is present
+          # Promote if Awaiting CI is present
           if echo "$LABELS" | grep -q "^Awaiting CI$"; then
-            # Also clean up QA Invalidated if it lingered from a previous push
             REMOVE="Awaiting CI"
-            if echo "$LABELS" | grep -q "^QA Invalidated$"; then
-              REMOVE="Awaiting CI,QA Invalidated"
+            if echo "$LABELS" | grep -q "^CI Failed$"; then
+              REMOVE="Awaiting CI,CI Failed"
             fi
             gh pr edit "$PR" --repo "$REPO" --remove-label "$REMOVE"
             gh pr edit "$PR" --repo "$REPO" --add-label "Ready for QA"
           fi
 
-  # When CI fails, move from Awaiting CI back to Dev Active.
+  # When CI fails on a PR branch, set CI Failed.
+  # Skips if Dev Active is present (dev is already working).
   on-ci-fail:
     if: >-
       github.event.workflow_run.conclusion == 'failure'
@@ -95,14 +100,14 @@ jobs:
       && github.event.workflow_run.head_branch != github.event.repository.default_branch
     runs-on: ubuntu-latest
     steps:
-      - name: Restore Dev Active on CI failure
+      - name: Set CI Failed
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           REPO=${{ github.repository }}
 
           PR=""
-          API_OUT=$(gh api repos/$REPO/actions/runs/${{ github.event.workflow_run.id }}/pull_requests \
+          API_OUT=$(gh api "repos/$REPO/actions/runs/${{ github.event.workflow_run.id }}/pull_requests" \
             --jq '.[0].number // empty' 2>&1) && PR="$API_OUT" || true
 
           if [ -z "$PR" ]; then
@@ -112,14 +117,20 @@ jobs:
           fi
 
           if [ -z "$PR" ]; then
-            echo "No PR associated with this workflow run"
+            echo "No PR associated with this workflow run — exiting"
             exit 0
           fi
 
           LABELS=$(gh pr view "$PR" --repo "$REPO" --json labels --jq '.labels[].name')
 
-          # Only restore Dev Active if Awaiting CI is present (normal flow)
+          # Dev Active means dev is already working — don't add CI Failed
+          if echo "$LABELS" | grep -q "^Dev Active$"; then
+            echo "Dev Active present — skipping CI Failed"
+            exit 0
+          fi
+
+          # Set CI Failed if Awaiting CI is present (normal flow)
           if echo "$LABELS" | grep -q "^Awaiting CI$"; then
             gh pr edit "$PR" --repo "$REPO" --remove-label "Awaiting CI"
-            gh pr edit "$PR" --repo "$REPO" --add-label "Dev Active"
+            gh pr edit "$PR" --repo "$REPO" --add-label "CI Failed"
           fi
