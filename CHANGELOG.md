@@ -16,6 +16,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Custom prompt sync uses DEFAULT_OWNER**: `_sync_custom_prompts` now queries `DEFAULT_OWNER` instead of the request-scoped `_owner_id()`, preventing User A's prompt sync from leaking into User B's prompt registry in multi-tenant deployments (MEDIUM #14)
 - **Custom prompt sync debounce**: `_sync_custom_prompts` now skips the DB query if called again within 60 seconds, avoiding a round-trip on every `agent_instructions` invocation (MEDIUM #15)
 
+### Changed
+- **Cleanup logging**: replaced `print()` in `_do_cleanup` with `logger.error()` to use the module's logging infrastructure (MEDIUM #6)
+
 ### Added
 - **OAuth 2.1 resource server**: provider-agnostic JWKS-based token validation for external OAuth providers (WorkOS, Auth0, Cloudflare Access, Keycloak, etc.)
 - **Dual auth**: self-signed JWTs (via CLI) and OAuth provider tokens both accepted — OAuth for interactive clients, self-signed for edge providers/scripts

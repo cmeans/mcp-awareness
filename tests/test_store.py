@@ -601,15 +601,18 @@ def test_get_deleted_pagination(store):
 # ------------------------------------------------------------------
 
 
-def test_do_cleanup_logs_errors(store, capsys):
-    """_do_cleanup prints error instead of silently swallowing."""
+def test_do_cleanup_logs_errors(store, caplog):
+    """_do_cleanup logs error instead of silently swallowing."""
+    import logging
     from unittest.mock import patch
 
     # Mock pool.connection to raise an error
-    with patch.object(store._pool, "connection", side_effect=Exception("test error")):
+    with (
+        caplog.at_level(logging.ERROR, logger="mcp_awareness.postgres_store"),
+        patch.object(store._pool, "connection", side_effect=Exception("test error")),
+    ):
         store._do_cleanup()
-    captured = capsys.readouterr()
-    assert "[awareness] cleanup failed:" in captured.out
+    assert "Cleanup failed: Exception: test error" in caplog.text
 
 
 # ------------------------------------------------------------------
