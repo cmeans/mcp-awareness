@@ -256,6 +256,35 @@ class TestWellKnownMiddleware:
         assert called
 
     @pytest.mark.anyio
+    async def test_host_header_fallback(self) -> None:
+        """Without public_url, resource URL is derived from Host header."""
+
+        async def inner_app(scope: Any, receive: Any, send: Any) -> None:
+            pass
+
+        app = WellKnownMiddleware(inner_app, TEST_ISSUER)
+        scope = {
+            "type": "http",
+            "path": "/.well-known/oauth-protected-resource",
+            "method": "GET",
+            "headers": [(b"host", b"mcpawareness.com")],
+        }
+
+        sent: list[dict[str, Any]] = []
+
+        async def noop_receive() -> dict[str, Any]:
+            return {"type": "http.request", "body": b""}
+
+        async def capture_send(msg: dict[str, Any]) -> None:
+            sent.append(msg)
+
+        await app(scope, noop_receive, capture_send)
+
+        body = b"".join(m.get("body", b"") for m in sent if m["type"] == "http.response.body")
+        data = json.loads(body)
+        assert data["resource"] == "https://mcpawareness.com/mcp"
+
+    @pytest.mark.anyio
     async def test_public_url_used_in_metadata(self) -> None:
         """When public_url is set, resource URL uses it instead of host:port."""
 
@@ -283,6 +312,69 @@ class TestWellKnownMiddleware:
         body = b"".join(m.get("body", b"") for m in sent if m["type"] == "http.response.body")
         data = json.loads(body)
         assert data["resource"] == "https://mcpawareness.com/mcp"
+
+
+# ---------------------------------------------------------------------------
+# Per-owner concurrency limit tests
+# ---------------------------------------------------------------------------
+
+
+class TestConcurrencyLimit:
+    @pytest.mark.anyio
+    async def test_429_when_slots_exhausted(self) -> None:
+        """Returns 429 when all per-owner concurrency slots are taken."""
+        import asyncio as _asyncio
+
+        secret = "test-secret-at-least-32-chars-long!"
+        token = jwt.encode({"sub": "busy-user"}, secret, algorithm="HS256")
+
+        barrier = _asyncio.Event()
+
+        async def slow_app(scope: Any, receive: Any, send: Any) -> None:
+            await barrier.wait()  # Block until released
+
+        app = AuthMiddleware(slow_app, jwt_secret=secret, max_concurrent_per_owner=1)
+
+        scope = {
+            "type": "http",
+            "path": "/mcp",
+            "method": "POST",
+            "headers": [(b"authorization", f"Bearer {token}".encode())],
+        }
+
+        async def noop_receive() -> dict[str, Any]:
+            return {"type": "http.request", "body": b""}
+
+        # First request — takes the only slot
+        first_done = _asyncio.Event()
+
+        async def first_request() -> None:
+            async def noop_send(msg: dict[str, Any]) -> None:
+                pass
+
+            await app(scope, noop_receive, noop_send)
+            first_done.set()
+
+        task = _asyncio.create_task(first_request())
+        await _asyncio.sleep(0.05)  # Let first request acquire semaphore
+
+        # Second request — should get 429
+        sent: list[dict[str, Any]] = []
+
+        async def capture_send(msg: dict[str, Any]) -> None:
+            sent.append(msg)
+
+        await app(scope, noop_receive, capture_send)
+
+        response_start = next(m for m in sent if m["type"] == "http.response.start")
+        assert response_start["status"] == 429
+
+        body = b"".join(m.get("body", b"") for m in sent if m["type"] == "http.response.body")
+        assert b"Too many concurrent requests" in body
+
+        # Release the first request
+        barrier.set()
+        await task
 
 
 # ---------------------------------------------------------------------------
