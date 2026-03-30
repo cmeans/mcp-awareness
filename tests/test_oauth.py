@@ -183,7 +183,7 @@ class TestOAuthTokenValidator:
 
 
 class TestWellKnownMiddleware:
-    @pytest.mark.asyncio(loop_scope="function")
+    @pytest.mark.asyncio
     async def test_serves_protected_resource_metadata(self) -> None:
         async def inner_app(scope: Any, receive: Any, send: Any) -> None:
             pass
@@ -212,7 +212,7 @@ class TestWellKnownMiddleware:
         assert data["token_methods"] == ["Bearer"]
         assert "/mcp" in data["resource"]
 
-    @pytest.mark.asyncio(loop_scope="function")
+    @pytest.mark.asyncio
     async def test_passes_through_other_paths(self) -> None:
         called = False
 
@@ -239,7 +239,7 @@ class TestWellKnownMiddleware:
 
 
 class TestDualAuth:
-    @pytest.mark.asyncio(loop_scope="function")
+    @pytest.mark.asyncio
     async def test_self_signed_jwt_still_works(self) -> None:
         """Existing self-signed JWT auth continues to work with OAuth configured."""
         secret = "test-secret-at-least-32-chars-long!"
@@ -273,7 +273,7 @@ class TestDualAuth:
         # OAuth validator should NOT be called when self-signed JWT succeeds
         mock_oauth.validate.assert_not_called()
 
-    @pytest.mark.asyncio(loop_scope="function")
+    @pytest.mark.asyncio
     async def test_oauth_fallback_when_self_signed_fails(self) -> None:
         """When self-signed JWT fails, falls back to OAuth validation."""
         oauth_token = "oauth-token-not-valid-as-self-signed"
@@ -315,7 +315,7 @@ class TestDualAuth:
         assert called_with_owner == ["oauth-user"]
         mock_oauth.validate.assert_called_once_with(oauth_token)
 
-    @pytest.mark.asyncio(loop_scope="function")
+    @pytest.mark.asyncio
     async def test_well_known_bypasses_auth(self) -> None:
         """/.well-known/ paths should not require authentication."""
         sent: list[dict[str, Any]] = []
@@ -343,7 +343,7 @@ class TestDualAuth:
         status_codes = [m.get("status") for m in sent if m["type"] == "http.response.start"]
         assert 401 not in status_codes
 
-    @pytest.mark.asyncio(loop_scope="function")
+    @pytest.mark.asyncio
     async def test_401_includes_www_authenticate(self) -> None:
         """401 responses include WWW-Authenticate with resource_metadata URL."""
         sent: list[dict[str, Any]] = []
