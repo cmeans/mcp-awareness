@@ -25,7 +25,6 @@ from mcp_awareness.schema import (
     now_utc,
     parse_iso,
     severity_rank,
-    validate_entry_data,
 )
 
 
@@ -209,33 +208,6 @@ def test_severity_rank():
     assert severity_rank("critical") > severity_rank("warning")
     assert severity_rank("warning") > severity_rank("info")
     assert severity_rank("unknown") == -1
-
-
-def test_validate_entry_data_valid():
-    errors = validate_entry_data({"type": "status", "source": "s", "data": {}})
-    assert errors == []
-
-
-def test_validate_entry_data_missing_fields():
-    errors = validate_entry_data({})
-    assert len(errors) == 2
-    assert any("type" in e for e in errors)
-    assert any("source" in e for e in errors)
-
-
-def test_validate_entry_data_invalid_type():
-    errors = validate_entry_data({"type": "bogus", "source": "s"})
-    assert any("Invalid type" in e for e in errors)
-
-
-def test_validate_entry_data_bad_data_field():
-    errors = validate_entry_data({"type": "status", "source": "s", "data": "string"})
-    assert any("dict" in e for e in errors)
-
-
-def test_validate_entry_data_bad_tags():
-    errors = validate_entry_data({"type": "status", "source": "s", "tags": "string"})
-    assert any("list" in e for e in errors)
 
 
 # ------------------------------------------------------------------
