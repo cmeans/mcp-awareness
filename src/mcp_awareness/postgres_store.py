@@ -1026,7 +1026,7 @@ class PostgresStore:
             self._set_rls_context(cur, owner_id)
             cur.execute(
                 _load_sql("update_intention_state"),
-                (now, json.dumps(entry.data), entry.id),
+                (now, json.dumps(entry.data), entry.id, owner_id),
             )
         return entry
 

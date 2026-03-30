@@ -1369,6 +1369,23 @@ def test_update_intention_state_wrong_type(store):
     assert store.update_intention_state(TEST_OWNER, entry.id, "fired") is None
 
 
+def test_update_intention_state_wrong_owner(store):
+    """update_intention_state rejects updates from a different owner."""
+    now = now_utc()
+    entry = Entry(
+        id=make_id(),
+        type=EntryType.INTENTION,
+        source="test",
+        tags=[],
+        created=now,
+        expires=None,
+        data={"goal": "test goal", "state": "pending"},
+    )
+    store.add(TEST_OWNER, entry)
+    result = store.update_intention_state("wrong-owner", entry.id, "fired")
+    assert result is None
+
+
 def test_get_fired_intentions(store):
     """get_fired_intentions returns pending intentions with past deliver_at."""
     from datetime import timedelta
