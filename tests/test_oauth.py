@@ -458,6 +458,57 @@ class TestDualAuth:
 # ---------------------------------------------------------------------------
 
 
+class TestAutoProvisionIntegration:
+    """Integration test: middleware auto-provision with a real store."""
+
+    @pytest.mark.anyio
+    async def test_ensure_user_creates_record(self, store: Any, monkeypatch: Any) -> None:
+        """_ensure_user calls store.create_user_if_not_exists through the server module."""
+        import mcp_awareness.server as server_mod
+
+        # Point the middleware at our test store
+        monkeypatch.setattr(server_mod, "store", store)
+
+        async def inner_app(scope: Any, receive: Any, send: Any) -> None:
+            pass
+
+        mock_oauth = MagicMock()
+        mock_oauth.validate.return_value = {
+            "owner_id": "integration-user",
+            "email": "int@example.com",
+            "name": "Integration",
+            "oauth_subject": "int-sub",
+            "oauth_issuer": TEST_ISSUER,
+        }
+
+        app = AuthMiddleware(
+            inner_app,
+            jwt_secret="",
+            oauth_validator=mock_oauth,
+            auto_provision=True,
+        )
+
+        scope = {
+            "type": "http",
+            "path": "/mcp",
+            "method": "POST",
+            "headers": [(b"authorization", b"Bearer oauth-token")],
+        }
+
+        async def noop_receive() -> dict[str, Any]:
+            return {"type": "http.request", "body": b""}
+
+        async def noop_send(msg: dict[str, Any]) -> None:
+            pass
+
+        await app(scope, noop_receive, noop_send)
+
+        # Verify user was created in the real store
+        user = store.get_user("integration-user")
+        assert user is not None
+        assert user["email"] == "int@example.com"
+
+
 class TestServerWiring:
     def test_build_oauth_validator_returns_none_without_issuer(self) -> None:
         """No OAuth validator when OAUTH_ISSUER is empty."""
@@ -469,6 +520,29 @@ class TestServerWiring:
             assert server_mod._build_oauth_validator() is None
         finally:
             server_mod.OAUTH_ISSUER = original
+
+    def test_wrap_with_auth_uses_oauth_when_issuer_set(self) -> None:
+        """_wrap_with_auth creates AuthMiddleware with OAuth validator when issuer is set."""
+        from mcp_awareness import server as server_mod
+
+        orig_issuer = server_mod.OAUTH_ISSUER
+        orig_required = server_mod.AUTH_REQUIRED
+        orig_secret = server_mod.JWT_SECRET
+        try:
+            server_mod.OAUTH_ISSUER = TEST_ISSUER
+            server_mod.AUTH_REQUIRED = True
+            server_mod.JWT_SECRET = ""  # No self-signed — OAuth only
+
+            async def dummy(scope: Any, receive: Any, send: Any) -> None:
+                pass
+
+            wrapped = server_mod._wrap_with_auth(dummy)
+            assert isinstance(wrapped, AuthMiddleware)
+            assert wrapped.oauth_validator is not None
+        finally:
+            server_mod.OAUTH_ISSUER = orig_issuer
+            server_mod.AUTH_REQUIRED = orig_required
+            server_mod.JWT_SECRET = orig_secret
 
     def test_build_oauth_validator_returns_validator_with_issuer(self) -> None:
         """OAuth validator created when OAUTH_ISSUER is set."""
