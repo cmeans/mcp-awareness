@@ -22,6 +22,25 @@ Defines the EmbeddingProvider protocol and implementations:
 
 Also provides compose_embedding_text() for building the text representation
 of an entry that gets embedded.
+
+Hash stability
+--------------
+``text_hash()`` computes a SHA-256 digest of the string returned by
+``compose_embedding_text()``.  The hash is stored alongside each embedding
+in the ``embeddings`` table and compared on subsequent writes to decide
+whether re-embedding is needed.
+
+**Any change to ``compose_embedding_text()``** — new fields, reordered
+fields, different separators — changes the composed text for every entry
+and therefore invalidates every stored hash.  The background embedding
+worker will detect the mismatch and re-embed affected entries on its next
+cycle.
+
+This is intentional: embeddings must always reflect the current composition
+logic.  There is no hash versioning scheme; staleness is detected purely
+by comparing the stored hash against a freshly computed one.  If you modify
+``compose_embedding_text()``, expect a one-time re-embedding wave across
+all entries the next time the background worker runs.
 """
 
 from __future__ import annotations
@@ -148,6 +167,12 @@ def compose_embedding_text(entry: Entry) -> str:
 
     Combines source, tags, and type-specific content fields into a single
     string that captures the semantic meaning of the entry.
+
+    .. warning::
+
+       Changing this function's output format invalidates all stored
+       ``text_hash`` values, triggering a mass re-embedding on the next
+       background cycle.  See the module docstring for details.
     """
     parts: list[str] = []
     parts.append(f"type: {entry.type.value}")
@@ -171,7 +196,12 @@ def compose_embedding_text(entry: Entry) -> str:
 
 
 def text_hash(text: str) -> str:
-    """SHA-256 hash of the text, used to detect stale embeddings."""
+    """SHA-256 hash of the text, used to detect stale embeddings.
+
+    The hash is stored in the ``embeddings.text_hash`` column and compared
+    against a freshly computed hash on each write.  A mismatch means the
+    entry's composed text has changed and the embedding is stale.
+    """
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
