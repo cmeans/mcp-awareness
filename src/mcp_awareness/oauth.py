@@ -70,8 +70,8 @@ class OAuthTokenValidator:
                 if uri:
                     logger.info("Discovered JWKS URI: %s", uri)
                     return str(uri)
-        except Exception:
-            pass  # Fall through to default
+        except Exception as exc:
+            logger.warning("OIDC discovery request failed for %s: %s", discovery_url, exc)
 
         logger.warning(
             "OIDC discovery failed for %s, using default JWKS path",
