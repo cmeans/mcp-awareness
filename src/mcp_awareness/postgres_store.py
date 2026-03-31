@@ -1294,6 +1294,22 @@ class PostgresStore:
             row = cur.fetchone()
             return str(row["id"]) if row else None
 
+    def update_user_profile(
+        self,
+        user_id: str,
+        email: str | None = None,
+        display_name: str | None = None,
+    ) -> None:
+        """Update user profile fields if currently null (enrich on login)."""
+        from .helpers import canonical_email as canon_fn
+
+        canon = canon_fn(email) if email else None
+        with self._pool.connection() as conn, conn.transaction(), conn.cursor() as cur:
+            cur.execute(
+                _load_sql("update_user_profile"),
+                (email, canon, display_name, user_id),
+            )
+
     def clear(self, owner_id: str) -> None:
         with self._pool.connection() as conn, conn.transaction(), conn.cursor() as cur:
             self._set_rls_context(cur, owner_id)
