@@ -260,7 +260,7 @@ Stores vector embeddings for semantic search. One embedding per entry per model.
 
 - Embeddings are generated fire-and-forget on write (never blocks the response)
 - Suppression entries are not embedded (short-lived, not worth searching)
-- The `text_hash` column enables detection of stale embeddings after entry updates
+- The `text_hash` column enables detection of stale embeddings after entry updates. The hash is a SHA-256 digest of the string produced by `compose_embedding_text()` in `embeddings.py`. On each write, a fresh hash is computed and compared to the stored value; a mismatch marks the embedding as stale, and the background worker re-embeds the entry on its next cycle. Because the hash is derived from the composed text, any change to `compose_embedding_text()` (new fields, reordered fields, different separators) invalidates **all** stored hashes and triggers a one-time mass re-embedding. This is by design — embeddings always reflect the current composition logic
 - `ON DELETE CASCADE` ensures embeddings are cleaned up when entries are deleted
 - Requires `AWARENESS_EMBEDDING_PROVIDER=ollama` to activate (optional)
 - **Dimension constraint**: The `VECTOR` column dimension is configured via `AWARENESS_EMBEDDING_DIMENSIONS` (default: 768, matching `nomic-embed-text`). The inline DDL uses this value at table creation time. The initial Alembic migration hardcodes 768 — existing deployments that need a different dimension require a new migration. The dimension must match the embedding model's output size.
