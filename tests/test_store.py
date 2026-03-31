@@ -1562,6 +1562,35 @@ def test_get_fired_intentions(store):
 # ------------------------------------------------------------------
 
 
+def test_fired_intentions_sql_filters_future_deliver_at(store):
+    """Verify future deliver_at intentions are excluded at the SQL level."""
+    from datetime import timedelta
+
+    now = now_utc()
+    future = now + timedelta(hours=24)
+
+    # Create only a future intention — nothing should come back
+    store.add(
+        TEST_OWNER,
+        Entry(
+            id=make_id(),
+            type=EntryType.INTENTION,
+            source="test",
+            tags=[],
+            created=now,
+            expires=None,
+            data={
+                "goal": "future task",
+                "state": "pending",
+                "deliver_at": future.isoformat(),
+            },
+        ),
+    )
+
+    fired = store.get_fired_intentions(TEST_OWNER)
+    assert fired == [], f"Expected no fired intentions for future deliver_at, got {len(fired)}"
+
+
 def test_get_knowledge_default_sort_desc(store):
     """get_knowledge returns most recent entries first (updated DESC)."""
     from datetime import timedelta
