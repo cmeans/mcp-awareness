@@ -183,14 +183,38 @@ def compose_embedding_text(entry: Entry) -> str:
     data = entry.data
     if desc := data.get("description"):
         parts.append(str(desc))
-    if content := data.get("content"):
-        parts.append(str(content))
     if goal := data.get("goal"):
         parts.append(str(goal))
     if msg := data.get("message"):
         parts.append(str(msg))
     if effect := data.get("effect"):
         parts.append(f"effect: {effect}")
+
+    # Preference-specific fields
+    if key := data.get("key"):
+        parts.append(f"key: {key}")
+    if (value := data.get("value")) is not None:
+        parts.append(f"value: {value}")
+    if scope := data.get("scope"):
+        parts.append(f"scope: {scope}")
+
+    # Status-specific fields: metrics and inventory
+    if (metrics := data.get("metrics")) and isinstance(metrics, dict):
+        metric_parts = [f"{k}={v}" for k, v in metrics.items()]
+        parts.append(f"metrics: {', '.join(metric_parts)}")
+    if inventory := data.get("inventory"):
+        if isinstance(inventory, list):
+            parts.append(f"inventory: {', '.join(str(i) for i in inventory)}")
+        else:
+            parts.append(f"inventory: {inventory}")
+
+    # Content field (truncate if very long to keep embeddings focused)
+    _max_content_len = 500
+    if content := data.get("content"):
+        content_str = str(content)
+        if len(content_str) > _max_content_len:
+            content_str = content_str[:_max_content_len] + "..."
+        parts.append(content_str)
 
     return "\n".join(parts)
 
