@@ -922,7 +922,7 @@ class TestRememberTool:
             source="tools",
             tags=["backup"],
             description="Config snapshot",
-            content={"key": "value", "nested": [1, 2, 3]},  # type: ignore[arg-type]
+            content={"key": "value", "nested": [1, 2, 3]},
             content_type="application/json",
         )
         data = json.loads(result)
@@ -940,7 +940,7 @@ class TestRememberTool:
             source="tools",
             tags=["backup"],
             description="List snapshot",
-            content=[1, 2, 3],  # type: ignore[arg-type]
+            content=[1, 2, 3],
             content_type="application/json",
         )
         data = json.loads(result)
@@ -1039,7 +1039,7 @@ class TestUpdateEntryTool:
         entry_id = json.loads(result)["id"]
         await server_mod.update_entry(
             entry_id=entry_id,
-            content={"new": "value"},  # type: ignore[arg-type]
+            content={"new": "value"},
         )
         entries = json.loads(await server_mod.get_knowledge(entry_type="note"))
         assert isinstance(entries[0]["data"]["content"], str)

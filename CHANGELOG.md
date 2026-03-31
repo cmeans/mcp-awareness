@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **JSON content rejected by Pydantic validation**: `remember` and `update_entry` now accept `dict` and `list` content in addition to `str` — fixes `string_type` validation error when MCP transport auto-parses JSON strings before they reach the handler (#130)
+
 ### Documentation
 - **Migration backfill notes**: added performance advisory comments to `f1a2b3c4d5e6` (owner_id backfill) and `h3c4d5e6f7g8` (updated nullability backfill) migrations — for large tables (>100K rows), includes a batched UPDATE example to avoid long-held locks (MEDIUM #7)
 - **Hash stability**: documented embedding hash behavior in `embeddings.py` module docstring and function docstrings — explains that changes to `compose_embedding_text()` invalidate all stored hashes and trigger mass re-embedding (MEDIUM #22)
