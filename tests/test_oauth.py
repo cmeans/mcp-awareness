@@ -988,6 +988,65 @@ class TestAutoProvisionIntegration:
         assert user is not None
         assert user["id"] == "cli-bob"
 
+    @pytest.mark.anyio
+    async def test_resolve_enriches_missing_profile_fields(
+        self, store: Any, monkeypatch: Any
+    ) -> None:
+        """Returning user with missing email/name gets enriched from token claims."""
+        import mcp_awareness.server as server_mod
+
+        monkeypatch.setattr(server_mod, "store", store)
+
+        # Create user without email or display_name (simulates auto-provision
+        # from a token that lacked those claims)
+        store.create_user_if_not_exists("linked-alice", None, None, "alice-sub", TEST_ISSUER)
+        user = store.get_user("linked-alice")
+        assert user is not None
+        assert user["email"] is None
+        assert user["display_name"] is None
+
+        called_with_owner: list[str] = []
+
+        async def inner_app(scope: Any, receive: Any, send: Any) -> None:
+            from mcp_awareness.server import _owner_ctx
+
+            called_with_owner.append(_owner_ctx.get())
+
+        # Second login — this time the token has email and name
+        mock_oauth = MagicMock()
+        mock_oauth.validate.return_value = {
+            "owner_id": "alice-sub",
+            "email": "alice@example.com",
+            "name": "Alice",
+            "oauth_subject": "alice-sub",
+            "oauth_issuer": TEST_ISSUER,
+        }
+
+        app = AuthMiddleware(
+            inner_app, jwt_secret="", oauth_validator=mock_oauth, auto_provision=False
+        )
+        scope = {
+            "type": "http",
+            "path": "/mcp",
+            "method": "POST",
+            "headers": [(b"authorization", b"Bearer oauth-token")],
+        }
+
+        async def noop_receive() -> dict[str, Any]:
+            return {"type": "http.request", "body": b""}
+
+        async def noop_send(msg: dict[str, Any]) -> None:
+            pass
+
+        await app(scope, noop_receive, noop_send)
+        assert called_with_owner == ["linked-alice"]
+
+        # Verify profile was enriched
+        user = store.get_user("linked-alice")
+        assert user is not None
+        assert user["email"] == "alice@example.com"
+        assert user["display_name"] == "Alice"
+
 
 class TestAutoProvisionFailure:
     """Verify _ensure_user swallows exceptions gracefully."""
@@ -1168,3 +1227,45 @@ class TestAutoProvisioning:
         # Try to link again with different sub — should not overwrite
         linked_id = store.link_oauth_identity("new-sub", TEST_ISSUER, "linked@example.com")
         assert linked_id is None  # Already linked, no update
+
+    def test_update_user_profile_fills_missing_email(self, store: Any) -> None:
+        """User created without email gets email populated on enrichment."""
+        store.create_user_if_not_exists("oauth-noemail", None, None, "noemail-sub", TEST_ISSUER)
+        user = store.get_user("oauth-noemail")
+        assert user is not None
+        assert user["email"] is None
+
+        store.update_user_profile("oauth-noemail", email="enriched@example.com")
+        user = store.get_user("oauth-noemail")
+        assert user is not None
+        assert user["email"] == "enriched@example.com"
+
+    def test_update_user_profile_does_not_overwrite_existing_email(self, store: Any) -> None:
+        """Existing email is NOT overwritten by a different email."""
+        store.create_user_if_not_exists(
+            "oauth-hasemail", "original@example.com", None, "hasemail-sub", TEST_ISSUER
+        )
+        store.update_user_profile("oauth-hasemail", email="different@example.com")
+        user = store.get_user("oauth-hasemail")
+        assert user is not None
+        assert user["email"] == "original@example.com"  # Original preserved
+
+    def test_update_user_profile_fills_missing_display_name(self, store: Any) -> None:
+        """User created without display_name gets it populated on enrichment."""
+        store.create_user_if_not_exists(
+            "oauth-noname", "noname@example.com", None, "noname-sub", TEST_ISSUER
+        )
+        store.update_user_profile("oauth-noname", display_name="Enriched Name")
+        user = store.get_user("oauth-noname")
+        assert user is not None
+        assert user["display_name"] == "Enriched Name"
+
+    def test_update_user_profile_does_not_overwrite_existing_display_name(self, store: Any) -> None:
+        """Existing display_name is NOT overwritten."""
+        store.create_user_if_not_exists(
+            "oauth-hasname", "hasname@example.com", "Original Name", "hasname-sub", TEST_ISSUER
+        )
+        store.update_user_profile("oauth-hasname", display_name="New Name")
+        user = store.get_user("oauth-hasname")
+        assert user is not None
+        assert user["display_name"] == "Original Name"  # Original preserved

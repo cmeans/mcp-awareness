@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **OAuth user profile enrichment**: email and display_name populated from token claims on subsequent logins if missing
+
 ### Fixed
 - **Data dictionary: missing OAuth columns**: added `oauth_subject` and `oauth_issuer` columns to users table documentation (MEDIUM #24)
 - **Data dictionary: missing OAuth indexes**: added `ix_users_oauth_identity` and `ix_users_oauth_subject` indexes to users table documentation (MEDIUM #25)

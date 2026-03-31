@@ -309,6 +309,9 @@ class AuthMiddleware:
             if oauth_issuer and oauth_subject:
                 existing = store.get_user_by_oauth(oauth_issuer, oauth_subject)
                 if existing:
+                    # Enrich user profile on login if fields are missing
+                    if email or display_name:
+                        store.update_user_profile(str(existing["id"]), email, display_name)
                     return str(existing["id"])
 
             # 2. Pre-provisioned user with matching email? Link on first login.
