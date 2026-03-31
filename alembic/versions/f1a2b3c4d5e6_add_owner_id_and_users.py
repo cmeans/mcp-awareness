@@ -68,24 +68,37 @@ def upgrade() -> None:
     """)
 
     # --- 2. Add owner_id to entries (nullable first, then backfill, then NOT NULL + DEFAULT) ---
+    #
+    # NOTE: The backfill UPDATEs below are one-time operations that run on all
+    # existing rows per table. For small-to-moderate tables this completes in
+    # seconds, but on large tables (>100K rows) the single UPDATE can hold a
+    # lock for an extended period. If you encounter this on a large deployment,
+    # consider running the backfill in batches before applying NOT NULL:
+    #
+    #   UPDATE entries SET owner_id = '<default>'
+    #     WHERE id IN (
+    #       SELECT id FROM entries WHERE owner_id IS NULL LIMIT 10000
+    #     );
+    #   -- repeat until 0 rows affected, then ALTER ... SET NOT NULL
+    #
     op.execute("ALTER TABLE entries ADD COLUMN IF NOT EXISTS owner_id TEXT")
     op.execute(f"UPDATE entries SET owner_id = '{_escaped}' WHERE owner_id IS NULL")
     op.execute("ALTER TABLE entries ALTER COLUMN owner_id SET NOT NULL")
     op.execute(f"ALTER TABLE entries ALTER COLUMN owner_id SET DEFAULT '{_escaped}'")
 
-    # --- 3. Add owner_id to reads ---
+    # --- 3. Add owner_id to reads (same batching note as above applies) ---
     op.execute("ALTER TABLE reads ADD COLUMN IF NOT EXISTS owner_id TEXT")
     op.execute(f"UPDATE reads SET owner_id = '{_escaped}' WHERE owner_id IS NULL")
     op.execute("ALTER TABLE reads ALTER COLUMN owner_id SET NOT NULL")
     op.execute(f"ALTER TABLE reads ALTER COLUMN owner_id SET DEFAULT '{_escaped}'")
 
-    # --- 4. Add owner_id to actions ---
+    # --- 4. Add owner_id to actions (same batching note as above applies) ---
     op.execute("ALTER TABLE actions ADD COLUMN IF NOT EXISTS owner_id TEXT")
     op.execute(f"UPDATE actions SET owner_id = '{_escaped}' WHERE owner_id IS NULL")
     op.execute("ALTER TABLE actions ALTER COLUMN owner_id SET NOT NULL")
     op.execute(f"ALTER TABLE actions ALTER COLUMN owner_id SET DEFAULT '{_escaped}'")
 
-    # --- 5. Add owner_id to embeddings ---
+    # --- 5. Add owner_id to embeddings (same batching note as above applies) ---
     op.execute("ALTER TABLE embeddings ADD COLUMN IF NOT EXISTS owner_id TEXT")
     op.execute(f"UPDATE embeddings SET owner_id = '{_escaped}' WHERE owner_id IS NULL")
     op.execute("ALTER TABLE embeddings ALTER COLUMN owner_id SET NOT NULL")
