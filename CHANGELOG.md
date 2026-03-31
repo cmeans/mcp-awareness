@@ -21,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`semantic_search` empty-string guard**: add missing empty-string validation for `since` and `until` parameters — passing `""` now returns a clear error instead of a `ValueError` (MEDIUM #16)
 
 ### Changed
+- **Fired intentions SQL filter**: `get_fired_intentions` now filters by `deliver_at` in the SQL WHERE clause instead of fetching all pending intentions and filtering in Python (MEDIUM #5)
 - **Cleanup logging**: replaced `print()` in `_do_cleanup` with `logger.error()` to use the module's logging infrastructure (MEDIUM #6)
 
 ### Added

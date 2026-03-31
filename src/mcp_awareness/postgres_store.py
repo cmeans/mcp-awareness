@@ -1109,16 +1109,13 @@ class PostgresStore:
         server tool) is responsible for transitioning them to 'fired'.
         """
         now = now_utc()
-        entries = self._query_entries(
+        return self._query_entries(
             owner_id,
-            "type = %s AND data->>'state' = %s",
-            (EntryType.INTENTION.value, "pending"),
+            "type = %s AND data->>'state' = %s"
+            " AND data->>'deliver_at' IS NOT NULL"
+            " AND (data->>'deliver_at')::timestamptz <= %s",
+            (EntryType.INTENTION.value, "pending", now),
         )
-        return [
-            e
-            for e in entries
-            if e.data.get("deliver_at") and ensure_dt(e.data["deliver_at"]) <= now
-        ]
 
     # ------------------------------------------------------------------
     # Embeddings / semantic search
