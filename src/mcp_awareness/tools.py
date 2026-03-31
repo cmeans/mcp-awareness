@@ -398,7 +398,7 @@ async def remember(
     source: str,
     tags: list[str],
     description: str,
-    content: str | None = None,
+    content: str | dict[str, Any] | list[Any] | None = None,
     content_type: str = "text/plain",
     learned_from: str = "conversation",
     logical_key: str | None = None,
@@ -460,7 +460,7 @@ async def update_entry(
     description: str | None = None,
     tags: list[str] | None = None,
     source: str | None = None,
-    content: str | None = None,
+    content: str | dict[str, Any] | list[Any] | None = None,
     content_type: str | None = None,
 ) -> str:
     """Update an existing entry in place, preserving its ID and creation timestamp.
