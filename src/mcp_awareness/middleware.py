@@ -268,6 +268,15 @@ class AuthMiddleware:
             logger.warning("OAuth token validation failed", exc_info=True)
             return None
 
+        # Enrich claims from userinfo endpoint when token lacks identity fields
+        # (e.g. WorkOS AuthKit access tokens omit email and name)
+        if "email" not in claims and hasattr(validator, "fetch_userinfo"):
+            userinfo = await asyncio.to_thread(validator.fetch_userinfo, token)
+            if "email" in userinfo:
+                claims["email"] = userinfo["email"]
+            if "name" in userinfo or "preferred_username" in userinfo:
+                claims["name"] = userinfo.get("name") or userinfo.get("preferred_username", "")
+
         owner_id = claims["owner_id"]
         oauth_subject = claims.get("oauth_subject")
         oauth_issuer = claims.get("oauth_issuer")

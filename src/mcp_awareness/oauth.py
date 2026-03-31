@@ -52,24 +52,31 @@ class OAuthTokenValidator:
         # JWKS URI: explicit override or auto-discover from OIDC configuration
         if jwks_uri:
             self._jwks_uri = jwks_uri
+            self._userinfo_endpoint = ""
         else:
-            self._jwks_uri = self._discover_jwks_uri()
+            self._jwks_uri, self._userinfo_endpoint = self._discover_oidc_config()
 
         self._jwk_client = PyJWKClient(self._jwks_uri, cache_jwk_set=True)
         self._jwks_cache_ttl = jwks_cache_ttl
         self._last_jwks_fetch: float = 0.0
         self._jwks_lock = threading.Lock()
 
-    def _discover_jwks_uri(self) -> str:
-        """Discover JWKS URI from OpenID configuration, fall back to well-known default."""
+    def _discover_oidc_config(self) -> tuple[str, str]:
+        """Discover JWKS URI and userinfo endpoint from OpenID configuration."""
         discovery_url = f"{self.issuer}/.well-known/openid-configuration"
         try:
             with urllib.request.urlopen(discovery_url, timeout=10) as resp:
                 config = json.loads(resp.read())
-                uri = config.get("jwks_uri")
-                if uri:
-                    logger.info("Discovered JWKS URI: %s", uri)
-                    return str(uri)
+                jwks = config.get("jwks_uri", "")
+                userinfo = config.get("userinfo_endpoint", "")
+                if jwks:
+                    logger.info("Discovered JWKS URI: %s", jwks)
+                if userinfo:
+                    logger.info("Discovered userinfo endpoint: %s", userinfo)
+                return (
+                    str(jwks) or f"{self.issuer}/.well-known/jwks.json",
+                    str(userinfo),
+                )
         except Exception as exc:
             logger.warning("OIDC discovery request failed for %s: %s", discovery_url, exc)
 
@@ -77,7 +84,28 @@ class OAuthTokenValidator:
             "OIDC discovery failed for %s, using default JWKS path",
             self.issuer,
         )
-        return f"{self.issuer}/.well-known/jwks.json"
+        return f"{self.issuer}/.well-known/jwks.json", ""
+
+    def fetch_userinfo(self, token: str) -> dict[str, str]:
+        """Fetch user profile from the provider's userinfo endpoint.
+
+        Called when the access token doesn't contain identity claims (e.g.
+        WorkOS AuthKit tokens omit ``email`` and ``name``).  Returns the
+        parsed JSON response, or an empty dict on any failure.
+        """
+        if not self._userinfo_endpoint:
+            return {}
+        try:
+            req = urllib.request.Request(
+                self._userinfo_endpoint,
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                data = json.loads(resp.read())
+                return {k: str(v) for k, v in data.items() if isinstance(v, str)}
+        except Exception as exc:
+            logger.warning("Userinfo fetch failed: %s", exc)
+            return {}
 
     def validate(self, token: str) -> dict[str, str]:
         """Validate an OAuth JWT and return extracted identity claims.

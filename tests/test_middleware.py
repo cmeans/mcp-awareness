@@ -588,3 +588,135 @@ class TestServerAuthWiring:
 
         assert len(captured_app) == 1
         assert isinstance(captured_app[0], AuthMiddleware)
+
+
+# ---------------------------------------------------------------------------
+# Userinfo enrichment in _try_oauth
+# ---------------------------------------------------------------------------
+
+
+class TestUserinfoEnrichment:
+    """Tests that AuthMiddleware calls fetch_userinfo when email is missing from claims."""
+
+    @pytest.mark.anyio
+    async def test_try_oauth_calls_userinfo_when_email_missing(self) -> None:
+        """When OAuth claims lack email, fetch_userinfo is called to enrich them."""
+        mock_validator = MagicMock()
+        mock_validator.validate.return_value = {
+            "owner_id": "user_123",
+            "oauth_subject": "sub_123",
+            "oauth_issuer": "https://auth.example.com",
+        }
+        mock_validator.fetch_userinfo.return_value = {
+            "email": "alice@example.com",
+            "name": "Alice Smith",
+        }
+
+        app = AuthMiddleware(
+            _dummy_app,
+            jwt_secret="test-secret",
+            oauth_validator=mock_validator,
+        )
+
+        mock_resolve = MagicMock(return_value="user_123")
+        with patch.object(app, "_resolve_user", mock_resolve):
+            result = await app._try_oauth("fake-token")
+
+        assert result == "user_123"
+        mock_validator.fetch_userinfo.assert_called_once_with("fake-token")
+        # _resolve_user should have received the enriched email/name
+        mock_resolve.assert_called_once_with(
+            "user_123",
+            "alice@example.com",
+            "Alice Smith",
+            "sub_123",
+            "https://auth.example.com",
+        )
+
+    @pytest.mark.anyio
+    async def test_try_oauth_skips_userinfo_when_email_present(self) -> None:
+        """When OAuth claims already include email, fetch_userinfo is NOT called."""
+        mock_validator = MagicMock()
+        mock_validator.validate.return_value = {
+            "owner_id": "user_123",
+            "oauth_subject": "sub_123",
+            "oauth_issuer": "https://auth.example.com",
+            "email": "alice@example.com",
+            "name": "Alice",
+        }
+
+        app = AuthMiddleware(
+            _dummy_app,
+            jwt_secret="test-secret",
+            oauth_validator=mock_validator,
+        )
+
+        mock_resolve = MagicMock(return_value="user_123")
+        with patch.object(app, "_resolve_user", mock_resolve):
+            result = await app._try_oauth("fake-token")
+
+        assert result == "user_123"
+        mock_validator.fetch_userinfo.assert_not_called()
+
+    @pytest.mark.anyio
+    async def test_try_oauth_userinfo_preferred_username_fallback(self) -> None:
+        """When userinfo has preferred_username but no name, use it as name."""
+        mock_validator = MagicMock()
+        mock_validator.validate.return_value = {
+            "owner_id": "user_123",
+            "oauth_subject": "sub_123",
+            "oauth_issuer": "https://auth.example.com",
+        }
+        mock_validator.fetch_userinfo.return_value = {
+            "email": "alice@example.com",
+            "preferred_username": "alice42",
+        }
+
+        app = AuthMiddleware(
+            _dummy_app,
+            jwt_secret="test-secret",
+            oauth_validator=mock_validator,
+        )
+
+        mock_resolve = MagicMock(return_value="user_123")
+        with patch.object(app, "_resolve_user", mock_resolve):
+            await app._try_oauth("fake-token")
+
+        mock_resolve.assert_called_once_with(
+            "user_123",
+            "alice@example.com",
+            "alice42",
+            "sub_123",
+            "https://auth.example.com",
+        )
+
+    @pytest.mark.anyio
+    async def test_try_oauth_userinfo_failure_still_resolves(self) -> None:
+        """When fetch_userinfo returns empty, _try_oauth still proceeds without email."""
+        mock_validator = MagicMock()
+        mock_validator.validate.return_value = {
+            "owner_id": "user_123",
+            "oauth_subject": "sub_123",
+            "oauth_issuer": "https://auth.example.com",
+        }
+        mock_validator.fetch_userinfo.return_value = {}
+
+        app = AuthMiddleware(
+            _dummy_app,
+            jwt_secret="test-secret",
+            oauth_validator=mock_validator,
+        )
+
+        mock_resolve = MagicMock(return_value="user_123")
+        with patch.object(app, "_resolve_user", mock_resolve):
+            result = await app._try_oauth("fake-token")
+
+        assert result == "user_123"
+        # _resolve_user called without email/name
+        mock_resolve.assert_called_once_with(
+            "user_123",
+            None,
+            None,
+            "sub_123",
+            "https://auth.example.com",
+        )
