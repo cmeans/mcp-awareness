@@ -621,12 +621,13 @@ class PostgresStore:
     ) -> tuple[Entry, bool]:
         """Upsert by source + logical_key. Returns (entry, created).
 
-        Uses a single connection with INSERT ... ON CONFLICT to avoid race
-        conditions when concurrent writers target the same logical_key.
+        Uses a single connection for the entire operation: INSERT attempt,
+        existing-row fetch, and conditional update all share one connection
+        and transaction to avoid pool contention under concurrency.
         """
         with self._pool.connection() as conn, conn.transaction(), conn.cursor() as cur:
             self._set_rls_context(cur, owner_id)
-            # Attempt insert; on conflict, fetch the existing row's id
+            # Attempt insert; on conflict, return inserted=false
             cur.execute(
                 _load_sql("upsert_by_logical_key"),
                 (
@@ -646,27 +647,63 @@ class PostgresStore:
             assert row is not None
             inserted: bool = row["inserted"]
 
-        if inserted:
-            self._cleanup_expired()
-            return (entry, True)
+            if inserted:
+                self._cleanup_expired()
+                return (entry, True)
 
-        # Existing entry — compute diff and update if needed
-        existing = self._query_entries(
-            owner_id, "source = %s AND logical_key = %s", (source, logical_key)
-        )
-        old = existing[0]
-        updates: dict[str, Any] = {}
-        if entry.tags != old.tags:
-            updates["tags"] = entry.tags
-        for field in ("description", "content", "content_type"):
-            new_val = entry.data.get(field)
-            old_val = old.data.get(field)
-            if new_val is not None and new_val != old_val:
-                updates[field] = new_val
-        if updates:
-            result = self.update_entry(owner_id, old.id, updates)
-            return (result or old, False)
-        return (old, False)
+            # Existing entry — fetch within the same connection
+            query_sql = _load_sql("query_entries").format(
+                where="source = %s AND logical_key = %s",
+                order_by="COALESCE(updated, created) DESC",
+                limit_clause="",
+            )
+            cur.execute(query_sql, (owner_id, source, logical_key))
+            rows = cur.fetchall()
+            old = self._row_to_entry(rows[0])
+
+            # Compute diff
+            updates: dict[str, Any] = {}
+            if entry.tags != old.tags:
+                updates["tags"] = entry.tags
+            for field in ("description", "content", "content_type"):
+                new_val = entry.data.get(field)
+                old_val = old.data.get(field)
+                if new_val is not None and new_val != old_val:
+                    updates[field] = new_val
+
+            if not updates:
+                return (old, False)
+
+            # Apply updates inline (mirrors update_entry logic for knowledge types)
+            now = now_utc()
+            changed: dict[str, Any] = {}
+            if "tags" in updates and updates["tags"] != old.tags:
+                changed["tags"] = old.tags
+                old.tags = updates["tags"]
+            for field in ("description", "content", "content_type"):
+                if field in updates and updates[field] != old.data.get(field):
+                    old_val = old.data.get(field)
+                    if old_val is not None:
+                        changed[field] = old_val
+                    old.data[field] = updates[field]
+
+            if changed:
+                changelog = old.data.setdefault("changelog", [])
+                changelog.append({"updated": to_iso(now), "changed": changed})
+                old.updated = now
+                cur.execute(
+                    _load_sql("update_entry"),
+                    (
+                        now,
+                        old.source,
+                        json.dumps(old.tags),
+                        json.dumps(old.data),
+                        old.id,
+                        owner_id,
+                    ),
+                )
+
+            return (old, False)
 
     def get_stats(self, owner_id: str) -> dict[str, Any]:
         """Get entry counts by type, list of sources, and total count."""

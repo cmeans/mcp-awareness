@@ -2434,6 +2434,55 @@ class TestConcurrency:
             if store._cleanup_thread is not None:
                 store._cleanup_thread.join(timeout=2)
 
+    def test_upsert_by_logical_key_creates_then_updates(self, store):
+        """First upsert creates the entry; second upsert updates it in place."""
+        source = "upsert-single-conn"
+        logical_key = "lk-create-update"
+        now = now_utc()
+
+        # First call — should create
+        entry1 = Entry(
+            id=make_id(),
+            type=EntryType.NOTE,
+            source=source,
+            tags=["v1"],
+            created=now,
+            expires=None,
+            data={"description": "original description"},
+            logical_key=logical_key,
+        )
+        result1, created1 = store.upsert_by_logical_key(TEST_OWNER, source, logical_key, entry1)
+        assert created1 is True
+        assert result1.id == entry1.id
+        assert result1.data["description"] == "original description"
+
+        # Second call — same logical_key, different tags and description
+        entry2 = Entry(
+            id=make_id(),
+            type=EntryType.NOTE,
+            source=source,
+            tags=["v2"],
+            created=now,
+            expires=None,
+            data={"description": "updated description"},
+            logical_key=logical_key,
+        )
+        result2, created2 = store.upsert_by_logical_key(TEST_OWNER, source, logical_key, entry2)
+        assert created2 is False
+        # Should keep the original entry's id
+        assert result2.id == entry1.id
+        # Tags and description should reflect the update
+        assert result2.tags == ["v2"]
+        assert result2.data["description"] == "updated description"
+        # Changelog should record the change
+        assert "changelog" in result2.data
+        assert len(result2.data["changelog"]) >= 1
+
+        # Verify only one entry exists for this logical_key
+        results = store.get_knowledge(TEST_OWNER, source=source)
+        matching = [e for e in results if e.logical_key == logical_key]
+        assert len(matching) == 1
+
     def test_concurrent_upsert_by_logical_key(self, store):
         """Concurrent upserts with same source + logical_key must not create duplicates."""
         source = "upsert-race"
