@@ -16,9 +16,18 @@ All data in mcp-awareness is stored in a single `entries` table using a common e
 | `display_name` | TEXT | Yes | Human-readable name. |
 | `timezone` | TEXT | Yes | IANA timezone (e.g., `"America/Chicago"`). Default: `"UTC"`. Used for notification scheduling. |
 | `preferences` | JSONB | No | Extensible user settings (notification prefs, etc.). Default: `{}`. |
+| `oauth_subject` | TEXT | Yes | OAuth `sub` claim from the identity provider. Used for provider-agnostic user lookup. |
+| `oauth_issuer` | TEXT | Yes | OAuth issuer URL (e.g., `https://your-domain.authkit.app`). Identifies which provider issued the token. |
 | `created` | TIMESTAMPTZ | No | When the user was created. Default: `now()`. |
 | `updated` | TIMESTAMPTZ | Yes | Last update timestamp. `NULL` until first update. |
 | `deleted` | TIMESTAMPTZ | Yes | Soft deletion timestamp. `NULL` means active. |
+
+### Indexes
+
+| Index | Columns | Type | Purpose |
+|-------|---------|------|---------|
+| `ix_users_oauth_identity` | `oauth_issuer`, `oauth_subject` | Unique (partial) | One OAuth identity per provider. `WHERE oauth_issuer IS NOT NULL`. |
+| `ix_users_oauth_subject` | `oauth_subject` | B-tree (partial) | Fast lookup on every authenticated request. `WHERE oauth_subject IS NOT NULL`. |
 
 ### Email normalization (`canonical_email`)
 
@@ -39,7 +48,7 @@ The UNIQUE constraint is on `canonical_email`, not `email`. Users see and use th
 | `type` | TEXT | No | Entry type. One of: `status`, `alert`, `pattern`, `suppression`, `context`, `preference`, `note`, `intention`. |
 | `source` | TEXT | No | Origin identifier. Describes the subject, not the owner (e.g., `"personal"`, `"synology-nas"`, `"mcp-awareness-project"`). |
 | `created` | TIMESTAMPTZ | No | UTC timestamp. Set once when the entry is first created. |
-| `updated` | TIMESTAMPTZ | No | UTC timestamp. Updated on every upsert or `update_entry` call. |
+| `updated` | TIMESTAMPTZ | Yes | UTC timestamp. Updated on every upsert or `update_entry` call. `NULL` until first update. |
 | `expires` | TIMESTAMPTZ | Yes | When set, the entry is eligible for cleanup after this time. `NULL` means permanent (until explicitly deleted). |
 | `deleted` | TIMESTAMPTZ | Yes | Timestamp of soft deletion. `NULL` means active. Non-null means trashed — recoverable for 30 days, then auto-purged. |
 | `tags` | JSONB | No | Array of strings (e.g., `["infra", "nas", "docker"]`). Used for filtering, suppression matching, and knowledge retrieval. Default: `[]`. |
@@ -123,7 +132,7 @@ Written by agents via `remind`. Intentions have a lifecycle: they start `pending
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `goal` | string | Yes | What outcome is desired (e.g., "pick up milk", "tell Mom about insurance"). |
-| `state` | string | Yes | Lifecycle state: `pending`, `fired`, `completed`, `snoozed`, `cancelled`. |
+| `state` | string | Yes | Lifecycle state: `pending`, `active`, `fired`, `completed`, `snoozed`, `cancelled`. |
 | `deliver_at` | string | No | ISO 8601 timestamp — when to surface this intention. Required for time-based triggers. |
 | `constraints` | string | No | Preferences or requirements (e.g., "organic, budget-conscious"). |
 | `urgency` | string | No | `"low"`, `"normal"`, or `"high"`. Default: `"normal"`. |

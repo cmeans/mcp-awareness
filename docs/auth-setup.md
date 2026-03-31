@@ -81,6 +81,12 @@ claude mcp add --transport http \
 | `AWARENESS_OAUTH_USER_CLAIM` | `sub` | JWT claim to use as owner_id (`sub`, `email`, or `preferred_username`) |
 | `AWARENESS_OAUTH_AUTO_PROVISION` | `false` | Auto-create user record on first valid OAuth login |
 
+### Server URL
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `AWARENESS_PUBLIC_URL` | _(empty)_ | Public base URL (e.g., `https://mcpawareness.com`). Required when behind a reverse proxy or Cloudflare Tunnel so that `/.well-known/oauth-protected-resource` returns the correct `resource` URL instead of `http://localhost:8420`. |
+
 ## CLI tools
 
 ### `mcp-awareness-secret`
