@@ -226,6 +226,7 @@ The server is running on port 8420. Point any MCP client at `http://localhost:84
 | `AWARENESS_OAUTH_JWKS_URI` | `{issuer}/.well-known/jwks.json` | Override JWKS endpoint |
 | `AWARENESS_OAUTH_USER_CLAIM` | `sub` | JWT claim to use as owner_id |
 | `AWARENESS_OAUTH_AUTO_PROVISION` | `false` | Auto-create user on first valid OAuth login |
+| `AWARENESS_PUBLIC_URL` | _(empty)_ | Public base URL for this server (e.g., `https://mcpawareness.com`). Required when behind a reverse proxy or Cloudflare Tunnel so that `/.well-known/oauth-protected-resource` returns the correct `resource` URL. |
 
 See the [Auth Setup Guide](docs/auth-setup.md) for complete configuration instructions.
 

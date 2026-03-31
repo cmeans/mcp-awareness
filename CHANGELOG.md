@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Data dictionary: missing OAuth columns**: added `oauth_subject` and `oauth_issuer` columns to users table documentation (MEDIUM #24)
+- **Data dictionary: missing OAuth indexes**: added `ix_users_oauth_identity` and `ix_users_oauth_subject` indexes to users table documentation (MEDIUM #25)
+- **Data dictionary: missing intention state**: added `active` to intention `state` field's valid values to match `schema.py` INTENTION_STATES (MEDIUM #26)
+- **Data dictionary: entries `updated` nullability**: corrected `updated` column from NOT NULL to nullable, matching the actual schema (MEDIUM #27)
+- **Undocumented `AWARENESS_PUBLIC_URL`**: added to README, auth-setup.md, and data dictionary — required for correct `/.well-known/oauth-protected-resource` URLs behind reverse proxies (MEDIUM #28)
+
 ### Removed
 - **Dead code**: removed unused `validate_entry_data` function from `schema.py` and its tests (MEDIUM #17)
 
