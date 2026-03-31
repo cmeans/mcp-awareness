@@ -10,6 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Removed
 - **Dead code**: removed unused `validate_entry_data` function from `schema.py` and its tests (MEDIUM #17)
 
+### Security
+- **Parameterized LIMIT clauses**: `get_reads`, `get_actions`, and `get_activity` now use bind parameters (`%s`) for LIMIT values instead of f-string interpolation, eliminating a fragile SQL construction pattern (MEDIUM #3)
+
 ### Fixed
 - **Alert expiry filter**: `get_active_alerts` and `get_all_active_alerts` now filter out expired alerts (`expires > NOW()`), matching the behavior of `get_active_suppressions` (MEDIUM #18)
 - **Intention lifecycle**: `generate_briefing` now transitions fired intentions from "pending" to "fired" state, preventing them from firing on every subsequent briefing read

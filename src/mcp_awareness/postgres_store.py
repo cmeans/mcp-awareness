@@ -893,7 +893,8 @@ class PostgresStore:
         where = " AND ".join(clauses) if clauses else "1=1"
         limit_clause = ""
         if limit:
-            limit_clause = f" LIMIT {int(limit)}"
+            limit_clause = " LIMIT %s"
+            params.append(int(limit))
         sql = _load_sql("get_reads").format(where=where, limit_clause=limit_clause)
         with self._pool.connection() as conn, conn.transaction(), conn.cursor() as cur:
             self._set_rls_context(cur, owner_id)
@@ -938,7 +939,8 @@ class PostgresStore:
         where = " AND ".join(clauses) if clauses else "1=1"
         limit_clause = ""
         if limit:
-            limit_clause = f" LIMIT {int(limit)}"
+            limit_clause = " LIMIT %s"
+            params.append(int(limit))
         sql = _load_sql("get_actions").format(where=where, limit_clause=limit_clause)
         with self._pool.connection() as conn, conn.transaction(), conn.cursor() as cur:
             self._set_rls_context(cur, owner_id)
@@ -1000,13 +1002,17 @@ class PostgresStore:
             params_a.append(platform)
         where_r = " AND ".join(clauses_r) if clauses_r else "1=1"
         where_a = " AND ".join(clauses_a) if clauses_a else "1=1"
-        limit_clause = f"LIMIT {int(limit)}" if limit else ""
+        limit_clause = ""
+        all_params = params_r + params_a
+        if limit:
+            limit_clause = "LIMIT %s"
+            all_params.append(int(limit))
         sql = _load_sql("get_activity").format(
             where_r=where_r, where_a=where_a, limit_clause=limit_clause
         )
         with self._pool.connection() as conn, conn.transaction(), conn.cursor() as cur:
             self._set_rls_context(cur, owner_id)
-            cur.execute(sql, tuple(params_r + params_a))
+            cur.execute(sql, tuple(all_params))
             rows = cur.fetchall()
         return [
             {
