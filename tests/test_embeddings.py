@@ -135,6 +135,82 @@ class TestComposeEmbeddingText:
         assert "type: context" in context_text
         assert note_text != context_text
 
+    def test_preference_includes_key_value_scope(self):
+        """Preferences should embed key, value, and scope for richer text."""
+        entry = _make_entry(
+            entry_type=EntryType.PREFERENCE,
+            data={"key": "theme", "value": "dark", "scope": "editor"},
+        )
+        text = compose_embedding_text(entry)
+        assert "key: theme" in text
+        assert "value: dark" in text
+        assert "scope: editor" in text
+
+    def test_preference_with_false_value(self):
+        """Preference with falsy value (False, 0) should still include it."""
+        entry = _make_entry(
+            entry_type=EntryType.PREFERENCE,
+            data={"key": "notifications", "value": False, "scope": "global"},
+        )
+        text = compose_embedding_text(entry)
+        assert "key: notifications" in text
+        assert "value: False" in text
+
+    def test_status_includes_metrics(self):
+        """Status entries should embed metrics keys and values."""
+        entry = _make_entry(
+            entry_type=EntryType.STATUS,
+            source="nas",
+            data={
+                "description": "NAS health",
+                "metrics": {"cpu_pct": 42, "mem_gb": 12.5, "disk_free_tb": 3.1},
+            },
+        )
+        text = compose_embedding_text(entry)
+        assert "NAS health" in text
+        assert "metrics:" in text
+        assert "cpu_pct=42" in text
+        assert "mem_gb=12.5" in text
+        assert "disk_free_tb=3.1" in text
+
+    def test_status_includes_inventory(self):
+        """Status entries should embed inventory list."""
+        entry = _make_entry(
+            entry_type=EntryType.STATUS,
+            source="nas",
+            data={
+                "description": "NAS services",
+                "inventory": ["plex", "syncthing", "docker"],
+            },
+        )
+        text = compose_embedding_text(entry)
+        assert "inventory: plex, syncthing, docker" in text
+
+    def test_status_inventory_string(self):
+        """Status with non-list inventory should still be included."""
+        entry = _make_entry(
+            entry_type=EntryType.STATUS,
+            data={"inventory": "single-item"},
+        )
+        text = compose_embedding_text(entry)
+        assert "inventory: single-item" in text
+
+    def test_content_truncated_when_long(self):
+        """Very long content should be truncated to avoid bloating embeddings."""
+        long_content = "x" * 1000
+        entry = _make_entry(data={"content": long_content})
+        text = compose_embedding_text(entry)
+        # Should be truncated to 500 chars + "..."
+        assert len(text.split("\n")[-1]) == 503  # 500 + len("...")
+        assert text.endswith("...")
+
+    def test_content_not_truncated_when_short(self):
+        """Short content should appear in full."""
+        entry = _make_entry(data={"content": "short snippet"})
+        text = compose_embedding_text(entry)
+        assert "short snippet" in text
+        assert "..." not in text
+
 
 # ---------------------------------------------------------------------------
 # text_hash
