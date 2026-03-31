@@ -18,7 +18,9 @@
 
 from __future__ import annotations
 
+import json
 import os
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -202,6 +204,35 @@ class TestOllamaEmbeddingUnit:
         """is_available returns False when Ollama is unreachable."""
         p = OllamaEmbedding(base_url="http://localhost:19999")
         assert p.is_available() is False
+
+    def test_partial_response_raises(self):
+        """embed() raises ValueError when Ollama returns fewer embeddings than inputs."""
+        p = OllamaEmbedding(base_url="http://localhost:19999")
+        # Simulate Ollama returning only 1 embedding for 3 input texts
+        partial_body = json.dumps({"embeddings": [[0.1] * 768]}).encode()
+        mock_resp = MagicMock()
+        mock_resp.read.return_value = partial_body
+        mock_resp.__enter__ = lambda s: s
+        mock_resp.__exit__ = MagicMock(return_value=False)
+
+        with (
+            patch("urllib.request.urlopen", return_value=mock_resp),
+            pytest.raises(ValueError, match=r"1 embeddings for 3 input texts"),
+        ):
+            p.embed(["text one", "text two", "text three"])
+
+    def test_correct_response_count_succeeds(self):
+        """embed() returns normally when embedding count matches input count."""
+        p = OllamaEmbedding(base_url="http://localhost:19999")
+        good_body = json.dumps({"embeddings": [[0.1] * 768, [0.2] * 768]}).encode()
+        mock_resp = MagicMock()
+        mock_resp.read.return_value = good_body
+        mock_resp.__enter__ = lambda s: s
+        mock_resp.__exit__ = MagicMock(return_value=False)
+
+        with patch("urllib.request.urlopen", return_value=mock_resp):
+            result = p.embed(["text one", "text two"])
+        assert len(result) == 2
 
 
 # ---------------------------------------------------------------------------
