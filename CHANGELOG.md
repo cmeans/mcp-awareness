@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - **JWKS auto-discovery**: when `AWARENESS_OAUTH_JWKS_URI` is not set, the server now fetches `<issuer>/.well-known/openid-configuration` to discover the correct `jwks_uri` before falling back to `<issuer>/.well-known/jwks.json` — fixes WorkOS compatibility (#126)
 - **OAuth user profile enrichment**: email and display_name populated from token claims on subsequent logins if missing
+- **Userinfo endpoint**: when access tokens lack `email`/`name` claims (e.g. WorkOS AuthKit), the server now calls the provider's OIDC userinfo endpoint to fetch identity fields for user resolution (#125)
 
 ### Fixed
 - **Data dictionary: missing OAuth columns**: added `oauth_subject` and `oauth_issuer` columns to users table documentation (MEDIUM #24)

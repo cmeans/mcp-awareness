@@ -251,6 +251,32 @@ class TestOAuthTokenValidator:
             )
         assert validator._jwks_uri == discovered_uri
 
+    def test_oidc_discovery_extracts_userinfo_endpoint(self) -> None:
+        """OIDC discovery extracts both jwks_uri and userinfo_endpoint."""
+        from unittest.mock import patch
+
+        discovered_uri = "https://auth.example.com/oauth2/jwks"
+        userinfo_uri = "https://auth.example.com/oauth2/userinfo"
+        oidc_config = json.dumps(
+            {
+                "jwks_uri": discovered_uri,
+                "userinfo_endpoint": userinfo_uri,
+            }
+        ).encode()
+
+        mock_resp = MagicMock()
+        mock_resp.read.return_value = oidc_config
+        mock_resp.__enter__ = lambda s: s
+        mock_resp.__exit__ = MagicMock(return_value=False)
+
+        with patch("mcp_awareness.oauth.urllib.request.urlopen", return_value=mock_resp):
+            validator = OAuthTokenValidator(
+                issuer=TEST_ISSUER,
+                audience=TEST_AUDIENCE,
+            )
+        assert validator._jwks_uri == discovered_uri
+        assert validator._userinfo_endpoint == userinfo_uri
+
     def test_oidc_discovery_fallback_on_failure(self) -> None:
         """When OIDC discovery fails, fall back to .well-known/jwks.json."""
         from unittest.mock import patch
@@ -264,6 +290,16 @@ class TestOAuthTokenValidator:
                 audience=TEST_AUDIENCE,
             )
         assert validator._jwks_uri == f"{TEST_ISSUER}/.well-known/jwks.json"
+        assert validator._userinfo_endpoint == ""
+
+    def test_explicit_jwks_uri_sets_empty_userinfo(self) -> None:
+        """When explicit jwks_uri is set, userinfo_endpoint is empty."""
+        validator = OAuthTokenValidator(
+            issuer=TEST_ISSUER,
+            audience=TEST_AUDIENCE,
+            jwks_uri="https://custom.example.com/keys",
+        )
+        assert validator._userinfo_endpoint == ""
 
 
 # ---------------------------------------------------------------------------
@@ -1316,3 +1352,114 @@ class TestAutoProvisioning:
         user = store.get_user("oauth-hasname")
         assert user is not None
         assert user["display_name"] == "Original Name"  # Original preserved
+
+
+# ---------------------------------------------------------------------------
+# Userinfo endpoint tests
+# ---------------------------------------------------------------------------
+
+
+class TestFetchUserinfo:
+    def _make_validator_with_userinfo(self, userinfo_endpoint: str = "") -> OAuthTokenValidator:
+        """Create a validator with a pre-set userinfo endpoint (skip real discovery)."""
+        from unittest.mock import patch
+
+        with patch(
+            "mcp_awareness.oauth.urllib.request.urlopen",
+            side_effect=Exception("no network"),
+        ):
+            validator = OAuthTokenValidator(
+                issuer=TEST_ISSUER,
+                audience=TEST_AUDIENCE,
+            )
+        validator._userinfo_endpoint = userinfo_endpoint
+        return validator
+
+    def test_returns_profile_data(self) -> None:
+        """fetch_userinfo returns parsed profile when endpoint is configured."""
+        from unittest.mock import patch
+
+        validator = self._make_validator_with_userinfo("https://auth.example.com/oauth2/userinfo")
+        userinfo_response = json.dumps(
+            {
+                "sub": "user_123",
+                "email": "alice@example.com",
+                "name": "Alice Smith",
+            }
+        ).encode()
+
+        mock_resp = MagicMock()
+        mock_resp.read.return_value = userinfo_response
+        mock_resp.__enter__ = lambda s: s
+        mock_resp.__exit__ = MagicMock(return_value=False)
+
+        with patch("mcp_awareness.oauth.urllib.request.urlopen", return_value=mock_resp):
+            result = validator.fetch_userinfo("fake-token")
+
+        assert result["email"] == "alice@example.com"
+        assert result["name"] == "Alice Smith"
+        assert result["sub"] == "user_123"
+
+    def test_returns_empty_dict_when_no_endpoint(self) -> None:
+        """fetch_userinfo returns {} when no userinfo endpoint is configured."""
+        validator = self._make_validator_with_userinfo("")
+        result = validator.fetch_userinfo("fake-token")
+        assert result == {}
+
+    def test_returns_empty_dict_on_network_failure(self) -> None:
+        """fetch_userinfo returns {} when the HTTP request fails."""
+        from unittest.mock import patch
+
+        validator = self._make_validator_with_userinfo("https://auth.example.com/oauth2/userinfo")
+        with patch(
+            "mcp_awareness.oauth.urllib.request.urlopen",
+            side_effect=Exception("connection refused"),
+        ):
+            result = validator.fetch_userinfo("fake-token")
+        assert result == {}
+
+    def test_sends_bearer_token(self) -> None:
+        """fetch_userinfo sends the access token in the Authorization header."""
+        from unittest.mock import patch
+
+        validator = self._make_validator_with_userinfo("https://auth.example.com/oauth2/userinfo")
+        userinfo_response = json.dumps({"sub": "user_123"}).encode()
+
+        mock_resp = MagicMock()
+        mock_resp.read.return_value = userinfo_response
+        mock_resp.__enter__ = lambda s: s
+        mock_resp.__exit__ = MagicMock(return_value=False)
+
+        with patch(
+            "mcp_awareness.oauth.urllib.request.urlopen", return_value=mock_resp
+        ) as mock_urlopen:
+            validator.fetch_userinfo("my-secret-token")
+            req = mock_urlopen.call_args[0][0]
+            assert req.get_header("Authorization") == "Bearer my-secret-token"
+
+    def test_filters_non_string_values(self) -> None:
+        """fetch_userinfo only returns string values from the response."""
+        from unittest.mock import patch
+
+        validator = self._make_validator_with_userinfo("https://auth.example.com/oauth2/userinfo")
+        # Response includes non-string fields (e.g. boolean, int)
+        userinfo_response = json.dumps(
+            {
+                "sub": "user_123",
+                "email": "alice@example.com",
+                "email_verified": True,
+                "updated_at": 1234567890,
+            }
+        ).encode()
+
+        mock_resp = MagicMock()
+        mock_resp.read.return_value = userinfo_response
+        mock_resp.__enter__ = lambda s: s
+        mock_resp.__exit__ = MagicMock(return_value=False)
+
+        with patch("mcp_awareness.oauth.urllib.request.urlopen", return_value=mock_resp):
+            result = validator.fetch_userinfo("fake-token")
+
+        assert result == {"sub": "user_123", "email": "alice@example.com"}
+        assert "email_verified" not in result
+        assert "updated_at" not in result
