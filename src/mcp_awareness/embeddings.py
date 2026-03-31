@@ -118,6 +118,15 @@ class OllamaEmbedding:
         with urllib.request.urlopen(req, timeout=self._timeout) as resp:
             data = json.loads(resp.read())
         result: list[list[float]] = data["embeddings"]
+        if len(result) != len(texts):
+            logger.warning(
+                "Ollama returned %d embeddings for %d texts — partial response",
+                len(result),
+                len(texts),
+            )
+            raise ValueError(
+                f"Ollama returned {len(result)} embeddings for {len(texts)} input texts"
+            )
         return result
 
     def is_available(self) -> bool:
