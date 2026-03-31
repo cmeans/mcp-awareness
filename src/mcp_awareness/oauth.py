@@ -18,11 +18,16 @@
 
 from __future__ import annotations
 
+import json
+import logging
 import threading
 import time
+import urllib.request
 
 import jwt
 from jwt import PyJWKClient
+
+logger = logging.getLogger(__name__)
 
 
 class OAuthTokenValidator:
@@ -44,16 +49,35 @@ class OAuthTokenValidator:
         self.audience = audience
         self.user_claim = user_claim
 
-        # JWKS URI: explicit override or derive from issuer
+        # JWKS URI: explicit override or auto-discover from OIDC configuration
         if jwks_uri:
             self._jwks_uri = jwks_uri
         else:
-            self._jwks_uri = f"{self.issuer}/.well-known/jwks.json"
+            self._jwks_uri = self._discover_jwks_uri()
 
         self._jwk_client = PyJWKClient(self._jwks_uri, cache_jwk_set=True)
         self._jwks_cache_ttl = jwks_cache_ttl
         self._last_jwks_fetch: float = 0.0
         self._jwks_lock = threading.Lock()
+
+    def _discover_jwks_uri(self) -> str:
+        """Discover JWKS URI from OpenID configuration, fall back to well-known default."""
+        discovery_url = f"{self.issuer}/.well-known/openid-configuration"
+        try:
+            with urllib.request.urlopen(discovery_url, timeout=10) as resp:
+                config = json.loads(resp.read())
+                uri = config.get("jwks_uri")
+                if uri:
+                    logger.info("Discovered JWKS URI: %s", uri)
+                    return str(uri)
+        except Exception:
+            pass  # Fall through to default
+
+        logger.warning(
+            "OIDC discovery failed for %s, using default JWKS path",
+            self.issuer,
+        )
+        return f"{self.issuer}/.well-known/jwks.json"
 
     def validate(self, token: str) -> dict[str, str]:
         """Validate an OAuth JWT and return extracted identity claims.

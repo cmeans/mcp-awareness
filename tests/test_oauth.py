@@ -218,6 +218,53 @@ class TestOAuthTokenValidator:
         result = validator.validate(token)
         assert result["owner_id"] == TEST_OWNER
 
+    def test_explicit_jwks_uri_skips_discovery(self) -> None:
+        """When jwks_uri is provided, OIDC discovery should not be attempted."""
+        from unittest.mock import patch
+
+        explicit_uri = "https://auth.example.com/custom/jwks"
+        with patch("mcp_awareness.oauth.urllib.request.urlopen") as mock_urlopen:
+            validator = OAuthTokenValidator(
+                issuer=TEST_ISSUER,
+                audience=TEST_AUDIENCE,
+                jwks_uri=explicit_uri,
+            )
+            mock_urlopen.assert_not_called()
+        assert validator._jwks_uri == explicit_uri
+
+    def test_oidc_discovery_extracts_jwks_uri(self) -> None:
+        """When jwks_uri is empty, auto-discover from OIDC configuration."""
+        from unittest.mock import patch
+
+        discovered_uri = "https://auth.example.com/oauth2/jwks"
+        oidc_config = json.dumps({"jwks_uri": discovered_uri}).encode()
+
+        mock_resp = MagicMock()
+        mock_resp.read.return_value = oidc_config
+        mock_resp.__enter__ = lambda s: s
+        mock_resp.__exit__ = MagicMock(return_value=False)
+
+        with patch("mcp_awareness.oauth.urllib.request.urlopen", return_value=mock_resp):
+            validator = OAuthTokenValidator(
+                issuer=TEST_ISSUER,
+                audience=TEST_AUDIENCE,
+            )
+        assert validator._jwks_uri == discovered_uri
+
+    def test_oidc_discovery_fallback_on_failure(self) -> None:
+        """When OIDC discovery fails, fall back to .well-known/jwks.json."""
+        from unittest.mock import patch
+
+        with patch(
+            "mcp_awareness.oauth.urllib.request.urlopen",
+            side_effect=Exception("connection refused"),
+        ):
+            validator = OAuthTokenValidator(
+                issuer=TEST_ISSUER,
+                audience=TEST_AUDIENCE,
+            )
+        assert validator._jwks_uri == f"{TEST_ISSUER}/.well-known/jwks.json"
+
 
 # ---------------------------------------------------------------------------
 # WellKnownMiddleware tests
