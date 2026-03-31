@@ -1919,6 +1919,52 @@ class TestEmbeddings:
         assert len(results) == 1
         assert results[0][1] > 0.99
 
+    def test_upsert_embedding_preserves_created(self, store):
+        """Upserting same entry+model preserves the original created timestamp."""
+        import time
+
+        now = now_utc()
+        entry = Entry(
+            id=make_id(),
+            type=EntryType.NOTE,
+            source="test",
+            tags=[],
+            created=now,
+            expires=None,
+            data={"description": "test"},
+        )
+        store.add(TEST_OWNER, entry)
+        store.upsert_embedding(TEST_OWNER, entry.id, "test-model", 768, "hash1", self._vec(768, 0))
+
+        # Read the created timestamp after the first insert
+        with store._pool.connection() as conn, conn.cursor() as cur:
+            cur.execute(
+                "SELECT created FROM embeddings WHERE entry_id = %s AND model = %s",
+                (entry.id, "test-model"),
+            )
+            original_created = cur.fetchone()["created"]
+
+        # Small delay so any now() call would produce a different timestamp
+        time.sleep(0.05)
+
+        # Upsert again with a different hash and vector
+        store.upsert_embedding(TEST_OWNER, entry.id, "test-model", 768, "hash2", self._vec(768, 1))
+
+        # Read the created timestamp after the second upsert
+        with store._pool.connection() as conn, conn.cursor() as cur:
+            cur.execute(
+                "SELECT created, text_hash FROM embeddings WHERE entry_id = %s AND model = %s",
+                (entry.id, "test-model"),
+            )
+            row = cur.fetchone()
+            updated_created = row["created"]
+            updated_hash = row["text_hash"]
+
+        # created must be preserved from the first insert
+        assert updated_created == original_created
+        # but the hash should have been updated
+        assert updated_hash == "hash2"
+
     def test_semantic_search_ordering(self, store):
         """Results are ordered by similarity (closest first)."""
         now = now_utc()

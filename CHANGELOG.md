@@ -22,6 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - **Ollama response validation**: `OllamaEmbedding.embed()` now validates that the number of returned embeddings matches the number of input texts, raising `ValueError` on partial responses instead of silently dropping entries via `zip(strict=False)` (MEDIUM #21)
+- **Embedding upsert preserves `created`**: `upsert_embedding.sql` no longer overwrites the `created` timestamp on conflict — only the vector, hash, and dimensions are updated (MEDIUM #8)
 - **Alert expiry filter**: `get_active_alerts` and `get_all_active_alerts` now filter out expired alerts (`expires > NOW()`), matching the behavior of `get_active_suppressions` (MEDIUM #18)
 - **Intention lifecycle**: `generate_briefing` now transitions fired intentions from "pending" to "fired" state, preventing them from firing on every subsequent briefing read
 - **Custom prompt sync uses DEFAULT_OWNER**: `_sync_custom_prompts` now queries `DEFAULT_OWNER` instead of the request-scoped `_owner_id()`, preventing User A's prompt sync from leaking into User B's prompt registry in multi-tenant deployments (MEDIUM #14)
