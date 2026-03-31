@@ -39,6 +39,16 @@ def upgrade() -> None:
     op.execute("ALTER TABLE entries ALTER COLUMN updated DROP NOT NULL")
     # Backfill: entries that were never actually updated have updated == created.
     # Set those to NULL so the column reflects reality.
+    #
+    # NOTE: This is a one-time backfill operation. For large tables (>100K rows),
+    # the single UPDATE may be slow. Consider running in batches instead:
+    #
+    #   UPDATE entries SET updated = NULL
+    #     WHERE id IN (
+    #       SELECT id FROM entries WHERE updated = created LIMIT 10000
+    #     );
+    #   -- repeat until 0 rows affected
+    #
     op.execute("UPDATE entries SET updated = NULL WHERE updated = created")
 
 
