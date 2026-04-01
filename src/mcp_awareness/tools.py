@@ -226,8 +226,6 @@ async def get_knowledge(
         limit=limit + 1,
         offset=offset,
     )
-    _srv._log_reads(entries[:limit], "get_knowledge")
-
     # Semantic re-ranking: if hint is provided and embeddings are available,
     # re-order results by cosine similarity to the hint text.
     similarity_map: dict[str, float] = {}
@@ -255,6 +253,9 @@ async def get_knowledge(
                     entries.sort(key=lambda e: similarity_map.get(e.id, -1.0), reverse=True)
             except Exception:  # pragma: no cover
                 logger.debug("Hint re-ranking failed", exc_info=True)
+
+    # Log reads after re-ranking so we track exactly what's returned
+    _srv._log_reads(entries[:limit], "get_knowledge")
 
     if mode == "list":
         read_counts = _srv.store.get_read_counts(_srv._owner_id(), [e.id for e in entries])

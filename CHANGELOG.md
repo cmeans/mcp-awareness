@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - **OAuth staging compose**: `docker-compose.oauth.yaml` for isolated OAuth/WorkOS AuthKit testing with separate Postgres, Cloudflare tunnel, and optional Ollama — runs on port 8421 alongside production
 - **OAuth env template**: `.env.oauth.example` with all required/optional variables for staging deployment
-- **Gzip response compression**: HTTP transport now compresses responses over 500 bytes via Starlette GZipMiddleware — expected 60-80% egress reduction for typical payloads (#112)
+- **Gzip response compression**: HTTP transport compresses non-SSE responses over 500 bytes via Starlette GZipMiddleware — applies to health checks and JSON endpoints; MCP tool responses use SSE (`text/event-stream`) which Starlette excludes from compression, so rely on Cloudflare or reverse proxy for tool traffic compression (#112)
 
 ### Changed
 - **Default query limit reduced**: `DEFAULT_QUERY_LIMIT` lowered from 200 to 100 — reduces default response size for all paginated tools (#112)
