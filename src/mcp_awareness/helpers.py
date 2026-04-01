@@ -29,7 +29,7 @@ import json
 import time
 from collections.abc import Callable
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, NoReturn
 
 from .schema import EntryType
 
@@ -59,14 +59,15 @@ def canonical_email(email: str) -> str:
 _VALID_ENTRY_TYPES = [e.value for e in EntryType]
 
 
-def _parse_entry_type(entry_type: str | None) -> tuple[EntryType | None, str | None]:
-    """Parse entry_type string. Returns (value, None) or (None, error)."""
+def _parse_entry_type(entry_type: str | None) -> EntryType | None:
+    """Parse entry_type string. Returns EntryType or None. Raises on invalid."""
     if not entry_type:
-        return None, None
+        return None
     try:
-        return EntryType(entry_type), None
+        return EntryType(entry_type)
     except ValueError:
-        return None, f"Invalid entry_type: {entry_type!r}. Valid: {_VALID_ENTRY_TYPES}"
+        _validate_enum(entry_type, "entry_type", _VALID_ENTRY_TYPES)
+        return None  # unreachable, but keeps mypy happy
 
 
 def _validate_pagination(
@@ -155,7 +156,7 @@ def _error_response(
     valid: list[str] | None = None,
     suggestion: str | None = None,
     help_url: str | None = None,
-) -> None:
+) -> NoReturn:
     """Build a structured error envelope and raise ToolError.
 
     The MCP SDK wraps ToolError in a CallToolResult with isError=True,
