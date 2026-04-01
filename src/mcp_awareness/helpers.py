@@ -104,6 +104,46 @@ def _paginate(
     }
 
 
+def _levenshtein(a: str, b: str) -> int:
+    """Compute Levenshtein edit distance between two strings."""
+    if len(a) < len(b):
+        return _levenshtein(b, a)
+    if not b:
+        return len(a)
+    prev = list(range(len(b) + 1))
+    for i, ca in enumerate(a):
+        curr = [i + 1]
+        for j, cb in enumerate(b):
+            curr.append(
+                min(
+                    prev[j + 1] + 1,
+                    curr[j] + 1,
+                    prev[j] + (ca != cb),
+                )
+            )
+        prev = curr
+    return prev[-1]
+
+
+def _suggest(value: str, valid_values: set[str] | list[str]) -> str | None:
+    """Return the closest valid value if edit distance <= 2, else None.
+
+    Returns None for exact matches (the value is already valid).
+    Case-insensitive comparison — suggestion returned in its original case.
+    """
+    if value in valid_values:
+        return None  # exact match (already valid)
+    lower_value = value.lower()
+    best: str | None = None
+    best_dist = 3  # threshold: only suggest if distance <= 2
+    for v in valid_values:
+        dist = _levenshtein(lower_value, v.lower())
+        if dist < best_dist:
+            best_dist = dist
+            best = v
+    return best
+
+
 def _log_timing(tool_name: str, elapsed_ms: float) -> None:
     """Log tool call timing to stdout (Docker captures automatically)."""
     ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
