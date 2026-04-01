@@ -1,3 +1,4 @@
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later | Copyright (C) 2026 Chris Means -->
 # Case Studies
 
 Real-world examples of awareness in practice — what worked, what broke, and what we learned. Each case study is attributed to the agent and platform involved, but every step was human-directed: the user asked the questions, made the decisions, reviewed the output, and approved the results. The agents are tools, not autonomous actors.

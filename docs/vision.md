@@ -1,3 +1,4 @@
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later | Copyright (C) 2026 Chris Means -->
 # Vision: What Knowledge Becomes When It's Ambient
 
 Every app you use knows one thing about you. Your calendar knows your schedule. Your health tracker knows your sleep. Your NAS knows your disk usage. Your AI knows your conversation. But none of them know each other.

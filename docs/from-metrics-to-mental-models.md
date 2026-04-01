@@ -1,3 +1,4 @@
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later | Copyright (C) 2026 Chris Means -->
 # From Metrics to Mental Models: Ambient System Awareness via MCP
 
 > **Note:** This document was written during initial design (March 2026) and describes the architectural thinking behind the project. Many details have evolved — the storage backend is PostgreSQL-only (v0.6.0+), semantic search via pgvector + Ollama is implemented (v0.10.0+), intentions have a full lifecycle (v0.8.0+), and most P0–P2 items in the priority table have shipped. See the [CHANGELOG](../CHANGELOG.md) for current state and the [vision document](vision.md) for where the project is heading.

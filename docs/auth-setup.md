@@ -1,3 +1,4 @@
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later | Copyright (C) 2026 Chris Means -->
 # Authentication Setup
 
 Awareness supports two authentication modes that can work independently or together:
