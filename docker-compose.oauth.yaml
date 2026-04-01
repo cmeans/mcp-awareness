@@ -1,0 +1,138 @@
+# OAuth staging deployment — isolated stack for testing WorkOS AuthKit
+# Uses separate containers, volumes, and ports from production.
+#
+# Setup:
+#   1. Create a Cloudflare named tunnel for staging:
+#        cloudflared tunnel create awareness-staging
+#   2. Add DNS route:
+#        cloudflared tunnel route dns awareness-staging staging.mcpawareness.com
+#   3. Create config at ~/.cloudflared/staging-config.yml:
+#        tunnel: <tunnel-id>
+#        credentials-file: /etc/cloudflared/credentials.json
+#        ingress:
+#          - hostname: staging.mcpawareness.com
+#            service: http://awareness-oauth:8421
+#          - service: http_status:404
+#   4. Copy .env.oauth.example to .env.oauth and fill in WorkOS values
+#   5. Launch: docker compose -f docker-compose.oauth.yaml --env-file .env.oauth up -d
+#
+# Tear down: docker compose -f docker-compose.oauth.yaml down -v
+name: mcp-awareness-oauth
+
+services:
+  awareness-oauth:
+    build: .
+    container_name: awareness-oauth
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8421:8421"
+    environment:
+      - AWARENESS_HOST=0.0.0.0
+      - AWARENESS_PORT=8421
+      - AWARENESS_TRANSPORT=streamable-http
+      - AWARENESS_DATABASE_URL=postgresql://awareness:${POSTGRES_PASSWORD:-awareness-oauth}@postgres-oauth:5432/awareness
+      - AWARENESS_MOUNT_PATH=${AWARENESS_MOUNT_PATH:-}
+      - AWARENESS_AUTH_REQUIRED=true
+      - AWARENESS_JWT_SECRET=${AWARENESS_JWT_SECRET:-}
+      - AWARENESS_JWT_ALGORITHM=${AWARENESS_JWT_ALGORITHM:-HS256}
+      - AWARENESS_OAUTH_ISSUER=${AWARENESS_OAUTH_ISSUER:?Set AWARENESS_OAUTH_ISSUER to your WorkOS AuthKit domain}
+      - AWARENESS_OAUTH_AUDIENCE=${AWARENESS_OAUTH_AUDIENCE:-}
+      - AWARENESS_OAUTH_JWKS_URI=${AWARENESS_OAUTH_JWKS_URI:-}
+      - AWARENESS_OAUTH_USER_CLAIM=${AWARENESS_OAUTH_USER_CLAIM:-sub}
+      - AWARENESS_OAUTH_AUTO_PROVISION=true
+      - AWARENESS_PUBLIC_URL=${AWARENESS_PUBLIC_URL:-https://staging.mcpawareness.com}
+      - AWARENESS_DEFAULT_OWNER=${AWARENESS_DEFAULT_OWNER:-}
+      - AWARENESS_EMBEDDING_PROVIDER=${AWARENESS_EMBEDDING_PROVIDER:-}
+      - AWARENESS_EMBEDDING_MODEL=${AWARENESS_EMBEDDING_MODEL:-nomic-embed-text}
+      - AWARENESS_OLLAMA_URL=${AWARENESS_OLLAMA_URL:-http://ollama-oauth:11434}
+    depends_on:
+      postgres-oauth:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: '0.1'
+          memory: 64M
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; s = socket.create_connection(('localhost', 8421), timeout=2); s.close()"]
+      interval: 10s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  tunnel-oauth:
+    image: cloudflare/cloudflared:latest
+    container_name: awareness-tunnel-oauth
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run
+    volumes:
+      - ${CLOUDFLARED_STAGING_CONFIG:-~/.cloudflared/staging-config.yml}:/etc/cloudflared/config.yml:ro
+      - ${CLOUDFLARED_STAGING_CREDS:?Set CLOUDFLARED_STAGING_CREDS to your staging tunnel credentials file}:/etc/cloudflared/credentials.json:ro
+    depends_on:
+      awareness-oauth:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: '0.05'
+          memory: 64M
+
+  postgres-oauth:
+    image: pgvector/pgvector:pg17
+    container_name: awareness-postgres-oauth
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: awareness
+      POSTGRES_USER: awareness
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-awareness-oauth}
+    volumes:
+      - ${AWARENESS_OAUTH_PG_DATA:-~/awareness-oauth-pg}:/var/lib/postgresql/data
+    command:
+      - postgres
+      - -c
+      - wal_level=logical
+      - -c
+      - max_replication_slots=4
+      - -c
+      - shared_preload_libraries=pg_stat_statements
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U awareness"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # Ollama for staging — separate volume from production to avoid concurrent access
+  ollama-oauth:
+    image: ollama/ollama:latest
+    container_name: awareness-ollama-oauth
+    restart: unless-stopped
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        ollama serve &
+        until ollama list > /dev/null 2>&1; do sleep 1; done
+        ollama pull ${AWARENESS_EMBEDDING_MODEL:-nomic-embed-text}
+        wait
+    environment:
+      - AWARENESS_EMBEDDING_MODEL=${AWARENESS_EMBEDDING_MODEL:-nomic-embed-text}
+    volumes:
+      - ${AWARENESS_OLLAMA_DATA:-~/awareness-ollama-oauth}:/root/.ollama
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 2G
+    healthcheck:
+      test: ["CMD-SHELL", "ollama list | grep -q ${AWARENESS_EMBEDDING_MODEL:-nomic-embed-text}"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+    profiles:
+      - embeddings

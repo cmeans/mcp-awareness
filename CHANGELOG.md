@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **OAuth staging compose**: `docker-compose.oauth.yaml` for isolated OAuth/WorkOS AuthKit testing with separate Postgres, Cloudflare tunnel, and optional Ollama — runs on port 8421 alongside production
+- **OAuth env template**: `.env.oauth.example` with all required/optional variables for staging deployment
+
 ### Fixed
 - **JSON content rejected by Pydantic validation**: `remember` and `update_entry` now accept `dict` and `list` content in addition to `str` — fixes `string_type` validation error when MCP transport auto-parses JSON strings before they reach the handler (#130)
 

@@ -146,6 +146,7 @@ celerybeat.pid
 
 # Environments
 .env
+.env.oauth
 .envrc
 .venv
 env/
