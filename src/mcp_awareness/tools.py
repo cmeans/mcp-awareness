@@ -40,6 +40,7 @@ from .helpers import (
     VALID_ALERT_LEVELS,
     VALID_ALERT_TYPES,
     VALID_URGENCY,
+    _paginate,
     _parse_entry_type,
     _timed,
     _validate_pagination,
@@ -96,6 +97,7 @@ async def get_alerts(
     if isinstance(pv, str):
         return json.dumps({"error": pv})
     limit, offset = pv
+    assert limit is not None  # _validate_pagination guarantees a default
     if since is not None and not since:
         return json.dumps({"error": "since cannot be empty; omit or provide an ISO 8601 timestamp"})
     if since:
@@ -105,12 +107,14 @@ async def get_alerts(
     else:
         since_dt = None
     alerts = _srv.store.get_active_alerts(
-        _srv._owner_id(), source, since=since_dt, limit=limit, offset=offset
+        _srv._owner_id(), source, since=since_dt, limit=limit + 1, offset=offset
     )
-    _srv._log_reads(alerts, "get_alerts")
+    _srv._log_reads(alerts[:limit], "get_alerts")
     if mode == "list":
-        return json.dumps([a.to_list_dict() for a in alerts], indent=2)
-    return json.dumps([a.to_dict() for a in alerts], indent=2)
+        page = _paginate([a.to_list_dict() for a in alerts], limit, offset)
+    else:
+        page = _paginate([a.to_dict() for a in alerts], limit, offset)
+    return json.dumps(page, indent=2)
 
 
 @_srv.mcp.tool()
@@ -180,6 +184,7 @@ async def get_knowledge(
     if isinstance(pv, str):
         return json.dumps({"error": pv})
     limit, offset = pv
+    assert limit is not None  # _validate_pagination guarantees a default
     if since:
         since_dt, err = _safe_ensure_dt(since)
         if err:
@@ -218,10 +223,10 @@ async def get_knowledge(
         learned_from=learned_from,
         created_after=created_after_dt,
         created_before=created_before_dt,
-        limit=limit,
+        limit=limit + 1,
         offset=offset,
     )
-    _srv._log_reads(entries, "get_knowledge")
+    _srv._log_reads(entries[:limit], "get_knowledge")
 
     # Semantic re-ranking: if hint is provided and embeddings are available,
     # re-order results by cosine similarity to the hint text.
@@ -253,7 +258,7 @@ async def get_knowledge(
 
     if mode == "list":
         read_counts = _srv.store.get_read_counts(_srv._owner_id(), [e.id for e in entries])
-        result = []
+        result_items = []
         for e in entries:
             d = e.to_list_dict()
             counts = read_counts.get(e.id, {})
@@ -261,15 +266,17 @@ async def get_knowledge(
             d["last_read"] = counts.get("last_read")
             if e.id in similarity_map:
                 d["similarity"] = round(similarity_map[e.id], 4)
-            result.append(d)
-        return json.dumps(result, indent=2)
+            result_items.append(d)
+        page = _paginate(result_items, limit, offset)
+        return json.dumps(page, indent=2)
     items = []
     for e in entries:
         d = e.to_dict()
         if e.id in similarity_map:
             d["similarity"] = round(similarity_map[e.id], 4)
         items.append(d)
-    return json.dumps(items, indent=2)
+    page = _paginate(items, limit, offset)
+    return json.dumps(page, indent=2)
 
 
 @_srv.mcp.tool()
@@ -744,6 +751,7 @@ async def get_deleted(
     if isinstance(pv, str):
         return json.dumps({"error": pv})
     limit, offset = pv
+    assert limit is not None  # _validate_pagination guarantees a default
     if since is not None and not since:
         return json.dumps({"error": "since cannot be empty; omit or provide an ISO 8601 timestamp"})
     if since:
@@ -752,10 +760,14 @@ async def get_deleted(
             return json.dumps({"status": "error", "message": err})
     else:
         since_dt = None
-    entries = _srv.store.get_deleted(_srv._owner_id(), since=since_dt, limit=limit, offset=offset)
+    entries = _srv.store.get_deleted(
+        _srv._owner_id(), since=since_dt, limit=limit + 1, offset=offset
+    )
     if mode == "list":
-        return json.dumps([e.to_list_dict() for e in entries], indent=2)
-    return json.dumps([e.to_dict() for e in entries], indent=2)
+        page = _paginate([e.to_list_dict() for e in entries], limit, offset)
+    else:
+        page = _paginate([e.to_dict() for e in entries], limit, offset)
+    return json.dumps(page, indent=2)
 
 
 # ---------------------------------------------------------------------------
@@ -817,9 +829,10 @@ async def get_reads(
     else:
         since_dt = None
     reads = _srv.store.get_reads(
-        _srv._owner_id(), entry_id=entry_id, since=since_dt, platform=platform, limit=limit
+        _srv._owner_id(), entry_id=entry_id, since=since_dt, platform=platform, limit=limit + 1
     )
-    return json.dumps(reads, indent=2)
+    page = _paginate(reads, limit, None)
+    return json.dumps(page, indent=2)
 
 
 @_srv.mcp.tool()
@@ -849,9 +862,10 @@ async def get_actions(
         since=since_dt,
         platform=platform,
         tags=tags,
-        limit=limit,
+        limit=limit + 1,
     )
-    return json.dumps(actions, indent=2)
+    page = _paginate(actions, limit, None)
+    return json.dumps(page, indent=2)
 
 
 @_srv.mcp.tool()
@@ -872,8 +886,9 @@ async def get_unread(since: str | None = None, limit: int | None = None) -> str:
             return json.dumps({"status": "error", "message": err})
     else:
         since_dt = None
-    entries = _srv.store.get_unread(_srv._owner_id(), since=since_dt, limit=limit)
-    return json.dumps([e.to_list_dict() for e in entries], indent=2)
+    entries = _srv.store.get_unread(_srv._owner_id(), since=since_dt, limit=limit + 1)
+    page = _paginate([e.to_list_dict() for e in entries], limit, None)
+    return json.dumps(page, indent=2)
 
 
 @_srv.mcp.tool()
@@ -897,9 +912,10 @@ async def get_activity(
     else:
         since_dt = None
     activity = _srv.store.get_activity(
-        _srv._owner_id(), since=since_dt, platform=platform, limit=limit
+        _srv._owner_id(), since=since_dt, platform=platform, limit=limit + 1
     )
-    return json.dumps(activity, indent=2)
+    page = _paginate(activity, limit, None)
+    return json.dumps(page, indent=2)
 
 
 # ---------------------------------------------------------------------------
@@ -978,11 +994,13 @@ async def get_intentions(
     if limit is None:
         limit = DEFAULT_QUERY_LIMIT
     entries = _srv.store.get_intentions(
-        _srv._owner_id(), state=state, source=source, tags=tags, limit=limit
+        _srv._owner_id(), state=state, source=source, tags=tags, limit=limit + 1
     )
     if mode == "list":
-        return json.dumps([e.to_list_dict() for e in entries], indent=2)
-    return json.dumps([e.to_dict() for e in entries], indent=2)
+        page = _paginate([e.to_list_dict() for e in entries], limit, None)
+    else:
+        page = _paginate([e.to_dict() for e in entries], limit, None)
+    return json.dumps(page, indent=2)
 
 
 @_srv.mcp.tool()
@@ -1080,22 +1098,24 @@ async def semantic_search(
         tags=tags,
         since=since_dt,
         until=until_dt,
-        limit=limit,
+        limit=limit + 1,
     )
-    _srv._log_reads([e for e, _ in results], "semantic_search")
+    _srv._log_reads([e for e, _ in results[:limit]], "semantic_search")
     if mode == "list":
         items = []
         for entry, score in results:
             d = entry.to_list_dict()
             d["similarity"] = round(score, 4)
             items.append(d)
-        return json.dumps(items, indent=2)
+        page = _paginate(items, limit, None)
+        return json.dumps(page, indent=2)
     items = []
     for entry, score in results:
         d = entry.to_dict()
         d["similarity"] = round(score, 4)
         items.append(d)
-    return json.dumps(items, indent=2)
+    page = _paginate(items, limit, None)
+    return json.dumps(page, indent=2)
 
 
 @_srv.mcp.tool()

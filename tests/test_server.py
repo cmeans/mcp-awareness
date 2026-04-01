@@ -555,7 +555,7 @@ class TestGetAlertsTool:
     @pytest.mark.anyio
     async def test_get_alerts_empty(self) -> None:
         result = await server_mod.get_alerts()
-        assert json.loads(result) == []
+        assert json.loads(result)["entries"] == []
 
     @pytest.mark.anyio
     async def test_get_alerts_filtered(self) -> None:
@@ -587,9 +587,9 @@ class TestGetAlertsTool:
             },
         )
         all_result = await server_mod.get_alerts()
-        assert len(json.loads(all_result)) == 2
+        assert len(json.loads(all_result)["entries"]) == 2
         nas_result = await server_mod.get_alerts(source="nas")
-        assert len(json.loads(nas_result)) == 1
+        assert len(json.loads(nas_result)["entries"]) == 1
 
     @pytest.mark.anyio
     async def test_get_alerts_negative_limit(self) -> None:
@@ -630,7 +630,7 @@ class TestGetKnowledgeTool:
             effect="suppress test",
         )
         result = await server_mod.get_knowledge()
-        entries = json.loads(result)
+        entries = json.loads(result)["entries"]
         assert len(entries) == 1
 
     @pytest.mark.anyio
@@ -638,7 +638,7 @@ class TestGetKnowledgeTool:
         await server_mod.learn_pattern(source="nas", tags=["infra"], description="nas pattern")
         await server_mod.learn_pattern(source="ci", tags=["infra"], description="ci pattern")
         result = await server_mod.get_knowledge(source="nas")
-        entries = json.loads(result)
+        entries = json.loads(result)["entries"]
         assert len(entries) == 1
         assert entries[0]["data"]["description"] == "nas pattern"
 
@@ -649,7 +649,7 @@ class TestGetKnowledgeTool:
             source="nas", tags=["personal"], description="personal pattern"
         )
         result = await server_mod.get_knowledge(tags=["personal"])
-        entries = json.loads(result)
+        entries = json.loads(result)["entries"]
         assert len(entries) == 1
         assert entries[0]["data"]["description"] == "personal pattern"
 
@@ -658,7 +658,7 @@ class TestGetKnowledgeTool:
         await server_mod.learn_pattern(source="nas", tags=["infra"], description="a pattern")
         await server_mod.add_context(source="nas", tags=["infra"], description="a context")
         result = await server_mod.get_knowledge(entry_type="context")
-        entries = json.loads(result)
+        entries = json.loads(result)["entries"]
         assert len(entries) == 1
         assert entries[0]["data"]["description"] == "a context"
 
@@ -668,7 +668,7 @@ class TestGetKnowledgeTool:
         await server_mod.learn_pattern(source="ci", tags=["infra"], description="ci infra")
         await server_mod.add_context(source="nas", tags=["infra"], description="nas context")
         result = await server_mod.get_knowledge(source="nas", entry_type="pattern")
-        entries = json.loads(result)
+        entries = json.loads(result)["entries"]
         assert len(entries) == 1
         assert entries[0]["data"]["description"] == "nas infra"
 
@@ -860,14 +860,14 @@ class TestGetDeletedTool:
     @pytest.mark.anyio
     async def test_get_deleted_empty(self) -> None:
         result = await server_mod.get_deleted()
-        assert json.loads(result) == []
+        assert json.loads(result)["entries"] == []
 
     @pytest.mark.anyio
     async def test_get_deleted_shows_trashed(self) -> None:
         result = await server_mod.learn_pattern(source="nas", tags=[], description="trashed")
         entry_id = json.loads(result)["id"]
         await server_mod.delete_entry(entry_id=entry_id)
-        trash = json.loads(await server_mod.get_deleted())
+        trash = json.loads(await server_mod.get_deleted())["entries"]
         assert len(trash) == 1
         assert trash[0]["id"] == entry_id
 
@@ -893,7 +893,7 @@ class TestRememberTool:
         data = json.loads(result)
         assert data["status"] == "ok"
         # Visible in get_knowledge
-        entries = json.loads(await server_mod.get_knowledge(entry_type="note"))
+        entries = json.loads(await server_mod.get_knowledge(entry_type="note"))["entries"]
         assert len(entries) == 1
         assert entries[0]["data"]["description"] == "Mom's birthday is March 15"
 
@@ -909,7 +909,7 @@ class TestRememberTool:
         )
         data = json.loads(result)
         assert data["status"] == "ok"
-        entries = json.loads(await server_mod.get_knowledge(entry_type="note"))
+        entries = json.loads(await server_mod.get_knowledge(entry_type="note"))["entries"]
         assert len(entries) == 1
         assert entries[0]["data"]["content_type"] == "application/json"
         assert entries[0]["data"]["learned_from"] == "claude-code"
@@ -927,7 +927,7 @@ class TestRememberTool:
         )
         data = json.loads(result)
         assert data["status"] == "ok"
-        entries = json.loads(await server_mod.get_knowledge(entry_type="note"))
+        entries = json.loads(await server_mod.get_knowledge(entry_type="note"))["entries"]
         # Content should be stored as a JSON string, not a dict
         assert isinstance(entries[0]["data"]["content"], str)
         parsed = json.loads(entries[0]["data"]["content"])
@@ -945,21 +945,21 @@ class TestRememberTool:
         )
         data = json.loads(result)
         assert data["status"] == "ok"
-        entries = json.loads(await server_mod.get_knowledge(entry_type="note"))
+        entries = json.loads(await server_mod.get_knowledge(entry_type="note"))["entries"]
         assert isinstance(entries[0]["data"]["content"], str)
         assert json.loads(entries[0]["data"]["content"]) == [1, 2, 3]
 
     @pytest.mark.anyio
     async def test_remember_no_content_field_when_omitted(self) -> None:
         await server_mod.remember(source="personal", tags=[], description="simple note")
-        entries = json.loads(await server_mod.get_knowledge(entry_type="note"))
+        entries = json.loads(await server_mod.get_knowledge(entry_type="note"))["entries"]
         assert "content" not in entries[0]["data"]
 
     @pytest.mark.anyio
     async def test_notes_included_in_get_knowledge(self) -> None:
         await server_mod.remember(source="s", tags=["t"], description="a note")
         await server_mod.learn_pattern(source="s", tags=["t"], description="a pattern")
-        entries = json.loads(await server_mod.get_knowledge())
+        entries = json.loads(await server_mod.get_knowledge())["entries"]
         assert len(entries) == 2
 
 
@@ -974,7 +974,7 @@ class TestUpdateEntryTool:
         # Check the entry was updated
         entries = json.loads(
             await server_mod.get_knowledge(entry_type="note", include_history="true")
-        )
+        )["entries"]
         assert entries[0]["data"]["description"] == "updated"
         # Check changelog
         changelog = entries[0]["data"]["changelog"]
@@ -986,7 +986,7 @@ class TestUpdateEntryTool:
         result = await server_mod.remember(source="personal", tags=["old-tag"], description="test")
         entry_id = json.loads(result)["id"]
         await server_mod.update_entry(entry_id=entry_id, tags=["new-tag"])
-        entries = json.loads(await server_mod.get_knowledge(include_history="true"))
+        entries = json.loads(await server_mod.get_knowledge(include_history="true"))["entries"]
         assert entries[0]["tags"] == ["new-tag"]
         assert entries[0]["data"]["changelog"][0]["changed"]["tags"] == ["old-tag"]
 
@@ -1027,7 +1027,7 @@ class TestUpdateEntryTool:
         data = json.loads(update_result)
         assert data["status"] == "ok"
         # No changelog since nothing changed
-        entries = json.loads(await server_mod.get_knowledge(include_history="true"))
+        entries = json.loads(await server_mod.get_knowledge(include_history="true"))["entries"]
         assert "changelog" not in entries[0]["data"]
 
     @pytest.mark.anyio
@@ -1041,7 +1041,7 @@ class TestUpdateEntryTool:
             entry_id=entry_id,
             content={"new": "value"},
         )
-        entries = json.loads(await server_mod.get_knowledge(entry_type="note"))
+        entries = json.loads(await server_mod.get_knowledge(entry_type="note"))["entries"]
         assert isinstance(entries[0]["data"]["content"], str)
         assert json.loads(entries[0]["data"]["content"]) == {"new": "value"}
 
@@ -1061,7 +1061,7 @@ class TestUpdateEntryTool:
         )
         entries = json.loads(
             await server_mod.get_knowledge(source="new-source", include_history="true")
-        )
+        )["entries"]
         assert len(entries) == 1
         assert entries[0]["data"]["content_type"] == "application/json"
 
@@ -1074,7 +1074,7 @@ class TestUpdateEntryTool:
         await server_mod.update_entry(entry_id=entry_id, description="refined pattern")
         entries = json.loads(
             await server_mod.get_knowledge(entry_type="pattern", include_history="true")
-        )
+        )["entries"]
         assert entries[0]["data"]["description"] == "refined pattern"
 
     @pytest.mark.anyio
@@ -1083,7 +1083,7 @@ class TestUpdateEntryTool:
         entry_id = json.loads(result)["id"]
         await server_mod.update_entry(entry_id=entry_id, description="v2")
         await server_mod.update_entry(entry_id=entry_id, description="v3")
-        entries = json.loads(await server_mod.get_knowledge(include_history="true"))
+        entries = json.loads(await server_mod.get_knowledge(include_history="true"))["entries"]
         changelog = entries[0]["data"]["changelog"]
         assert len(changelog) == 2
         assert changelog[0]["changed"]["description"] == "v1"
@@ -1096,7 +1096,7 @@ class TestGetKnowledgeHistory:
         result = await server_mod.remember(source="s", tags=["t"], description="v1")
         entry_id = json.loads(result)["id"]
         await server_mod.update_entry(entry_id=entry_id, description="v2")
-        entries = json.loads(await server_mod.get_knowledge())
+        entries = json.loads(await server_mod.get_knowledge())["entries"]
         assert "changelog" not in entries[0]["data"]
 
     @pytest.mark.anyio
@@ -1104,7 +1104,7 @@ class TestGetKnowledgeHistory:
         result = await server_mod.remember(source="s", tags=["t"], description="v1")
         entry_id = json.loads(result)["id"]
         await server_mod.update_entry(entry_id=entry_id, description="v2")
-        entries = json.loads(await server_mod.get_knowledge(include_history="true"))
+        entries = json.loads(await server_mod.get_knowledge(include_history="true"))["entries"]
         assert "changelog" in entries[0]["data"]
 
     @pytest.mark.anyio
@@ -1113,7 +1113,7 @@ class TestGetKnowledgeHistory:
         result = await server_mod.remember(source="s", tags=["t"], description="will change")
         entry_id = json.loads(result)["id"]
         await server_mod.update_entry(entry_id=entry_id, description="changed")
-        entries = json.loads(await server_mod.get_knowledge(include_history="only"))
+        entries = json.loads(await server_mod.get_knowledge(include_history="only"))["entries"]
         assert len(entries) == 1
         assert entries[0]["data"]["description"] == "changed"
 
@@ -1191,7 +1191,7 @@ class TestLogicalKeyUpsert:
         assert data["status"] == "ok"
         assert data["action"] == "updated"
         # Only one entry should exist
-        entries = json.loads(await server_mod.get_knowledge(entry_type="note"))
+        entries = json.loads(await server_mod.get_knowledge(entry_type="note"))["entries"]
         assert len(entries) == 1
         assert entries[0]["data"]["description"] == "v2"
 
@@ -1211,7 +1211,7 @@ class TestLogicalKeyUpsert:
         )
         entries = json.loads(
             await server_mod.get_knowledge(entry_type="note", include_history="true")
-        )
+        )["entries"]
         assert len(entries) == 1
         changelog = entries[0]["data"]["changelog"]
         assert len(changelog) == 1
@@ -1225,7 +1225,7 @@ class TestLogicalKeyUpsert:
         await server_mod.remember(
             source="project", tags=["v2-tag"], description="initial", logical_key="tag-test"
         )
-        entries = json.loads(await server_mod.get_knowledge(entry_type="note"))
+        entries = json.loads(await server_mod.get_knowledge(entry_type="note"))["entries"]
         assert len(entries) == 1
         assert entries[0]["tags"] == ["v2-tag"]
 
@@ -1237,7 +1237,7 @@ class TestLogicalKeyUpsert:
         await server_mod.remember(
             source="project", tags=["b"], description="two", logical_key="key-2"
         )
-        entries = json.loads(await server_mod.get_knowledge(entry_type="note"))
+        entries = json.loads(await server_mod.get_knowledge(entry_type="note"))["entries"]
         assert len(entries) == 2
 
     @pytest.mark.anyio
@@ -1248,14 +1248,14 @@ class TestLogicalKeyUpsert:
         await server_mod.remember(
             source="project-b", tags=["s"], description="b", logical_key="status"
         )
-        entries = json.loads(await server_mod.get_knowledge(entry_type="note"))
+        entries = json.loads(await server_mod.get_knowledge(entry_type="note"))["entries"]
         assert len(entries) == 2
 
     @pytest.mark.anyio
     async def test_no_logical_key_no_upsert(self) -> None:
         await server_mod.remember(source="s", tags=["t"], description="first")
         await server_mod.remember(source="s", tags=["t"], description="second")
-        entries = json.loads(await server_mod.get_knowledge(entry_type="note"))
+        entries = json.loads(await server_mod.get_knowledge(entry_type="note"))["entries"]
         assert len(entries) == 2  # no dedup without logical_key
 
     @pytest.mark.anyio
@@ -1268,7 +1268,7 @@ class TestLogicalKeyUpsert:
         assert data["action"] == "updated"  # matched, but no changelog since nothing changed
         entries = json.loads(
             await server_mod.get_knowledge(entry_type="note", include_history="true")
-        )
+        )["entries"]
         assert "changelog" not in entries[0]["data"]
 
 
@@ -1667,13 +1667,13 @@ class TestListModeAndSince:
             ),
         )
         # Full mode — includes data with content
-        full = json.loads(await server_mod.get_knowledge())
+        full = json.loads(await server_mod.get_knowledge())["entries"]
         assert len(full) == 1
         assert "data" in full[0]
         assert full[0]["data"].get("content") == "lots of content here"
 
         # List mode — metadata only, no data/content
-        listing = json.loads(await server_mod.get_knowledge(mode="list"))
+        listing = json.loads(await server_mod.get_knowledge(mode="list"))["entries"]
         assert len(listing) == 1
         assert "data" not in listing[0]
         assert listing[0]["description"] == "A test note"
@@ -1690,9 +1690,9 @@ class TestListModeAndSince:
             "a1",
             {"alert_id": "a1", "level": "warning", "message": "CPU high", "resolved": False},
         )
-        full = json.loads(await server_mod.get_alerts())
+        full = json.loads(await server_mod.get_alerts())["entries"]
         assert "data" in full[0]
-        listing = json.loads(await server_mod.get_alerts(mode="list"))
+        listing = json.loads(await server_mod.get_alerts(mode="list"))["entries"]
         assert "data" not in listing[0]
 
     @pytest.mark.anyio
@@ -1728,7 +1728,7 @@ class TestListModeAndSince:
             ),
         )
         cutoff = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
-        result = json.loads(await server_mod.get_knowledge(since=cutoff))
+        result = json.loads(await server_mod.get_knowledge(since=cutoff))["entries"]
         assert len(result) == 1
         assert result[0]["data"]["description"] == "recent note"
 
@@ -1750,7 +1750,7 @@ class TestListModeAndSince:
             ),
         )
         s.soft_delete_by_id(TEST_OWNER, entry.id)
-        listing = json.loads(await server_mod.get_deleted(mode="list"))
+        listing = json.loads(await server_mod.get_deleted(mode="list"))["entries"]
         assert len(listing) == 1
         assert "data" not in listing[0]
         assert listing[0]["description"] == "will delete"
@@ -1787,7 +1787,7 @@ class TestListModeAndSince:
             },
         )
         cutoff = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
-        result = json.loads(await server_mod.get_alerts(since=cutoff))
+        result = json.loads(await server_mod.get_alerts(since=cutoff))["entries"]
         assert len(result) == 1
         assert result[0]["data"]["alert_id"] == "recent-alert"
 
@@ -1820,7 +1820,7 @@ class TestListModeAndSince:
                 data={"description": "from beta"},
             ),
         )
-        result = json.loads(await server_mod.get_knowledge(source="alpha"))
+        result = json.loads(await server_mod.get_knowledge(source="alpha"))["entries"]
         assert len(result) == 1
         assert result[0]["data"]["description"] == "from alpha"
 
@@ -1909,7 +1909,7 @@ class TestReadActionTracking:
         )
         # This should auto-log reads
         await server_mod.get_knowledge()
-        reads = json.loads(await server_mod.get_reads())
+        reads = json.loads(await server_mod.get_reads())["entries"]
         assert len(reads) >= 1
         assert reads[0]["tool_used"] == "get_knowledge"
 
@@ -1931,7 +1931,7 @@ class TestReadActionTracking:
             ),
         )
         await server_mod.acted_on(entry_id=entry.id, action="test action")
-        actions = json.loads(await server_mod.get_actions(entry_id=entry.id))
+        actions = json.loads(await server_mod.get_actions(entry_id=entry.id))["entries"]
         assert len(actions) == 1
         assert actions[0]["action"] == "test action"
 
@@ -1965,7 +1965,7 @@ class TestReadActionTracking:
             ),
         )
         s.log_read(TEST_OWNER, [read_entry.id], tool_used="test")
-        unread = json.loads(await server_mod.get_unread())
+        unread = json.loads(await server_mod.get_unread())["entries"]
         assert len(unread) == 1
         assert unread[0]["description"] == "never read"
 
@@ -1987,9 +1987,9 @@ class TestReadActionTracking:
                     data={"description": f"unread-{i}"},
                 ),
             )
-        all_unread = json.loads(await server_mod.get_unread())
+        all_unread = json.loads(await server_mod.get_unread())["entries"]
         assert len(all_unread) == 5
-        limited = json.loads(await server_mod.get_unread(limit=2))
+        limited = json.loads(await server_mod.get_unread(limit=2))["entries"]
         assert len(limited) == 2
 
     @pytest.mark.anyio
@@ -2011,7 +2011,7 @@ class TestReadActionTracking:
         )
         s.log_read(TEST_OWNER, [entry.id], tool_used="test")
         await server_mod.acted_on(entry_id=entry.id, action="used")
-        activity = json.loads(await server_mod.get_activity())
+        activity = json.loads(await server_mod.get_activity())["entries"]
         assert len(activity) >= 2
         types = {a["event_type"] for a in activity}
         assert "read" in types
@@ -2038,7 +2038,7 @@ class TestReadActionTracking:
         s.log_read(TEST_OWNER, [entry.id], tool_used="test")
         s.log_read(TEST_OWNER, [entry.id], tool_used="test")
         # get_knowledge itself also logs a read, so count will be 2 + 1 = 3
-        listing = json.loads(await server_mod.get_knowledge(mode="list"))
+        listing = json.loads(await server_mod.get_knowledge(mode="list"))["entries"]
         assert len(listing) >= 1
         item = next(i for i in listing if i["description"] == "popular entry")
         assert item["read_count"] == 3  # 2 manual + 1 from this get_knowledge call
@@ -2069,7 +2069,7 @@ class TestLogReadsSilencesErrors:
         )
 
         with patch.object(s, "log_read", side_effect=RuntimeError("pool exploded")):
-            result = json.loads(await server_mod.get_knowledge(tags=["silence-test"]))
+            result = json.loads(await server_mod.get_knowledge(tags=["silence-test"]))["entries"]
 
         # Tool must succeed despite log_read blowing up
         assert len(result) >= 1
@@ -2096,7 +2096,7 @@ class TestIntentionTools:
         assert result["status"] == "ok"
         assert result["state"] == "pending"
         # Verify it's in the store
-        intentions = json.loads(await server_mod.get_intentions(state="pending"))
+        intentions = json.loads(await server_mod.get_intentions(state="pending"))["entries"]
         assert len(intentions) >= 1
         assert any(i["data"]["goal"] == "Pick up milk" for i in intentions)
 
@@ -2105,15 +2105,15 @@ class TestIntentionTools:
         await server_mod.remind(goal="pending one", source="test", tags=["qa"])
         result = json.loads(await server_mod.remind(goal="will fire", source="test", tags=["qa"]))
         await server_mod.update_intention(entry_id=result["id"], state="fired")
-        pending = json.loads(await server_mod.get_intentions(state="pending"))
-        fired = json.loads(await server_mod.get_intentions(state="fired"))
+        pending = json.loads(await server_mod.get_intentions(state="pending"))["entries"]
+        fired = json.loads(await server_mod.get_intentions(state="fired"))["entries"]
         assert len(pending) >= 1
         assert len(fired) >= 1
 
     @pytest.mark.anyio
     async def test_get_intentions_list_mode(self) -> None:
         await server_mod.remind(goal="list mode test", source="test", tags=["qa"])
-        listing = json.loads(await server_mod.get_intentions(mode="list"))
+        listing = json.loads(await server_mod.get_intentions(mode="list"))["entries"]
         assert len(listing) >= 1
         assert "data" not in listing[0]
         assert "description" in listing[0]
@@ -2223,7 +2223,7 @@ class TestCreatedFilters:
             ),
         )
         cutoff = (now_utc() - timedelta(hours=1)).isoformat()
-        result = json.loads(await server_mod.get_knowledge(created_after=cutoff))
+        result = json.loads(await server_mod.get_knowledge(created_after=cutoff))["entries"]
         assert len(result) == 1
         assert result[0]["data"]["description"] == "new"
 
@@ -2263,7 +2263,7 @@ class TestCreatedFilters:
             ),
         )
         cutoff = (now_utc() - timedelta(hours=1)).isoformat()
-        result = json.loads(await server_mod.get_knowledge(created_before=cutoff))
+        result = json.loads(await server_mod.get_knowledge(created_before=cutoff))["entries"]
         assert len(result) == 1
         assert result[0]["data"]["description"] == "old"
 
@@ -2374,7 +2374,7 @@ class TestSemanticSearchTool:
         s.add(TEST_OWNER, entry)
         s.upsert_embedding(TEST_OWNER, entry.id, "mock", 768, "h1", provider._vec(768, 0))
 
-        result = json.loads(await server_mod.semantic_search(query="retirement"))
+        result = json.loads(await server_mod.semantic_search(query="retirement"))["entries"]
         assert len(result) >= 1
         assert result[0]["id"] == entry.id
         assert "similarity" in result[0]
@@ -2417,7 +2417,7 @@ class TestSemanticSearchTool:
         vec[0] = 1.0
         s.upsert_embedding(TEST_OWNER, entry.id, "mock", 768, "h1", vec)
 
-        result = json.loads(await server_mod.semantic_search(query="test", mode="list"))
+        result = json.loads(await server_mod.semantic_search(query="test", mode="list"))["entries"]
         assert len(result) >= 1
         assert "similarity" in result[0]
         assert "description" in result[0]
@@ -2473,7 +2473,7 @@ class TestSemanticSearchTool:
         s.upsert_embedding(TEST_OWNER, e2.id, "mock", 768, "h2", vec)
 
         # Filter by source
-        result = json.loads(await server_mod.semantic_search(query="test", source="nas"))
+        result = json.loads(await server_mod.semantic_search(query="test", source="nas"))["entries"]
         assert len(result) == 1
         assert result[0]["source"] == "nas"
 
@@ -2698,7 +2698,7 @@ class TestGetKnowledgeHint:
 
         result = json.loads(
             await server_mod.get_knowledge(tags=["finance"], hint="retirement savings")
-        )
+        )["entries"]
         assert len(result) == 2
         # With hint, results should include similarity scores
         assert "similarity" in result[0]
@@ -2739,7 +2739,9 @@ class TestGetKnowledgeHint:
         vec[0] = 1.0
         s.upsert_embedding(TEST_OWNER, entry.id, "mock", 768, "h1", vec)
 
-        result = json.loads(await server_mod.get_knowledge(tags=["test"], hint="test", mode="list"))
+        result = json.loads(
+            await server_mod.get_knowledge(tags=["test"], hint="test", mode="list")
+        )["entries"]
         assert len(result) == 1
         assert "similarity" in result[0]
         assert "data" not in result[0]
@@ -2764,7 +2766,9 @@ class TestGetKnowledgeHint:
             ),
         )
         # Default NullEmbedding — hint should be ignored, not error
-        result = json.loads(await server_mod.get_knowledge(tags=["test"], hint="something"))
+        result = json.loads(
+            await server_mod.get_knowledge(tags=["test"], hint="something")
+        )["entries"]
         assert len(result) == 1
         assert "similarity" not in result[0]
 
@@ -2980,7 +2984,8 @@ class TestSemanticSearchIntegration:
         import time
 
         for _ in range(30):
-            result = json.loads(await server_mod.semantic_search(query="retirement savings"))
+            page = json.loads(await server_mod.semantic_search(query="retirement savings"))
+            result = page["entries"]
             if len(result) >= 2:
                 break
             time.sleep(0.5)
@@ -3201,4 +3206,6 @@ class TestDateValidation:
     async def test_get_alerts_valid_date_still_works(self) -> None:
         result = await server_mod.get_alerts(since="2026-03-30T00:00:00Z")
         parsed = json.loads(result)
-        assert isinstance(parsed, list)
+        assert isinstance(parsed, dict)
+        assert "entries" in parsed
+        assert isinstance(parsed["entries"], list)
