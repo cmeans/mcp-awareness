@@ -10,6 +10,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - **OAuth staging compose**: `docker-compose.oauth.yaml` for isolated OAuth/WorkOS AuthKit testing with separate Postgres, Cloudflare tunnel, and optional Ollama — runs on port 8421 alongside production
 - **OAuth env template**: `.env.oauth.example` with all required/optional variables for staging deployment
+- **Gzip response compression**: HTTP transport now compresses responses over 500 bytes via Starlette GZipMiddleware — expected 60-80% egress reduction for typical payloads (#112)
+
+### Changed
+- **Default query limit reduced**: `DEFAULT_QUERY_LIMIT` lowered from 200 to 100 — reduces default response size for all paginated tools (#112)
+- **Pagination metadata**: all paginated tools now return `{entries, limit, offset, has_more}` instead of a bare list — agents can detect when more data exists without a separate count query (#112)
 
 ### Security
 - **JWT issued-at validation**: both self-signed and OAuth token paths now reject tokens with future `iat` claims via `verify_iat: True` — prevents acceptance of not-yet-valid tokens

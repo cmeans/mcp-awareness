@@ -875,7 +875,7 @@ async def get_unread(since: str | None = None, limit: int | None = None) -> str:
     since: optional — only consider reads after this timestamp, so
     'unread in the last 30 days' is possible even if something was read
     6 months ago.
-    limit: max entries to return (default 200).
+    limit: max entries to return (default 100).
     Returns entry metadata (list mode format).
     This tool always returns structured JSON."""
     if limit is None:
