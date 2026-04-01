@@ -468,9 +468,7 @@ class TestRunTransportWiring:
         with pytest.raises(ValueError, match="AWARENESS_AUTH_REQUIRED=true requires"):
             server_mod._run()
 
-    def test_http_with_mount_path_gzip_outermost(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_http_with_mount_path_gzip_outermost(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """streamable-http + MOUNT_PATH wires GZipMiddleware as outermost layer."""
         from starlette.middleware.gzip import GZipMiddleware
 
@@ -494,9 +492,7 @@ class TestRunTransportWiring:
         assert len(captured_app) == 1
         assert isinstance(captured_app[0], GZipMiddleware)
 
-    def test_http_without_mount_path_gzip_outermost(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_http_without_mount_path_gzip_outermost(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """streamable-http without MOUNT_PATH wires GZipMiddleware as outermost layer."""
         from starlette.middleware.gzip import GZipMiddleware
 

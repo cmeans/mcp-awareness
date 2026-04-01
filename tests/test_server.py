@@ -2766,9 +2766,9 @@ class TestGetKnowledgeHint:
             ),
         )
         # Default NullEmbedding — hint should be ignored, not error
-        result = json.loads(
-            await server_mod.get_knowledge(tags=["test"], hint="something")
-        )["entries"]
+        result = json.loads(await server_mod.get_knowledge(tags=["test"], hint="something"))[
+            "entries"
+        ]
         assert len(result) == 1
         assert "similarity" not in result[0]
 
