@@ -135,8 +135,9 @@ class OAuthTokenValidator:
         }
         if self.audience:
             kwargs["audience"] = self.audience
+            kwargs["options"] = {"verify_iat": True}
         else:
-            kwargs["options"] = {"verify_aud": False}
+            kwargs["options"] = {"verify_aud": False, "verify_iat": True}
 
         payload = jwt.decode(token, **kwargs)  # type: ignore[arg-type]
 

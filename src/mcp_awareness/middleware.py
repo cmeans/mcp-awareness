@@ -241,7 +241,12 @@ class AuthMiddleware:
         try:
             import jwt
 
-            payload = jwt.decode(token, self.jwt_secret, algorithms=[self.algorithm])
+            payload = jwt.decode(
+                token,
+                self.jwt_secret,
+                algorithms=[self.algorithm],
+                options={"verify_iat": True},
+            )
             owner_id: str | None = payload.get("sub")
             if owner_id:
                 return owner_id, None

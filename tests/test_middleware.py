@@ -445,6 +445,28 @@ class TestAuthMiddleware:
         assert "sub" in data["error"].lower()
 
     @pytest.mark.anyio
+    async def test_future_iat_returns_401(self) -> None:
+        """JWT with future issued-at timestamp is rejected."""
+        app = self._make_app()
+        now = datetime.now(timezone.utc)
+        payload = {
+            "sub": "alice",
+            "iat": now + timedelta(hours=1),
+            "exp": now + timedelta(hours=2),
+        }
+        token = jwt.encode(payload, _JWT_SECRET, algorithm="HS256")
+        scope = {
+            "type": "http",
+            "path": "/mcp",
+            "method": "POST",
+            "headers": [(b"authorization", f"Bearer {token}".encode())],
+        }
+        status, body = await _collect_response(app, scope)
+        assert status == 401
+        data = json.loads(body)
+        assert "invalid" in data["error"].lower()
+
+    @pytest.mark.anyio
     async def test_health_path_skips_auth(self) -> None:
         """/health bypasses JWT auth."""
         app = self._make_app()
