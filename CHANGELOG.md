@@ -23,6 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Data dictionary**: expanded `text_hash` column description in `docs/data-dictionary.md` to explain staleness detection and mass re-embedding on composition changes
 
 ### Changed
+- **Consistent error schemas**: all tool error responses now use `{"status": "error", "message": "..."}` format instead of mixed `{"error": "..."}` — agents can reliably check `status` field to detect errors (#142)
 - **`upsert_by_logical_key` single-connection refactor**: the INSERT, existing-row fetch, and conditional UPDATE now share a single pooled connection and transaction instead of acquiring up to 3 separate connections, reducing pool contention under concurrency (MEDIUM #2)
 - **Richer embedding text for preferences and status entries**: `compose_embedding_text()` now includes key/value/scope for preferences, metrics keys/values and inventory for status entries, and truncates long content to 500 chars — produces higher-quality embeddings for previously sparse entry types (MEDIUM #20)
 

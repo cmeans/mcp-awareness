@@ -78,7 +78,7 @@ async def source_status_resource(source: str) -> str:
     entry = _srv.store.get_latest_status(_srv._owner_id(), source)
     if entry:
         return json.dumps(entry.to_dict(), indent=2)
-    return json.dumps({"error": f"No status found for source: {source}"})
+    return json.dumps({"status": "error", "message": f"No status found for source: {source}"})
 
 
 @_srv.mcp.resource("awareness://knowledge")

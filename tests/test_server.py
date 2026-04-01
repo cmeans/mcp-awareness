@@ -186,7 +186,7 @@ class TestStatusResource:
     async def test_status_not_found(self) -> None:
         result = await server_mod.source_status_resource("nonexistent")
         data = json.loads(result)
-        assert "error" in data
+        assert data["status"] == "error"
 
 
 class TestKnowledgeResource:
@@ -365,8 +365,8 @@ class TestInputValidation:
                 message="test",
             )
         )
-        assert "error" in result
-        assert "invalid level" in result["error"]
+        assert result["status"] == "error"
+        assert "invalid level" in result["message"]
 
     @pytest.mark.anyio
     async def test_report_alert_invalid_type(self) -> None:
@@ -380,20 +380,20 @@ class TestInputValidation:
                 message="test",
             )
         )
-        assert "error" in result
-        assert "invalid alert_type" in result["error"]
+        assert result["status"] == "error"
+        assert "invalid alert_type" in result["message"]
 
     @pytest.mark.anyio
     async def test_suppress_alert_invalid_level(self) -> None:
         result = json.loads(await server_mod.suppress_alert(source="nas", level="bogus"))
-        assert "error" in result
-        assert "invalid level" in result["error"]
+        assert result["status"] == "error"
+        assert "invalid level" in result["message"]
 
     @pytest.mark.anyio
     async def test_suppress_alert_zero_duration(self) -> None:
         result = json.loads(await server_mod.suppress_alert(source="nas", duration_minutes=0))
-        assert "error" in result
-        assert "duration_minutes" in result["error"]
+        assert result["status"] == "error"
+        assert "duration_minutes" in result["message"]
 
     @pytest.mark.anyio
     async def test_remind_invalid_urgency(self) -> None:
@@ -405,8 +405,8 @@ class TestInputValidation:
                 urgency="bogus",
             )
         )
-        assert "error" in result
-        assert "invalid urgency" in result["error"]
+        assert result["status"] == "error"
+        assert "invalid urgency" in result["message"]
 
     @pytest.mark.anyio
     async def test_add_context_zero_expires_days(self) -> None:
@@ -418,20 +418,20 @@ class TestInputValidation:
                 expires_days=0,
             )
         )
-        assert "error" in result
-        assert "expires_days" in result["error"]
+        assert result["status"] == "error"
+        assert "expires_days" in result["message"]
 
     @pytest.mark.anyio
     async def test_get_knowledge_negative_offset(self) -> None:
         result = json.loads(await server_mod.get_knowledge(offset=-1))
-        assert "error" in result
-        assert "offset" in result["error"]
+        assert result["status"] == "error"
+        assert "offset" in result["message"]
 
     @pytest.mark.anyio
     async def test_get_knowledge_negative_limit(self) -> None:
         result = json.loads(await server_mod.get_knowledge(limit=-1))
-        assert "error" in result
-        assert "limit" in result["error"]
+        assert result["status"] == "error"
+        assert "limit" in result["message"]
 
 
 class TestSuppressAlertTool:
@@ -594,14 +594,14 @@ class TestGetAlertsTool:
     @pytest.mark.anyio
     async def test_get_alerts_negative_limit(self) -> None:
         result = json.loads(await server_mod.get_alerts(limit=-1))
-        assert "error" in result
-        assert "limit" in result["error"]
+        assert result["status"] == "error"
+        assert "limit" in result["message"]
 
     @pytest.mark.anyio
     async def test_get_alerts_negative_offset(self) -> None:
         result = json.loads(await server_mod.get_alerts(offset=-1))
-        assert "error" in result
-        assert "offset" in result["error"]
+        assert result["status"] == "error"
+        assert "offset" in result["message"]
 
 
 class TestGetStatusTool:
@@ -617,7 +617,7 @@ class TestGetStatusTool:
     @pytest.mark.anyio
     async def test_get_status_not_found(self) -> None:
         result = await server_mod.get_status(source="nonexistent")
-        assert "error" in json.loads(result)
+        assert json.loads(result)["status"] == "error"
 
 
 class TestGetKnowledgeTool:
@@ -678,9 +678,9 @@ class TestInvalidEntryType:
     async def test_get_knowledge_invalid_entry_type(self) -> None:
         result = await server_mod.get_knowledge(entry_type="bogus")
         parsed = json.loads(result)
-        assert "error" in parsed
-        assert "bogus" in parsed["error"]
-        assert "Valid:" in parsed["error"]
+        assert parsed["status"] == "error"
+        assert "bogus" in parsed["message"]
+        assert "Valid:" in parsed["message"]
 
     @pytest.mark.anyio
     async def test_delete_entry_invalid_entry_type(self) -> None:
@@ -874,14 +874,14 @@ class TestGetDeletedTool:
     @pytest.mark.anyio
     async def test_get_deleted_negative_limit(self) -> None:
         result = json.loads(await server_mod.get_deleted(limit=-1))
-        assert "error" in result
-        assert "limit" in result["error"]
+        assert result["status"] == "error"
+        assert "limit" in result["message"]
 
     @pytest.mark.anyio
     async def test_get_deleted_negative_offset(self) -> None:
         result = json.loads(await server_mod.get_deleted(offset=-1))
-        assert "error" in result
-        assert "offset" in result["error"]
+        assert result["status"] == "error"
+        assert "offset" in result["message"]
 
 
 class TestRememberTool:
@@ -1827,25 +1827,25 @@ class TestListModeAndSince:
     @pytest.mark.anyio
     async def test_since_empty_string_returns_error(self) -> None:
         result = json.loads(await server_mod.get_knowledge(since=""))
-        assert "error" in result
+        assert result["status"] == "error"
 
         result = json.loads(await server_mod.get_alerts(since=""))
-        assert "error" in result
+        assert result["status"] == "error"
 
         result = json.loads(await server_mod.get_deleted(since=""))
-        assert "error" in result
+        assert result["status"] == "error"
 
     @pytest.mark.anyio
     async def test_semantic_search_empty_since_returns_error(self) -> None:
         result = json.loads(await server_mod.semantic_search(query="test", since=""))
-        assert "error" in result
-        assert "since" in result["error"]
+        assert result["status"] == "error"
+        assert "since" in result["message"]
 
     @pytest.mark.anyio
     async def test_semantic_search_empty_until_returns_error(self) -> None:
         result = json.loads(await server_mod.semantic_search(query="test", until=""))
-        assert "error" in result
-        assert "until" in result["error"]
+        assert result["status"] == "error"
+        assert "until" in result["message"]
 
 
 # ---------------------------------------------------------------------------
@@ -3077,26 +3077,26 @@ class TestDateValidation:
     async def test_get_alerts_malformed_since(self) -> None:
         result = await server_mod.get_alerts(since="not-a-date")
         parsed = json.loads(result)
-        assert "error" in parsed or parsed.get("status") == "error"
-        assert "date" in parsed.get("message", parsed.get("error", "")).lower()
+        assert parsed["status"] == "error"
+        assert "date" in parsed.get("message", "").lower()
 
     @pytest.mark.anyio
     async def test_get_knowledge_malformed_since(self) -> None:
         result = await server_mod.get_knowledge(since="not-a-date")
         parsed = json.loads(result)
-        assert "error" in parsed or parsed.get("status") == "error"
+        assert parsed["status"] == "error"
 
     @pytest.mark.anyio
     async def test_get_knowledge_malformed_until(self) -> None:
         result = await server_mod.get_knowledge(until="2026-13-45")
         parsed = json.loads(result)
-        assert "error" in parsed or parsed.get("status") == "error"
+        assert parsed["status"] == "error"
 
     @pytest.mark.anyio
     async def test_get_knowledge_malformed_created_after(self) -> None:
         result = await server_mod.get_knowledge(created_after="bad")
         parsed = json.loads(result)
-        assert "error" in parsed or parsed.get("status") == "error"
+        assert parsed["status"] == "error"
 
     @pytest.mark.anyio
     async def test_remind_malformed_deliver_at(self) -> None:
@@ -3104,19 +3104,19 @@ class TestDateValidation:
             goal="test", source="test", tags=["test"], deliver_at="not-a-date"
         )
         parsed = json.loads(result)
-        assert "error" in parsed or parsed.get("status") == "error"
+        assert parsed["status"] == "error"
 
     @pytest.mark.anyio
     async def test_get_deleted_malformed_since(self) -> None:
         result = await server_mod.get_deleted(since="not-a-date")
         parsed = json.loads(result)
-        assert "error" in parsed or parsed.get("status") == "error"
+        assert parsed["status"] == "error"
 
     @pytest.mark.anyio
     async def test_semantic_search_malformed_since(self) -> None:
         result = await server_mod.semantic_search(query="test", since="not-a-date")
         parsed = json.loads(result)
-        assert "error" in parsed or parsed.get("status") == "error"
+        assert parsed["status"] == "error"
 
     @pytest.mark.anyio
     async def test_get_knowledge_malformed_created_before(self) -> None:

@@ -94,10 +94,15 @@ async def get_alerts(
     error, the failure is in the transport or platform layer, not in awareness."""
     pv = _validate_pagination(limit, offset)
     if isinstance(pv, str):
-        return json.dumps({"error": pv})
+        return json.dumps({"status": "error", "message": pv})
     limit, offset = pv
     if since is not None and not since:
-        return json.dumps({"error": "since cannot be empty; omit or provide an ISO 8601 timestamp"})
+        return json.dumps(
+            {
+                "status": "error",
+                "message": "since cannot be empty; omit or provide an ISO 8601 timestamp",
+            }
+        )
     if since:
         since_dt, err = _safe_ensure_dt(since)
         if err:
@@ -124,7 +129,7 @@ async def get_status(source: str) -> str:
     entry = _srv.store.get_latest_status(_srv._owner_id(), source)
     if entry:
         return json.dumps(entry.to_dict(), indent=2)
-    return json.dumps({"error": f"No status found for source: {source}"})
+    return json.dumps({"status": "error", "message": f"No status found for source: {source}"})
 
 
 @_srv.mcp.tool()
@@ -175,10 +180,15 @@ async def get_knowledge(
     If you receive an unstructured error, the failure is in the transport
     or platform layer, not in awareness."""
     if since is not None and not since:
-        return json.dumps({"error": "since cannot be empty; omit or provide an ISO 8601 timestamp"})
+        return json.dumps(
+            {
+                "status": "error",
+                "message": "since cannot be empty; omit or provide an ISO 8601 timestamp",
+            }
+        )
     pv = _validate_pagination(limit, offset)
     if isinstance(pv, str):
-        return json.dumps({"error": pv})
+        return json.dumps({"status": "error", "message": pv})
     limit, offset = pv
     if since:
         since_dt, err = _safe_ensure_dt(since)
@@ -206,7 +216,7 @@ async def get_knowledge(
         created_before_dt = None
     et, et_err = _parse_entry_type(entry_type)
     if et_err:
-        return json.dumps({"error": et_err})
+        return json.dumps({"status": "error", "message": et_err})
     entries = _srv.store.get_knowledge(
         _srv._owner_id(),
         tags=tags,
@@ -326,13 +336,17 @@ async def report_alert(
     Alert types: 'threshold', 'structural', 'baseline'."""
     if level not in VALID_ALERT_LEVELS:
         return json.dumps(
-            {"error": f"invalid level '{level}', must be one of: {sorted(VALID_ALERT_LEVELS)}"}
+            {
+                "status": "error",
+                "message": f"invalid level '{level}', must be one of: {sorted(VALID_ALERT_LEVELS)}",
+            }
         )
     if alert_type not in VALID_ALERT_TYPES:
         return json.dumps(
             {
-                "error": f"invalid alert_type '{alert_type}',"
-                f" must be one of: {sorted(VALID_ALERT_TYPES)}"
+                "status": "error",
+                "message": f"invalid alert_type '{alert_type}',"
+                f" must be one of: {sorted(VALID_ALERT_TYPES)}",
             }
         )
     data: dict[str, Any] = {
@@ -542,10 +556,13 @@ async def suppress_alert(
     Escalation override means critical alerts will still break through."""
     if level not in VALID_ALERT_LEVELS:
         return json.dumps(
-            {"error": f"invalid level '{level}', must be one of: {sorted(VALID_ALERT_LEVELS)}"}
+            {
+                "status": "error",
+                "message": f"invalid level '{level}', must be one of: {sorted(VALID_ALERT_LEVELS)}",
+            }
         )
     if duration_minutes < 1:
-        return json.dumps({"error": "duration_minutes must be at least 1"})
+        return json.dumps({"status": "error", "message": "duration_minutes must be at least 1"})
     now = now_utc()
     expires = now + timedelta(minutes=duration_minutes)
     entry = Entry(
@@ -582,7 +599,7 @@ async def add_context(
     Quick test: still true in 30 days? -> remember instead. Happening now,
     will become stale? -> add_context. Any agent on any platform can read this."""
     if expires_days < 1:
-        return json.dumps({"error": "expires_days must be at least 1"})
+        return json.dumps({"status": "error", "message": "expires_days must be at least 1"})
     now = now_utc()
     expires = now + timedelta(days=expires_days)
     entry = Entry(
@@ -742,10 +759,15 @@ async def get_deleted(
     Use limit/offset for pagination."""
     pv = _validate_pagination(limit, offset)
     if isinstance(pv, str):
-        return json.dumps({"error": pv})
+        return json.dumps({"status": "error", "message": pv})
     limit, offset = pv
     if since is not None and not since:
-        return json.dumps({"error": "since cannot be empty; omit or provide an ISO 8601 timestamp"})
+        return json.dumps(
+            {
+                "status": "error",
+                "message": "since cannot be empty; omit or provide an ISO 8601 timestamp",
+            }
+        )
     if since:
         since_dt, err = _safe_ensure_dt(since)
         if err:
@@ -932,7 +954,10 @@ async def remind(
     This tool always returns structured JSON."""
     if urgency not in VALID_URGENCY:
         return json.dumps(
-            {"error": f"invalid urgency '{urgency}', must be one of: {sorted(VALID_URGENCY)}"}
+            {
+                "status": "error",
+                "message": f"invalid urgency '{urgency}', must be one of: {sorted(VALID_URGENCY)}",
+            }
         )
     now = now_utc()
     if deliver_at:
@@ -1033,9 +1058,19 @@ async def semantic_search(
     mode: omit for full entries, 'list' for metadata only + similarity."""
     limit = max(1, min(limit, 100))
     if since is not None and not since:
-        return json.dumps({"error": "since cannot be empty; omit or provide an ISO 8601 timestamp"})
+        return json.dumps(
+            {
+                "status": "error",
+                "message": "since cannot be empty; omit or provide an ISO 8601 timestamp",
+            }
+        )
     if until is not None and not until:
-        return json.dumps({"error": "until cannot be empty; omit or provide an ISO 8601 timestamp"})
+        return json.dumps(
+            {
+                "status": "error",
+                "message": "until cannot be empty; omit or provide an ISO 8601 timestamp",
+            }
+        )
     et, et_err = _parse_entry_type(entry_type)
     if et_err:
         return json.dumps({"status": "error", "message": et_err})
