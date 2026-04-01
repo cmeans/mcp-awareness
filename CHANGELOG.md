@@ -16,10 +16,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **OAuth staging compose**: `docker-compose.oauth.yaml` for isolated OAuth/WorkOS AuthKit testing with separate Postgres, Cloudflare tunnel, and optional Ollama — runs on port 8421 alongside production
 - **OAuth env template**: `.env.oauth.example` with all required/optional variables for staging deployment
 - **Gzip response compression**: HTTP transport compresses non-SSE responses over 500 bytes via Starlette GZipMiddleware — applies to health checks and JSON endpoints; MCP tool responses use SSE (`text/event-stream`) which Starlette excludes from compression, so rely on Cloudflare or reverse proxy for tool traffic compression (#112)
+- **Did-you-mean suggestions**: enum parameter errors include `suggestion` field and "Did you mean '...'?" in message when the supplied value is within edit distance 2 of a valid value (#142)
+- **Help URLs**: timestamp and content-type errors include reference URLs inline in message and as `help_url` field — ISO 8601 (Wikipedia), MIME types (MDN) (#142)
+- **Retryable flag**: every error includes `retryable: true/false` so agents know whether to retry or self-correct (#142)
 
 ### Changed
 - **Default query limit reduced**: `DEFAULT_QUERY_LIMIT` lowered from 200 to 100 — reduces default response size for all paginated tools (#112)
 - **Pagination metadata**: all paginated tools now return `{entries, limit, offset, has_more}` instead of a bare list — agents can detect when more data exists without a separate count query (#112)
+- **Structured error responses**: all tool errors now return `{"status": "error", "error": {"code", "message", "retryable", ...}}` with contextual fields (`param`, `value`, `valid`, `suggestion`, `help_url`) instead of flat strings — enables smart rendering by any consumer (#142)
+- **MCP isError flag**: tool errors now raise `ToolError` so the MCP SDK sets `isError: true` on `CallToolResult` — clients that support error styling can use this signal (#142)
 
 ### Security
 - **JWT issued-at validation**: both self-signed and OAuth token paths now reject tokens with future `iat` claims via `verify_iat: True` — prevents acceptance of not-yet-valid tokens
