@@ -54,15 +54,17 @@ def _make_token(
     email: str | None = None,
     name: str | None = None,
     expired: bool = False,
+    future_iat: bool = False,
 ) -> str:
     """Create a signed RS256 JWT for testing."""
     now = datetime.now(timezone.utc)
+    iat = now + timedelta(hours=1) if future_iat else now
     payload: dict[str, Any] = {
         "sub": sub,
         "iss": issuer,
         "aud": audience,
-        "iat": now,
-        "exp": now + timedelta(hours=-1 if expired else 1),
+        "iat": iat,
+        "exp": now + timedelta(hours=-1 if expired else 2),
     }
     if email:
         payload["email"] = email
@@ -120,6 +122,13 @@ class TestOAuthTokenValidator:
         self._mock_jwk_client(validator)
         token = _make_token(expired=True)
         with pytest.raises(jwt.ExpiredSignatureError):
+            validator.validate(token)
+
+    def test_future_iat_raises(self) -> None:
+        validator = self._make_validator()
+        self._mock_jwk_client(validator)
+        token = _make_token(future_iat=True)
+        with pytest.raises(jwt.ImmatureSignatureError):
             validator.validate(token)
 
     def test_wrong_issuer_raises(self) -> None:
