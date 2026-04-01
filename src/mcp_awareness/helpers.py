@@ -67,7 +67,7 @@ def _parse_entry_type(entry_type: str | None) -> EntryType | None:
         return EntryType(entry_type)
     except ValueError:
         _validate_enum(entry_type, "entry_type", _VALID_ENTRY_TYPES)
-        return None  # unreachable, but keeps mypy happy
+        raise  # pragma: no cover — unreachable, _validate_enum always raises
 
 
 def _validate_pagination(
