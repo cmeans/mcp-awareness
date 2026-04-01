@@ -1,3 +1,4 @@
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later | Copyright (C) 2026 Chris Means -->
 This server provides ambient awareness across monitored systems.
 At conversation start, read awareness://briefing. If attention_needed
 is true, mention the suggested_mention or compose your own from the

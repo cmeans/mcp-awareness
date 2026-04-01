@@ -1,3 +1,4 @@
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later | Copyright (C) 2026 Chris Means -->
 # Architecture Addendum: Collation Layer & Token Optimization
 
 > **Note:** Written during initial design. The collation logic described here is implemented and live. Backend references to SQLite are historical — the storage backend is now PostgreSQL-only (v0.6.0+). The briefing now includes an `evaluation` field (v0.6.1+) showing what was checked/dismissed, and `fired_intentions` (v0.8.0+). Semantic search (v0.10.0+) operates alongside the collator — it's a separate query path, not part of briefing generation. The network topology diagram reflects the original plan; current deployment uses Docker Compose with Cloudflare Tunnel (see [deployment guide](deployment-guide.md)).

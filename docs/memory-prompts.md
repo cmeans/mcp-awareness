@@ -1,3 +1,4 @@
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later | Copyright (C) 2026 Chris Means -->
 # Memory Prompts
 
 Connecting awareness as an MCP server gives your AI the tools — but without instructions, it won't know when or how to use them. Memory prompts bridge that gap: they tell your AI to check awareness at conversation start, store knowledge when it learns something, and maintain project status across platforms.

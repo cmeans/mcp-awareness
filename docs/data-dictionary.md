@@ -1,3 +1,4 @@
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later | Copyright (C) 2026 Chris Means -->
 # Data Dictionary
 
 All data in mcp-awareness is stored in a single `entries` table using a common envelope pattern. Every record — whether it's a system status report, an alert, a piece of knowledge, or a preference — shares the same columns. The `type` field determines the semantics, and the `data` column holds type-specific fields.

@@ -1,3 +1,4 @@
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later | Copyright (C) 2026 Chris Means -->
 # Deployment Guide
 
 This guide walks through deploying mcp-awareness locally — from starting the server to connecting your AI and seeing ambient awareness in action.
