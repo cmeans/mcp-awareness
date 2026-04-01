@@ -37,7 +37,7 @@ VALID_ALERT_LEVELS = {"warning", "critical"}
 VALID_ALERT_TYPES = {"threshold", "structural", "baseline"}
 VALID_URGENCY = {"low", "normal", "high"}
 
-DEFAULT_QUERY_LIMIT = 200
+DEFAULT_QUERY_LIMIT = 100
 
 
 def canonical_email(email: str) -> str:
@@ -82,6 +82,26 @@ def _validate_pagination(
     if limit is None:
         limit = default_limit
     return limit, offset
+
+
+def _paginate(
+    items: list[Any],
+    limit: int,
+    offset: int | None,
+) -> dict[str, Any]:
+    """Apply limit+1 pattern: trim to limit, set has_more flag.
+
+    Callers should fetch ``limit + 1`` rows from the store, then pass
+    all results here. If len(items) > limit, the extra row proves more
+    data exists and is trimmed from the response.
+    """
+    has_more = len(items) > limit
+    return {
+        "entries": items[:limit],
+        "limit": limit,
+        "offset": offset or 0,
+        "has_more": has_more,
+    }
 
 
 def _log_timing(tool_name: str, elapsed_ms: float) -> None:

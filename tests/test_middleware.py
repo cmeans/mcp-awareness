@@ -77,6 +77,29 @@ async def _collect_response(app: Any, scope: dict[str, Any]) -> tuple[int, bytes
     return status_code, b"".join(body_parts)
 
 
+async def _collect_response_with_headers(
+    app: Any, scope: dict[str, Any]
+) -> tuple[int, bytes, list[tuple[bytes, bytes]]]:
+    """Send a request through an ASGI app, return (status, body, headers)."""
+    status = 0
+    body = b""
+    headers: list[tuple[bytes, bytes]] = []
+
+    async def receive() -> dict[str, Any]:
+        return {"type": "http.request", "body": b""}
+
+    async def send(message: dict[str, Any]) -> None:
+        nonlocal status, body, headers
+        if message["type"] == "http.response.start":
+            status = message["status"]
+            headers = message.get("headers", [])
+        elif message["type"] == "http.response.body":
+            body += message.get("body", b"")
+
+    await app(scope, receive, send)
+    return status, body, headers
+
+
 # ---------------------------------------------------------------------------
 # SecretPathMiddleware
 # ---------------------------------------------------------------------------
@@ -232,6 +255,105 @@ class TestHealthMiddleware:
 
 
 # ---------------------------------------------------------------------------
+# GZipMiddleware
+# ---------------------------------------------------------------------------
+
+
+class TestGZipCompression:
+    """GZipMiddleware compresses HTTP responses."""
+
+    @pytest.mark.anyio
+    async def test_gzip_applied_when_requested(self) -> None:
+        """Response is gzip-compressed when client sends Accept-Encoding: gzip."""
+        from starlette.middleware.gzip import GZipMiddleware
+
+        async def big_app(scope: dict[str, Any], receive: Any, send: Any) -> None:
+            body = b"x" * 1000
+            await send(
+                {
+                    "type": "http.response.start",
+                    "status": 200,
+                    "headers": [
+                        (b"content-type", b"application/json"),
+                    ],
+                }
+            )
+            await send({"type": "http.response.body", "body": body})
+
+        app = GZipMiddleware(big_app, minimum_size=500)
+        scope = {
+            "type": "http",
+            "method": "GET",
+            "path": "/test",
+            "headers": [(b"accept-encoding", b"gzip")],
+        }
+        status, _body, headers = await _collect_response_with_headers(app, scope)
+        assert status == 200
+        header_dict = dict(headers)
+        assert header_dict.get(b"content-encoding") == b"gzip"
+
+    @pytest.mark.anyio
+    async def test_gzip_not_applied_without_accept_encoding(self) -> None:
+        """Response is NOT compressed when client doesn't request gzip."""
+        from starlette.middleware.gzip import GZipMiddleware
+
+        async def big_app(scope: dict[str, Any], receive: Any, send: Any) -> None:
+            body = b"x" * 1000
+            await send(
+                {
+                    "type": "http.response.start",
+                    "status": 200,
+                    "headers": [
+                        (b"content-type", b"application/json"),
+                    ],
+                }
+            )
+            await send({"type": "http.response.body", "body": body})
+
+        app = GZipMiddleware(big_app, minimum_size=500)
+        scope = {
+            "type": "http",
+            "method": "GET",
+            "path": "/test",
+            "headers": [],
+        }
+        status, _body, headers = await _collect_response_with_headers(app, scope)
+        assert status == 200
+        header_dict = dict(headers)
+        assert header_dict.get(b"content-encoding") is None
+
+    @pytest.mark.anyio
+    async def test_gzip_skips_small_responses(self) -> None:
+        """Responses under 500 bytes are NOT compressed."""
+        from starlette.middleware.gzip import GZipMiddleware
+
+        async def small_app(scope: dict[str, Any], receive: Any, send: Any) -> None:
+            body = b"small"
+            await send(
+                {
+                    "type": "http.response.start",
+                    "status": 200,
+                    "headers": [
+                        (b"content-type", b"application/json"),
+                    ],
+                }
+            )
+            await send({"type": "http.response.body", "body": body})
+
+        app = GZipMiddleware(small_app, minimum_size=500)
+        scope = {
+            "type": "http",
+            "method": "GET",
+            "path": "/test",
+            "headers": [(b"accept-encoding", b"gzip")],
+        }
+        status, _body, headers = await _collect_response_with_headers(app, scope)
+        assert status == 200
+        header_dict = dict(headers)
+        assert header_dict.get(b"content-encoding") is None
+
+
+# ---------------------------------------------------------------------------
 # _run() transport wiring tests
 # ---------------------------------------------------------------------------
 
@@ -242,7 +364,9 @@ class TestRunTransportWiring:
     def test_http_with_mount_path_uses_secret_path_middleware(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """streamable-http + MOUNT_PATH wires SecretPathMiddleware."""
+        """streamable-http + MOUNT_PATH wires SecretPathMiddleware inside GZipMiddleware."""
+        from starlette.middleware.gzip import GZipMiddleware
+
         monkeypatch.setattr(server_mod, "TRANSPORT", "streamable-http")
         monkeypatch.setattr(server_mod, "MOUNT_PATH", "/secret")
         monkeypatch.setattr(server_mod, "HOST", "0.0.0.0")
@@ -261,12 +385,15 @@ class TestRunTransportWiring:
             server_mod._run()
 
         assert len(captured_app) == 1
-        assert isinstance(captured_app[0], SecretPathMiddleware)
+        assert isinstance(captured_app[0], GZipMiddleware)
+        assert isinstance(captured_app[0].app, SecretPathMiddleware)
 
     def test_http_without_mount_path_uses_health_middleware(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """streamable-http without MOUNT_PATH wires HealthMiddleware."""
+        """streamable-http without MOUNT_PATH wires HealthMiddleware inside GZipMiddleware."""
+        from starlette.middleware.gzip import GZipMiddleware
+
         monkeypatch.setattr(server_mod, "TRANSPORT", "streamable-http")
         monkeypatch.setattr(server_mod, "MOUNT_PATH", "")
         monkeypatch.setattr(server_mod, "HOST", "0.0.0.0")
@@ -285,7 +412,8 @@ class TestRunTransportWiring:
             server_mod._run()
 
         assert len(captured_app) == 1
-        assert isinstance(captured_app[0], HealthMiddleware)
+        assert isinstance(captured_app[0], GZipMiddleware)
+        assert isinstance(captured_app[0].app, HealthMiddleware)
 
     def test_stdio_transport_calls_mcp_run(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Non-HTTP transport calls mcp.run(transport=...)."""
@@ -298,7 +426,9 @@ class TestRunTransportWiring:
     def test_http_with_mount_path_auth_required_wraps_with_auth_middleware(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """streamable-http + MOUNT_PATH + AUTH_REQUIRED wires AuthMiddleware outermost."""
+        """streamable-http + MOUNT_PATH + AUTH_REQUIRED wires GZip > AuthMiddleware."""
+        from starlette.middleware.gzip import GZipMiddleware
+
         monkeypatch.setattr(server_mod, "TRANSPORT", "streamable-http")
         monkeypatch.setattr(server_mod, "MOUNT_PATH", "/secret")
         monkeypatch.setattr(server_mod, "HOST", "0.0.0.0")
@@ -320,7 +450,8 @@ class TestRunTransportWiring:
             server_mod._run()
 
         assert len(captured_app) == 1
-        assert isinstance(captured_app[0], AuthMiddleware)
+        assert isinstance(captured_app[0], GZipMiddleware)
+        assert isinstance(captured_app[0].app, AuthMiddleware)
 
     def test_http_auth_required_no_secret_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """AUTH_REQUIRED without JWT_SECRET raises ValueError."""
@@ -336,6 +467,54 @@ class TestRunTransportWiring:
 
         with pytest.raises(ValueError, match="AWARENESS_AUTH_REQUIRED=true requires"):
             server_mod._run()
+
+    def test_http_with_mount_path_gzip_outermost(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """streamable-http + MOUNT_PATH wires GZipMiddleware as outermost layer."""
+        from starlette.middleware.gzip import GZipMiddleware
+
+        monkeypatch.setattr(server_mod, "TRANSPORT", "streamable-http")
+        monkeypatch.setattr(server_mod, "MOUNT_PATH", "/secret")
+        monkeypatch.setattr(server_mod, "HOST", "0.0.0.0")
+        monkeypatch.setattr(server_mod, "PORT", 8080)
+
+        mock_app = MagicMock()
+        monkeypatch.setattr(server_mod.mcp, "streamable_http_app", lambda: mock_app)
+
+        captured_app: list[Any] = []
+
+        def fake_config(app: Any, **kwargs: Any) -> MagicMock:
+            captured_app.append(app)
+            return MagicMock()
+
+        with patch("uvicorn.Config", side_effect=fake_config), patch("anyio.run"):
+            server_mod._run()
+
+        assert len(captured_app) == 1
+        assert isinstance(captured_app[0], GZipMiddleware)
+
+    def test_http_without_mount_path_gzip_outermost(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """streamable-http without MOUNT_PATH wires GZipMiddleware as outermost layer."""
+        from starlette.middleware.gzip import GZipMiddleware
+
+        monkeypatch.setattr(server_mod, "TRANSPORT", "streamable-http")
+        monkeypatch.setattr(server_mod, "MOUNT_PATH", "")
+        monkeypatch.setattr(server_mod, "HOST", "0.0.0.0")
+        monkeypatch.setattr(server_mod, "PORT", 8080)
+
+        mock_app = MagicMock()
+        monkeypatch.setattr(server_mod.mcp, "streamable_http_app", lambda: mock_app)
+
+        captured_app: list[Any] = []
+
+        def fake_config(app: Any, **kwargs: Any) -> MagicMock:
+            captured_app.append(app)
+            return MagicMock()
+
+        with patch("uvicorn.Config", side_effect=fake_config), patch("anyio.run"):
+            server_mod._run()
+
+        assert len(captured_app) == 1
+        assert isinstance(captured_app[0], GZipMiddleware)
 
 
 # ---------------------------------------------------------------------------
@@ -587,7 +766,9 @@ class TestServerAuthWiring:
     def test_http_no_mount_path_auth_required_wraps_with_auth_middleware(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """streamable-http without MOUNT_PATH + AUTH_REQUIRED wires AuthMiddleware."""
+        """streamable-http without MOUNT_PATH + AUTH_REQUIRED wires GZip > AuthMiddleware."""
+        from starlette.middleware.gzip import GZipMiddleware
+
         monkeypatch.setattr(server_mod, "TRANSPORT", "streamable-http")
         monkeypatch.setattr(server_mod, "MOUNT_PATH", "")
         monkeypatch.setattr(server_mod, "HOST", "0.0.0.0")
@@ -609,7 +790,8 @@ class TestServerAuthWiring:
             server_mod._run()
 
         assert len(captured_app) == 1
-        assert isinstance(captured_app[0], AuthMiddleware)
+        assert isinstance(captured_app[0], GZipMiddleware)
+        assert isinstance(captured_app[0].app, AuthMiddleware)
 
 
 # ---------------------------------------------------------------------------

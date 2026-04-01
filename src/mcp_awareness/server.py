@@ -430,6 +430,10 @@ def _run() -> None:
 
         app = _wrap_with_auth(app)
 
+        from starlette.middleware.gzip import GZipMiddleware
+
+        app = GZipMiddleware(app, minimum_size=500)
+
         config = uvicorn.Config(app, host=HOST, port=PORT)
         server = uvicorn.Server(config)
 
@@ -457,6 +461,10 @@ def _run() -> None:
             )
 
         health_app = _wrap_with_auth(health_app)
+
+        from starlette.middleware.gzip import GZipMiddleware
+
+        health_app = GZipMiddleware(health_app, minimum_size=500)
 
         config = uvicorn.Config(health_app, host=HOST, port=PORT)
         server = uvicorn.Server(config)
