@@ -88,6 +88,18 @@ OAUTH_USER_CLAIM = os.environ.get("AWARENESS_OAUTH_USER_CLAIM", "sub")
 OAUTH_AUTO_PROVISION = os.environ.get("AWARENESS_OAUTH_AUTO_PROVISION", "false").lower() == "true"
 PUBLIC_URL = os.environ.get("AWARENESS_PUBLIC_URL", "")
 
+# OAuth proxy workaround — feature-gated
+# See docs/superpowers/specs/2026-04-02-oauth-proxy-workaround-design.md
+OAUTH_PROXY = os.environ.get("AWARENESS_OAUTH_PROXY", "false").lower() == "true"
+OAUTH_PROXY_BAN_DURATION = int(os.environ.get("AWARENESS_OAUTH_PROXY_BAN_DURATION", "3600"))
+OAUTH_PROXY_IP_HEADERS = [
+    h.strip()
+    for h in os.environ.get("AWARENESS_OAUTH_PROXY_IP_HEADERS", "CF-Connecting-IP,X-Real-IP").split(
+        ","
+    )
+    if h.strip()
+]
+
 # Embedding provider — optional, configured via env vars
 EMBEDDING_PROVIDER = os.environ.get("AWARENESS_EMBEDDING_PROVIDER", "")
 EMBEDDING_MODEL = os.environ.get("AWARENESS_EMBEDDING_MODEL", "nomic-embed-text")
@@ -156,6 +168,9 @@ class _LazyStore:
 
 
 store: Any = _LazyStore()
+
+# OAuth proxy middleware instance (set during _run() if enabled)
+_oauth_proxy: Any = None
 
 # ---------------------------------------------------------------------------
 # Embedding helpers
@@ -344,12 +359,15 @@ def _sync_custom_prompts(*, force: bool = False) -> None:
 
 def _health_response() -> dict[str, Any]:
     """Build the health check response payload."""
-    return {
+    result: dict[str, Any] = {
         "status": "ok",
         "uptime_sec": round(time.monotonic() - _start_time, 1),
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "transport": TRANSPORT,
     }
+    if _oauth_proxy is not None:
+        result["oauth_proxy"] = _oauth_proxy.health_stats()
+    return result
 
 
 def main() -> None:
@@ -406,6 +424,7 @@ def _wrap_with_auth(app: Any) -> Any:
 
 
 def _run() -> None:
+    global _oauth_proxy
     if TRANSPORT == "streamable-http" and MOUNT_PATH:
         import uvicorn
         from starlette.types import ASGIApp as _ASGIApp
@@ -429,6 +448,23 @@ def _run() -> None:
             )
 
         app = _wrap_with_auth(app)
+
+        # OAuth proxy workaround — slots outside AuthMiddleware
+        if OAUTH_PROXY and OAUTH_ISSUER:
+            from mcp_awareness.oauth_proxy import OAuthProxyMiddleware, discover_oidc_endpoints
+
+            endpoints = discover_oidc_endpoints(OAUTH_ISSUER)
+            if endpoints:
+                _oauth_proxy = OAuthProxyMiddleware(
+                    app,
+                    endpoints=endpoints,
+                    ban_duration=OAUTH_PROXY_BAN_DURATION,
+                    ip_headers=OAUTH_PROXY_IP_HEADERS,
+                )
+                app = _oauth_proxy
+                logger.info("OAuth proxy: enabled — intercepting /authorize, /token, /register")
+            else:
+                logger.error("OAuth proxy: OIDC discovery failed — proxy disabled")
 
         from starlette.middleware.gzip import GZipMiddleware
 
@@ -461,6 +497,23 @@ def _run() -> None:
             )
 
         health_app = _wrap_with_auth(health_app)
+
+        # OAuth proxy workaround — slots outside AuthMiddleware
+        if OAUTH_PROXY and OAUTH_ISSUER:
+            from mcp_awareness.oauth_proxy import OAuthProxyMiddleware, discover_oidc_endpoints
+
+            endpoints = discover_oidc_endpoints(OAUTH_ISSUER)
+            if endpoints:
+                _oauth_proxy = OAuthProxyMiddleware(
+                    health_app,
+                    endpoints=endpoints,
+                    ban_duration=OAUTH_PROXY_BAN_DURATION,
+                    ip_headers=OAUTH_PROXY_IP_HEADERS,
+                )
+                health_app = _oauth_proxy
+                logger.info("OAuth proxy: enabled — intercepting /authorize, /token, /register")
+            else:
+                logger.error("OAuth proxy: OIDC discovery failed — proxy disabled")
 
         from starlette.middleware.gzip import GZipMiddleware
 

@@ -632,3 +632,54 @@ class TestOAuthProxyMiddleware:
         assert "enabled" in stats
         assert "completed_flows" in stats
         assert "raw_hits" in stats
+
+
+# ---------------------------------------------------------------------------
+# Server wiring tests
+# ---------------------------------------------------------------------------
+
+from mcp_awareness import server as server_mod  # noqa: E402
+
+
+class TestServerWiring:
+    """Tests for OAuth proxy env var handling and health integration."""
+
+    def test_oauth_proxy_disabled_by_default(self) -> None:
+        """AWARENESS_OAUTH_PROXY defaults to false."""
+        assert server_mod.OAUTH_PROXY is False
+
+    def test_health_response_no_proxy_stats(self) -> None:
+        """Health response omits oauth_proxy when proxy is disabled."""
+        # Ensure _oauth_proxy is None (default state)
+        original = server_mod._oauth_proxy
+        server_mod._oauth_proxy = None
+        try:
+            health = server_mod._health_response()
+            assert "oauth_proxy" not in health
+        finally:
+            server_mod._oauth_proxy = original
+
+    def test_health_response_with_proxy_stats(self) -> None:
+        """Health response includes oauth_proxy when proxy is active."""
+        from mcp_awareness.oauth_proxy import OAuthProxyMiddleware
+
+        async def noop(s: Any, r: Any, se: Any) -> None:
+            pass
+
+        proxy = OAuthProxyMiddleware(
+            app=noop,
+            endpoints={
+                "authorization_endpoint": "https://example.com/authorize",
+                "token_endpoint": "https://example.com/token",
+                "registration_endpoint": None,
+            },
+        )
+        original = server_mod._oauth_proxy
+        server_mod._oauth_proxy = proxy
+        try:
+            health = server_mod._health_response()
+            assert "oauth_proxy" in health
+            assert health["oauth_proxy"]["enabled"] is True
+            assert health["oauth_proxy"]["completed_flows"] == 0
+        finally:
+            server_mod._oauth_proxy = original
