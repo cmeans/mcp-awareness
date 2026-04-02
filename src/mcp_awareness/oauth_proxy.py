@@ -57,11 +57,11 @@ def resolve_client_ip(
     for header_name in chain:
         value = raw_headers.get(header_name.lower().encode(), b"").decode().strip()
         if value:
-            return value
+            return str(value)
 
-    client = scope.get("client")
+    client: tuple[str, int] | None = scope.get("client")
     if client:
-        return client[0]
+        return str(client[0])
     return "unknown"
 
 
