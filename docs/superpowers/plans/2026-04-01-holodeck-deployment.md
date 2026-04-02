@@ -1,3 +1,4 @@
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later | Copyright (C) 2026 Chris Means -->
 # Holodeck Deployment Implementation Plan
 
 > **For agentic workers:** This is an infrastructure provisioning plan, not a code implementation plan. Most steps are shell commands run on remote systems (holodeck, Synology) that the user executes. The agent's role is to guide, verify, and troubleshoot. Steps use checkbox (`- [ ]`) syntax for tracking.
