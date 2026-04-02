@@ -18,7 +18,10 @@
 
 from __future__ import annotations
 
-from mcp_awareness.oauth_proxy import resolve_client_ip
+import time
+from unittest.mock import patch
+
+from mcp_awareness.oauth_proxy import RateLimiter, resolve_client_ip
 
 
 class TestResolveClientIp:
@@ -55,3 +58,59 @@ class TestResolveClientIp:
         scope = {"headers": list(headers.items()), "client": ("10.0.0.1", 12345)}
         result = resolve_client_ip(scope, ip_headers=["X-Amzn-Source-Ip"])
         assert result == "9.8.7.6"
+
+
+class TestRateLimiter:
+    """Tests for RateLimiter."""
+
+    def test_allows_under_limit(self) -> None:
+        """Requests under the limit are allowed."""
+        rl = RateLimiter(max_requests=5, window_seconds=60)
+        for _ in range(5):
+            assert rl.check("1.2.3.4") is True
+
+    def test_blocks_over_limit(self) -> None:
+        """Sixth request in the window is blocked."""
+        rl = RateLimiter(max_requests=5, window_seconds=60)
+        for _ in range(5):
+            rl.check("1.2.3.4")
+        assert rl.check("1.2.3.4") is False
+
+    def test_per_ip_isolation(self) -> None:
+        """Rate limits are tracked per IP."""
+        rl = RateLimiter(max_requests=1, window_seconds=60)
+        assert rl.check("1.1.1.1") is True
+        assert rl.check("1.1.1.1") is False
+        assert rl.check("2.2.2.2") is True
+
+    def test_window_expiry(self) -> None:
+        """Old timestamps are pruned and the request is allowed."""
+        rl = RateLimiter(max_requests=1, window_seconds=1)
+        assert rl.check("1.1.1.1") is True
+        assert rl.check("1.1.1.1") is False
+        with patch("mcp_awareness.oauth_proxy.time.monotonic", return_value=time.monotonic() + 2):
+            assert rl.check("1.1.1.1") is True
+
+    def test_ban_blocks_all_requests(self) -> None:
+        """A banned IP is rejected regardless of rate limit."""
+        rl = RateLimiter(max_requests=100, window_seconds=60, ban_duration=3600)
+        rl.ban("1.1.1.1", reason="test")
+        assert rl.check("1.1.1.1") is False
+
+    def test_ban_expires(self) -> None:
+        """Bans expire after ban_duration seconds."""
+        rl = RateLimiter(max_requests=100, window_seconds=60, ban_duration=10)
+        rl.ban("1.1.1.1", reason="test")
+        assert rl.check("1.1.1.1") is False
+        with patch("mcp_awareness.oauth_proxy.time.monotonic", return_value=time.monotonic() + 11):
+            assert rl.check("1.1.1.1") is True
+
+    def test_stats(self) -> None:
+        """Stats report rate-limited and banned counts."""
+        rl = RateLimiter(max_requests=1, window_seconds=60, ban_duration=3600)
+        rl.check("1.1.1.1")
+        rl.check("1.1.1.1")  # rate limited
+        rl.ban("2.2.2.2", reason="test")
+        stats = rl.stats()
+        assert stats["rate_limited"] >= 1
+        assert stats["banned_ips"] == 1
