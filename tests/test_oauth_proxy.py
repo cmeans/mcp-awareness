@@ -869,7 +869,10 @@ class TestServerWiring:
         server_mod.MOUNT_PATH = "/secret"
         try:
             result = server_mod._build_resource_metadata_url()
-            assert result == "https://staging.mcpawareness.com/secret/.well-known/oauth-protected-resource"
+            assert (
+                result
+                == "https://staging.mcpawareness.com/secret/.well-known/oauth-protected-resource"
+            )
         finally:
             server_mod.PUBLIC_URL = orig_public
             server_mod.MOUNT_PATH = orig_mount
