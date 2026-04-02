@@ -835,6 +835,48 @@ class TestServerWiring:
             server_mod.OAUTH_ISSUER = original_issuer
             server_mod._oauth_proxy = original_oauth_proxy
 
+    def test_resource_metadata_url_relative_without_public_url(self) -> None:
+        """Returns relative path when PUBLIC_URL is not set."""
+        orig_public = server_mod.PUBLIC_URL
+        orig_mount = server_mod.MOUNT_PATH
+        server_mod.PUBLIC_URL = ""
+        server_mod.MOUNT_PATH = ""
+        try:
+            url = server_mod._build_resource_metadata_url()
+            assert url == "/.well-known/oauth-protected-resource"
+        finally:
+            server_mod.PUBLIC_URL = orig_public
+            server_mod.MOUNT_PATH = orig_mount
+
+    def test_resource_metadata_url_absolute_with_public_url(self) -> None:
+        """Returns absolute URI when PUBLIC_URL is set (RFC 9728)."""
+        orig_public = server_mod.PUBLIC_URL
+        orig_mount = server_mod.MOUNT_PATH
+        server_mod.PUBLIC_URL = "https://staging.mcpawareness.com"
+        server_mod.MOUNT_PATH = ""
+        try:
+            result = server_mod._build_resource_metadata_url()
+            assert result == "https://staging.mcpawareness.com/.well-known/oauth-protected-resource"
+        finally:
+            server_mod.PUBLIC_URL = orig_public
+            server_mod.MOUNT_PATH = orig_mount
+
+    def test_resource_metadata_url_with_mount_path(self) -> None:
+        """Includes MOUNT_PATH in the URL when set."""
+        orig_public = server_mod.PUBLIC_URL
+        orig_mount = server_mod.MOUNT_PATH
+        server_mod.PUBLIC_URL = "https://staging.mcpawareness.com"
+        server_mod.MOUNT_PATH = "/secret"
+        try:
+            result = server_mod._build_resource_metadata_url()
+            assert (
+                result
+                == "https://staging.mcpawareness.com/secret/.well-known/oauth-protected-resource"
+            )
+        finally:
+            server_mod.PUBLIC_URL = orig_public
+            server_mod.MOUNT_PATH = orig_mount
+
     def test_health_response_no_proxy_stats(self) -> None:
         """Health response omits oauth_proxy when proxy is disabled."""
         # Ensure _oauth_proxy is None (default state)

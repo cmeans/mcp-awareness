@@ -394,10 +394,16 @@ def _build_oauth_validator() -> object | None:
 
 
 def _build_resource_metadata_url() -> str:
-    """Build the well-known resource metadata URL for WWW-Authenticate headers."""
-    if MOUNT_PATH:
-        return f"{MOUNT_PATH}/.well-known/oauth-protected-resource"
-    return "/.well-known/oauth-protected-resource"
+    """Build the well-known resource metadata URL for WWW-Authenticate headers.
+
+    RFC 9728 requires an absolute URI.  Uses PUBLIC_URL when available,
+    falls back to a relative path for local/development use.
+    """
+    suffix = "/.well-known/oauth-protected-resource"
+    path = f"{MOUNT_PATH}{suffix}" if MOUNT_PATH else suffix
+    if PUBLIC_URL:
+        return f"{PUBLIC_URL.rstrip('/')}{path}"
+    return path
 
 
 def _wrap_with_auth(app: Any) -> Any:
