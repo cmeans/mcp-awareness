@@ -1,3 +1,4 @@
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later | Copyright (C) 2026 Chris Means -->
 # OAuth Proxy Workaround — Design Spec
 
 **Date**: 2026-04-02
