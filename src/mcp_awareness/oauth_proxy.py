@@ -176,6 +176,37 @@ class RateLimiter:
         }
 
 
+class ProxyStats:
+    """Tracks OAuth proxy traffic for the health endpoint."""
+
+    def __init__(self) -> None:
+        self._raw_hits: dict[str, int] = {"authorize": 0, "token": 0, "register": 0}
+        self._completed_flows = 0
+        self._last_completed_flow: str | None = None
+
+    def record_hit(self, route: str) -> None:
+        """Record a hit on a proxy route."""
+        if route in self._raw_hits:
+            self._raw_hits[route] += 1
+
+    def record_completed_flow(self) -> None:
+        """Record a successful token exchange (WorkOS returned 200 with access_token)."""
+        self._completed_flows += 1
+        self._last_completed_flow = datetime.now(timezone.utc).isoformat()
+
+    def to_dict(self, rate_limiter_stats: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Build the health endpoint payload."""
+        result: dict[str, Any] = {
+            "enabled": True,
+            "completed_flows": self._completed_flows,
+            "last_completed_flow": self._last_completed_flow,
+            "raw_hits": dict(self._raw_hits),
+        }
+        if rate_limiter_stats:
+            result.update(rate_limiter_stats)
+        return result
+
+
 def discover_oidc_endpoints(issuer: str) -> dict[str, str | None] | None:
     """Discover OAuth endpoints from the issuer's OpenID configuration.
 

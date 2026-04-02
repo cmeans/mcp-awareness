@@ -23,6 +23,7 @@ import time
 from unittest.mock import MagicMock, patch
 
 from mcp_awareness.oauth_proxy import (
+    ProxyStats,
     RateLimiter,
     detect_bogus_request,
     discover_oidc_endpoints,
@@ -264,3 +265,34 @@ class TestDiscoverOidcEndpoints:
         with patch("urllib.request.urlopen", return_value=self._mock_oidc_response(config)):
             result = discover_oidc_endpoints("https://auth.example.com")
         assert result is None
+
+
+class TestProxyStats:
+    """Tests for ProxyStats health reporting."""
+
+    def test_initial_stats(self) -> None:
+        """Fresh stats are all zeros/None."""
+        stats = ProxyStats()
+        data = stats.to_dict()
+        assert data["completed_flows"] == 0
+        assert data["last_completed_flow"] is None
+        assert data["raw_hits"] == {"authorize": 0, "token": 0, "register": 0}
+
+    def test_record_hit(self) -> None:
+        """Hits are counted per route."""
+        stats = ProxyStats()
+        stats.record_hit("authorize")
+        stats.record_hit("token")
+        stats.record_hit("token")
+        data = stats.to_dict()
+        assert data["raw_hits"]["authorize"] == 1
+        assert data["raw_hits"]["token"] == 2
+        assert data["raw_hits"]["register"] == 0
+
+    def test_record_completed_flow(self) -> None:
+        """Completed flows are counted and timestamped."""
+        stats = ProxyStats()
+        stats.record_completed_flow()
+        data = stats.to_dict()
+        assert data["completed_flows"] == 1
+        assert data["last_completed_flow"] is not None
