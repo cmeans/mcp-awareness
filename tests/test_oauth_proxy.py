@@ -18,10 +18,16 @@
 
 from __future__ import annotations
 
+import json
 import time
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
-from mcp_awareness.oauth_proxy import RateLimiter, detect_bogus_request, resolve_client_ip
+from mcp_awareness.oauth_proxy import (
+    RateLimiter,
+    detect_bogus_request,
+    discover_oidc_endpoints,
+    resolve_client_ip,
+)
 
 
 class TestResolveClientIp:
@@ -207,4 +213,54 @@ class TestDetectBogusRequest:
     def test_valid_register_post_passes(self) -> None:
         """POST to /register is not flagged."""
         result = detect_bogus_request("/register", "POST", {})
+        assert result is None
+
+
+class TestDiscoverOidcEndpoints:
+    """Tests for discover_oidc_endpoints()."""
+
+    def _mock_oidc_response(self, config: dict[str, str]) -> MagicMock:
+        """Create a mock urllib response with the given JSON body."""
+        mock_resp = MagicMock()
+        mock_resp.read.return_value = json.dumps(config).encode()
+        mock_resp.__enter__ = lambda s: s
+        mock_resp.__exit__ = MagicMock(return_value=False)
+        return mock_resp
+
+    def test_discovers_all_endpoints(self) -> None:
+        """All three endpoints are extracted from OIDC config."""
+        config = {
+            "authorization_endpoint": "https://auth.example.com/authorize",
+            "token_endpoint": "https://auth.example.com/token",
+            "registration_endpoint": "https://auth.example.com/register",
+        }
+        with patch("urllib.request.urlopen", return_value=self._mock_oidc_response(config)):
+            result = discover_oidc_endpoints("https://auth.example.com")
+        assert result["authorization_endpoint"] == "https://auth.example.com/authorize"
+        assert result["token_endpoint"] == "https://auth.example.com/token"
+        assert result["registration_endpoint"] == "https://auth.example.com/register"
+
+    def test_missing_registration_endpoint(self) -> None:
+        """Registration endpoint is None when not in OIDC config."""
+        config = {
+            "authorization_endpoint": "https://auth.example.com/authorize",
+            "token_endpoint": "https://auth.example.com/token",
+        }
+        with patch("urllib.request.urlopen", return_value=self._mock_oidc_response(config)):
+            result = discover_oidc_endpoints("https://auth.example.com")
+        assert result["authorization_endpoint"] == "https://auth.example.com/authorize"
+        assert result["token_endpoint"] == "https://auth.example.com/token"
+        assert result["registration_endpoint"] is None
+
+    def test_discovery_failure_returns_none(self) -> None:
+        """Returns None when OIDC discovery fails."""
+        with patch("urllib.request.urlopen", side_effect=Exception("connection refused")):
+            result = discover_oidc_endpoints("https://auth.example.com")
+        assert result is None
+
+    def test_missing_required_endpoints_returns_none(self) -> None:
+        """Returns None when authorization_endpoint or token_endpoint is missing."""
+        config = {"authorization_endpoint": "https://auth.example.com/authorize"}
+        with patch("urllib.request.urlopen", return_value=self._mock_oidc_response(config)):
+            result = discover_oidc_endpoints("https://auth.example.com")
         assert result is None

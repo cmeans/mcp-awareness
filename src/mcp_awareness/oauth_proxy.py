@@ -27,9 +27,11 @@ once the upstream bugs are fixed.
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 import time
+import urllib.request
 from datetime import datetime, timezone
 from typing import Any
 
@@ -172,3 +174,46 @@ class RateLimiter:
             "banned_ips": active_bans,
             "last_ban": self._last_ban,
         }
+
+
+def discover_oidc_endpoints(issuer: str) -> dict[str, str | None] | None:
+    """Discover OAuth endpoints from the issuer's OpenID configuration.
+
+    Returns a dict with ``authorization_endpoint``, ``token_endpoint``,
+    and ``registration_endpoint`` (may be None).  Returns None on failure.
+    Endpoints are pinned at startup — never re-discovered from client input.
+    """
+    discovery_url = f"{issuer.rstrip('/')}/.well-known/openid-configuration"
+    try:
+        with urllib.request.urlopen(discovery_url, timeout=10) as resp:
+            config = json.loads(resp.read())
+    except Exception as exc:
+        logger.error("OAuth proxy: OIDC discovery failed for %s: %s", discovery_url, exc)
+        return None
+
+    authorization_endpoint = config.get("authorization_endpoint")
+    token_endpoint = config.get("token_endpoint")
+
+    if not authorization_endpoint or not token_endpoint:
+        logger.error(
+            "OAuth proxy: OIDC config missing required endpoints "
+            "(authorization_endpoint=%s, token_endpoint=%s)",
+            authorization_endpoint,
+            token_endpoint,
+        )
+        return None
+
+    registration_endpoint = config.get("registration_endpoint")
+
+    logger.info(
+        "OAuth proxy: discovered endpoints — authorize=%s, token=%s, register=%s",
+        authorization_endpoint,
+        token_endpoint,
+        registration_endpoint or "(not available)",
+    )
+
+    return {
+        "authorization_endpoint": str(authorization_endpoint),
+        "token_endpoint": str(token_endpoint),
+        "registration_endpoint": str(registration_endpoint) if registration_endpoint else None,
+    }
