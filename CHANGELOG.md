@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **OAuth proxy workaround**: feature-gated middleware (`AWARENESS_OAUTH_PROXY=true`) that proxies `/authorize`, `/token`, `/register` to the external OAuth provider (e.g. WorkOS) — works around Claude Desktop/Claude.ai bugs that ignore external auth endpoints
+- **OAuth proxy rate limiting**: per-IP sliding window rate limits with auto-ban for bogus requests (injection patterns, wrong HTTP methods, missing required params)
+- **OAuth proxy health stats**: `/health` endpoint includes `oauth_proxy` section with completed flows, raw hits, rate-limited counts, and banned IP counts — enables detection of when upstream bugs are fixed
+- **Configurable IP resolution**: `AWARENESS_OAUTH_PROXY_IP_HEADERS` env var for infrastructure-portable client IP detection (default: `CF-Connecting-IP,X-Real-IP`)
 - **OAuth staging compose**: `docker-compose.oauth.yaml` for isolated OAuth/WorkOS AuthKit testing with separate Postgres, Cloudflare tunnel, and optional Ollama — runs on port 8421 alongside production
 - **OAuth env template**: `.env.oauth.example` with all required/optional variables for staging deployment
 - **Gzip response compression**: HTTP transport compresses non-SSE responses over 500 bytes via Starlette GZipMiddleware — applies to health checks and JSON endpoints; MCP tool responses use SSE (`text/event-stream`) which Starlette excludes from compression, so rely on Cloudflare or reverse proxy for tool traffic compression (#112)
