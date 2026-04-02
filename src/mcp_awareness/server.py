@@ -423,8 +423,34 @@ def _wrap_with_auth(app: Any) -> Any:
     )
 
 
-def _run() -> None:
+def _wrap_with_oauth_proxy(app: Any) -> Any:
+    """Wrap an ASGI app with OAuthProxyMiddleware if the proxy is enabled.
+
+    Returns the (possibly wrapped) app and sets the module-level _oauth_proxy
+    so the health endpoint can report proxy stats.
+    """
     global _oauth_proxy
+    if not (OAUTH_PROXY and OAUTH_ISSUER):
+        return app
+
+    from mcp_awareness.oauth_proxy import OAuthProxyMiddleware, discover_oidc_endpoints
+
+    endpoints = discover_oidc_endpoints(OAUTH_ISSUER)
+    if endpoints:
+        _oauth_proxy = OAuthProxyMiddleware(
+            app,
+            endpoints=endpoints,
+            ban_duration=OAUTH_PROXY_BAN_DURATION,
+            ip_headers=OAUTH_PROXY_IP_HEADERS,
+        )
+        logger.info("OAuth proxy: enabled — intercepting /authorize, /token, /register")
+        return _oauth_proxy
+
+    logger.error("OAuth proxy: OIDC discovery failed — proxy disabled")
+    return app
+
+
+def _run() -> None:
     if TRANSPORT == "streamable-http" and MOUNT_PATH:
         import uvicorn
         from starlette.types import ASGIApp as _ASGIApp
@@ -448,23 +474,7 @@ def _run() -> None:
             )
 
         app = _wrap_with_auth(app)
-
-        # OAuth proxy workaround — slots outside AuthMiddleware
-        if OAUTH_PROXY and OAUTH_ISSUER:
-            from mcp_awareness.oauth_proxy import OAuthProxyMiddleware, discover_oidc_endpoints
-
-            endpoints = discover_oidc_endpoints(OAUTH_ISSUER)
-            if endpoints:
-                _oauth_proxy = OAuthProxyMiddleware(
-                    app,
-                    endpoints=endpoints,
-                    ban_duration=OAUTH_PROXY_BAN_DURATION,
-                    ip_headers=OAUTH_PROXY_IP_HEADERS,
-                )
-                app = _oauth_proxy
-                logger.info("OAuth proxy: enabled — intercepting /authorize, /token, /register")
-            else:
-                logger.error("OAuth proxy: OIDC discovery failed — proxy disabled")
+        app = _wrap_with_oauth_proxy(app)
 
         from starlette.middleware.gzip import GZipMiddleware
 
@@ -497,23 +507,7 @@ def _run() -> None:
             )
 
         health_app = _wrap_with_auth(health_app)
-
-        # OAuth proxy workaround — slots outside AuthMiddleware
-        if OAUTH_PROXY and OAUTH_ISSUER:
-            from mcp_awareness.oauth_proxy import OAuthProxyMiddleware, discover_oidc_endpoints
-
-            endpoints = discover_oidc_endpoints(OAUTH_ISSUER)
-            if endpoints:
-                _oauth_proxy = OAuthProxyMiddleware(
-                    health_app,
-                    endpoints=endpoints,
-                    ban_duration=OAUTH_PROXY_BAN_DURATION,
-                    ip_headers=OAUTH_PROXY_IP_HEADERS,
-                )
-                health_app = _oauth_proxy
-                logger.info("OAuth proxy: enabled — intercepting /authorize, /token, /register")
-            else:
-                logger.error("OAuth proxy: OIDC discovery failed — proxy disabled")
+        health_app = _wrap_with_oauth_proxy(health_app)
 
         from starlette.middleware.gzip import GZipMiddleware
 

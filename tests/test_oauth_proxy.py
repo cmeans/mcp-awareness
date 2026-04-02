@@ -754,6 +754,71 @@ class TestServerWiring:
         """AWARENESS_OAUTH_PROXY defaults to false."""
         assert server_mod.OAUTH_PROXY is False
 
+    def test_wrap_with_oauth_proxy_disabled(self) -> None:
+        """_wrap_with_oauth_proxy returns app unchanged when OAUTH_PROXY is false."""
+        sentinel = object()
+        original_proxy = server_mod.OAUTH_PROXY
+        server_mod.OAUTH_PROXY = False
+        try:
+            result = server_mod._wrap_with_oauth_proxy(sentinel)
+            assert result is sentinel
+        finally:
+            server_mod.OAUTH_PROXY = original_proxy
+
+    def test_wrap_with_oauth_proxy_no_issuer(self) -> None:
+        """_wrap_with_oauth_proxy returns app unchanged when OAUTH_ISSUER is empty."""
+        sentinel = object()
+        original_proxy = server_mod.OAUTH_PROXY
+        original_issuer = server_mod.OAUTH_ISSUER
+        server_mod.OAUTH_PROXY = True
+        server_mod.OAUTH_ISSUER = ""
+        try:
+            result = server_mod._wrap_with_oauth_proxy(sentinel)
+            assert result is sentinel
+        finally:
+            server_mod.OAUTH_PROXY = original_proxy
+            server_mod.OAUTH_ISSUER = original_issuer
+
+    def test_wrap_with_oauth_proxy_discovery_fails(self) -> None:
+        """_wrap_with_oauth_proxy returns app unchanged when OIDC discovery fails."""
+        sentinel = object()
+        original_proxy = server_mod.OAUTH_PROXY
+        original_issuer = server_mod.OAUTH_ISSUER
+        server_mod.OAUTH_PROXY = True
+        server_mod.OAUTH_ISSUER = "https://auth.example.com"
+        try:
+            with patch("mcp_awareness.oauth_proxy.discover_oidc_endpoints", return_value=None):
+                result = server_mod._wrap_with_oauth_proxy(sentinel)
+            assert result is sentinel
+        finally:
+            server_mod.OAUTH_PROXY = original_proxy
+            server_mod.OAUTH_ISSUER = original_issuer
+
+    def test_wrap_with_oauth_proxy_success(self) -> None:
+        """_wrap_with_oauth_proxy wraps app with OAuthProxyMiddleware on success."""
+        sentinel = object()
+        original_proxy = server_mod.OAUTH_PROXY
+        original_issuer = server_mod.OAUTH_ISSUER
+        original_oauth_proxy = server_mod._oauth_proxy
+        server_mod.OAUTH_PROXY = True
+        server_mod.OAUTH_ISSUER = "https://auth.example.com"
+        try:
+            with patch(
+                "mcp_awareness.oauth_proxy.discover_oidc_endpoints",
+                return_value={
+                    "authorization_endpoint": "https://auth.example.com/authorize",
+                    "token_endpoint": "https://auth.example.com/token",
+                    "registration_endpoint": None,
+                },
+            ):
+                result = server_mod._wrap_with_oauth_proxy(sentinel)
+            assert result is not sentinel
+            assert server_mod._oauth_proxy is not None
+        finally:
+            server_mod.OAUTH_PROXY = original_proxy
+            server_mod.OAUTH_ISSUER = original_issuer
+            server_mod._oauth_proxy = original_oauth_proxy
+
     def test_health_response_no_proxy_stats(self) -> None:
         """Health response omits oauth_proxy when proxy is disabled."""
         # Ensure _oauth_proxy is None (default state)
