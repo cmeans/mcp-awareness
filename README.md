@@ -14,7 +14,7 @@
 > **Your AI's memory shouldn't be locked to one app. It should follow you everywhere.**
 
 > [!NOTE]
-> Early-stage but actively deployed — 535 tests, 15 releases, in daily use across Claude.ai, Claude Code, and Claude Desktop. See [Current status](#current-status) for what's working and what's planned.
+> Early-stage but actively deployed — 620 tests, 15 releases, in daily use across Claude.ai, Claude Code, and Claude Desktop. See [Current status](#current-status) for what's working and what's planned.
 
 ## What this is
 
@@ -227,6 +227,9 @@ The server is running on port 8420. Point any MCP client at `http://localhost:84
 | `AWARENESS_OAUTH_JWKS_URI` | `{issuer}/.well-known/jwks.json` | Override JWKS endpoint |
 | `AWARENESS_OAUTH_USER_CLAIM` | `sub` | JWT claim to use as owner_id |
 | `AWARENESS_OAUTH_AUTO_PROVISION` | `false` | Auto-create user on first valid OAuth login |
+| `AWARENESS_OAUTH_PROXY` | `false` | Enable OAuth proxy workaround for Claude Desktop/Claude.ai |
+| `AWARENESS_OAUTH_PROXY_BAN_DURATION` | `3600` | Auto-ban duration (seconds) for bogus OAuth requests |
+| `AWARENESS_OAUTH_PROXY_IP_HEADERS` | `CF-Connecting-IP,X-Real-IP` | Trusted IP header priority chain |
 | `AWARENESS_PUBLIC_URL` | _(empty)_ | Public base URL for this server (e.g., `https://mcpawareness.com`). Required when behind a reverse proxy or Cloudflare Tunnel so that `/.well-known/oauth-protected-resource` returns the correct `resource` URL. |
 
 See the [Auth Setup Guide](docs/auth-setup.md) for complete configuration instructions.
