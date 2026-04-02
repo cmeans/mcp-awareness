@@ -117,7 +117,7 @@ After=network.target
 Type=simple
 User=awareness
 EnvironmentFile=/etc/awareness/env
-ExecStart=/usr/local/bin/mcp-awareness
+ExecStart=/opt/mcp-awareness/venv/bin/mcp-awareness
 Restart=on-failure
 RestartSec=5
 
