@@ -28,6 +28,7 @@ once the upstream bugs are fixed.
 from __future__ import annotations
 
 import logging
+import re
 import time
 from datetime import datetime, timezone
 from typing import Any
@@ -38,6 +39,52 @@ logger = logging.getLogger(__name__)
 
 # Default trusted-header chain — Cloudflare environment
 _DEFAULT_IP_HEADERS = ["CF-Connecting-IP", "X-Real-IP"]
+
+# Patterns that indicate injection attempts in parameter values
+_INJECTION_PATTERNS = re.compile(
+    r"\.\./|\.\.\\|;.*(?:DROP|DELETE|INSERT|UPDATE|SELECT)|<script|%00|%0a|%0d",
+    re.IGNORECASE,
+)
+
+# Required params per route and allowed methods
+_ROUTE_RULES: dict[str, dict[str, Any]] = {
+    "/authorize": {
+        "method": "GET",
+        "required_params": ["response_type", "client_id", "redirect_uri"],
+    },
+    "/token": {"method": "POST", "required_params": []},
+    "/register": {"method": "POST", "required_params": []},
+}
+
+
+def detect_bogus_request(
+    path: str,
+    method: str,
+    params: dict[str, str],
+) -> str | None:
+    """Detect unambiguously malicious requests.
+
+    Returns a reason string if the request is bogus, None if it looks legitimate.
+    """
+    rule = _ROUTE_RULES.get(path)
+    if rule is None:
+        return None
+
+    # Wrong HTTP method
+    if method.upper() != rule["method"]:
+        return f"Wrong method {method} for {path} (expected {rule['method']})"
+
+    # Missing required params (only checked for routes that define them)
+    for param in rule["required_params"]:
+        if param not in params:
+            return f"Missing required param '{param}' for {path}"
+
+    # Injection patterns in any param value
+    for key, value in params.items():
+        if _INJECTION_PATTERNS.search(value):
+            return f"Injection pattern detected in param '{key}'"
+
+    return None
 
 
 def resolve_client_ip(

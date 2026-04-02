@@ -21,7 +21,7 @@ from __future__ import annotations
 import time
 from unittest.mock import patch
 
-from mcp_awareness.oauth_proxy import RateLimiter, resolve_client_ip
+from mcp_awareness.oauth_proxy import RateLimiter, detect_bogus_request, resolve_client_ip
 
 
 class TestResolveClientIp:
@@ -114,3 +114,97 @@ class TestRateLimiter:
         stats = rl.stats()
         assert stats["rate_limited"] >= 1
         assert stats["banned_ips"] == 1
+
+
+class TestDetectBogusRequest:
+    """Tests for detect_bogus_request()."""
+
+    def test_valid_authorize_passes(self) -> None:
+        """A valid /authorize request is not flagged."""
+        result = detect_bogus_request(
+            "/authorize",
+            "GET",
+            {"response_type": "code", "client_id": "abc", "redirect_uri": "https://example.com/cb"},
+        )
+        assert result is None
+
+    def test_authorize_missing_client_id(self) -> None:
+        """Missing client_id on /authorize is flagged."""
+        result = detect_bogus_request(
+            "/authorize",
+            "GET",
+            {"response_type": "code", "redirect_uri": "https://example.com/cb"},
+        )
+        assert result is not None
+        assert "client_id" in result
+
+    def test_authorize_missing_response_type(self) -> None:
+        """Missing response_type on /authorize is flagged."""
+        result = detect_bogus_request(
+            "/authorize",
+            "GET",
+            {"client_id": "abc", "redirect_uri": "https://example.com/cb"},
+        )
+        assert result is not None
+
+    def test_authorize_missing_redirect_uri(self) -> None:
+        """Missing redirect_uri on /authorize is flagged."""
+        result = detect_bogus_request(
+            "/authorize",
+            "GET",
+            {"response_type": "code", "client_id": "abc"},
+        )
+        assert result is not None
+
+    def test_wrong_method_post_authorize(self) -> None:
+        """POST to /authorize is flagged (should be GET)."""
+        result = detect_bogus_request(
+            "/authorize",
+            "POST",
+            {"response_type": "code", "client_id": "abc", "redirect_uri": "https://example.com/cb"},
+        )
+        assert result is not None
+        assert "method" in result.lower()
+
+    def test_wrong_method_get_token(self) -> None:
+        """GET to /token is flagged (should be POST)."""
+        result = detect_bogus_request("/token", "GET", {})
+        assert result is not None
+        assert "method" in result.lower()
+
+    def test_injection_in_params(self) -> None:
+        """Path traversal in param values is flagged."""
+        result = detect_bogus_request(
+            "/authorize",
+            "GET",
+            {
+                "response_type": "code",
+                "client_id": "../../etc/passwd",
+                "redirect_uri": "https://x.com/cb",
+            },
+        )
+        assert result is not None
+        assert "injection" in result.lower()
+
+    def test_sql_injection_in_params(self) -> None:
+        """SQL injection pattern in param values is flagged."""
+        result = detect_bogus_request(
+            "/authorize",
+            "GET",
+            {
+                "response_type": "code",
+                "client_id": "'; DROP TABLE users;--",
+                "redirect_uri": "https://x.com/cb",
+            },
+        )
+        assert result is not None
+
+    def test_valid_token_post_passes(self) -> None:
+        """POST to /token is not flagged."""
+        result = detect_bogus_request("/token", "POST", {})
+        assert result is None
+
+    def test_valid_register_post_passes(self) -> None:
+        """POST to /register is not flagged."""
+        result = detect_bogus_request("/register", "POST", {})
+        assert result is None
