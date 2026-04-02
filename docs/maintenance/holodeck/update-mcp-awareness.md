@@ -35,7 +35,7 @@ git pull origin main
 If the release includes new env vars, append them to the env file:
 
 ```bash
-vi /etc/awareness/env
+nano /etc/awareness/env
 ```
 
 ### 5. Restart the service
