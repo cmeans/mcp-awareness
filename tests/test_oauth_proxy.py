@@ -512,8 +512,10 @@ class TestOAuthProxyMiddleware:
         }
         status1, _, _ = await _collect_response(mw, scope)
         assert status1 == 302
-        status2, _, _ = await _collect_response(mw, scope)
+        status2, _, headers2 = await _collect_response(mw, scope)
         assert status2 == 429
+        header_dict = dict(headers2)
+        assert b"retry-after" in header_dict
 
     @pytest.mark.anyio
     async def test_upstream_timeout_returns_502(self) -> None:
@@ -571,6 +573,56 @@ class TestOAuthProxyMiddleware:
 
         stats = mw.health_stats()
         assert stats["completed_flows"] == 1
+
+    @pytest.mark.anyio
+    async def test_register_proxies_to_upstream(self) -> None:
+        """POST /register proxies to the real registration endpoint."""
+        mw = _make_middleware()
+        scope = {
+            "type": "http",
+            "path": "/register",
+            "method": "POST",
+            "headers": [(b"content-type", b"application/json")],
+            "client": ("1.1.1.1", 1234),
+        }
+        upstream_body = json.dumps({"client_id": "new_client"}).encode()
+        mock_resp = MagicMock()
+        mock_resp.status = 201
+        mock_resp.read.return_value = upstream_body
+        mock_resp.getheader.side_effect = lambda h, d=None: {
+            "Content-Type": "application/json",
+        }.get(h, d)
+        mock_resp.__enter__ = lambda s: s
+        mock_resp.__exit__ = MagicMock(return_value=False)
+
+        with patch("urllib.request.urlopen", return_value=mock_resp):
+            status, body, _ = await _collect_response(
+                mw, scope, body=b'{"redirect_uris": ["https://example.com/cb"]}'
+            )
+        assert status == 201
+        data = json.loads(body)
+        assert data["client_id"] == "new_client"
+
+    @pytest.mark.anyio
+    async def test_ip_header_warning_logged(self) -> None:
+        """Warning is logged when configured IP headers are not found."""
+        mw = _make_middleware()
+        scope = {
+            "type": "http",
+            "path": "/authorize",
+            "method": "GET",
+            "query_string": b"response_type=code&client_id=abc&redirect_uri=https://x.com/cb",
+            "headers": [],
+            "client": ("1.1.1.1", 1234),
+        }
+        import logging
+
+        with patch.object(logging.getLogger("mcp_awareness.oauth_proxy"), "warning") as mock_warn:
+            for _ in range(6):
+                # Reset rate limiter to avoid 429
+                mw._rate_limiters["/authorize"] = RateLimiter(max_requests=100, window_seconds=60)
+                await _collect_response(mw, scope)
+            assert any("fell back" in str(call) for call in mock_warn.call_args_list)
 
     @pytest.mark.anyio
     async def test_health_stats_structure(self) -> None:
