@@ -20,9 +20,13 @@ from __future__ import annotations
 
 import json
 import time
+from typing import Any
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from mcp_awareness.oauth_proxy import (
+    OAuthProxyMiddleware,
     ProxyStats,
     RateLimiter,
     detect_bogus_request,
@@ -296,3 +300,283 @@ class TestProxyStats:
         data = stats.to_dict()
         assert data["completed_flows"] == 1
         assert data["last_completed_flow"] is not None
+
+
+# ---------------------------------------------------------------------------
+# OAuthProxyMiddleware helpers and tests
+# ---------------------------------------------------------------------------
+
+
+async def _dummy_app(scope: dict[str, Any], receive: Any, send: Any) -> None:
+    """A minimal ASGI app that returns 200 with the path in the body."""
+    body = json.dumps({"path": scope.get("path", "")}).encode()
+    await send(
+        {
+            "type": "http.response.start",
+            "status": 200,
+            "headers": [(b"content-type", b"application/json")],
+        }
+    )
+    await send({"type": "http.response.body", "body": body})
+
+
+async def _collect_response(
+    app: Any, scope: dict[str, Any], body: bytes = b""
+) -> tuple[int, bytes, list[tuple[bytes, bytes]]]:
+    """Send a request through an ASGI app and collect status, body, headers."""
+    status = 0
+    resp_body = b""
+    headers: list[tuple[bytes, bytes]] = []
+
+    async def receive() -> dict[str, Any]:
+        return {"type": "http.request", "body": body}
+
+    async def send(message: dict[str, Any]) -> None:
+        nonlocal status, resp_body, headers
+        if message["type"] == "http.response.start":
+            status = message["status"]
+            headers = message.get("headers", [])
+        elif message["type"] == "http.response.body":
+            resp_body += message.get("body", b"")
+
+    await app(scope, receive, send)
+    return status, resp_body, headers
+
+
+def _make_middleware(
+    endpoints: dict[str, str | None] | None = None,
+) -> OAuthProxyMiddleware:
+    """Create an OAuthProxyMiddleware with test endpoints."""
+    ep = endpoints or {
+        "authorization_endpoint": "https://auth.example.com/authorize",
+        "token_endpoint": "https://auth.example.com/token",
+        "registration_endpoint": "https://auth.example.com/register",
+    }
+    return OAuthProxyMiddleware(
+        app=_dummy_app,
+        endpoints=ep,
+        ban_duration=3600,
+        ip_headers=["CF-Connecting-IP", "X-Real-IP"],
+    )
+
+
+class TestOAuthProxyMiddleware:
+    """Tests for OAuthProxyMiddleware ASGI handling."""
+
+    @pytest.mark.anyio
+    async def test_passthrough_non_oauth_path(self) -> None:
+        """Non-OAuth paths pass through to the inner app."""
+        mw = _make_middleware()
+        scope = {
+            "type": "http",
+            "path": "/mcp",
+            "method": "POST",
+            "headers": [],
+            "client": ("1.1.1.1", 1234),
+        }
+        status, body, _ = await _collect_response(mw, scope)
+        assert status == 200
+        data = json.loads(body)
+        assert data["path"] == "/mcp"
+
+    @pytest.mark.anyio
+    async def test_authorize_redirects(self) -> None:
+        """GET /authorize returns 302 to the real authorization endpoint."""
+        mw = _make_middleware()
+        scope = {
+            "type": "http",
+            "path": "/authorize",
+            "method": "GET",
+            "query_string": (
+                b"response_type=code&client_id=abc"
+                b"&redirect_uri=https%3A%2F%2Fexample.com%2Fcb&state=xyz"
+            ),
+            "headers": [],
+            "client": ("1.1.1.1", 1234),
+        }
+        status, _, headers = await _collect_response(mw, scope)
+        assert status == 302
+        location = dict(headers).get(b"location", b"").decode()
+        assert location.startswith("https://auth.example.com/authorize?")
+        assert "client_id=abc" in location
+        assert "state=xyz" in location
+
+    @pytest.mark.anyio
+    async def test_token_proxies_to_upstream(self) -> None:
+        """POST /token proxies to the real token endpoint and relays the response."""
+        mw = _make_middleware()
+        scope = {
+            "type": "http",
+            "path": "/token",
+            "method": "POST",
+            "headers": [(b"content-type", b"application/x-www-form-urlencoded")],
+            "client": ("1.1.1.1", 1234),
+        }
+        upstream_body = json.dumps({"access_token": "tok_123", "token_type": "bearer"}).encode()
+        mock_resp = MagicMock()
+        mock_resp.status = 200
+        mock_resp.read.return_value = upstream_body
+        mock_resp.getheader.side_effect = lambda h, d=None: {
+            "Content-Type": "application/json",
+        }.get(h, d)
+        mock_resp.__enter__ = lambda s: s
+        mock_resp.__exit__ = MagicMock(return_value=False)
+
+        with patch("urllib.request.urlopen", return_value=mock_resp):
+            status, body, _headers = await _collect_response(
+                mw, scope, body=b"grant_type=authorization_code&code=abc"
+            )
+        assert status == 200
+        data = json.loads(body)
+        assert data["access_token"] == "tok_123"
+
+    @pytest.mark.anyio
+    async def test_cors_preflight_token(self) -> None:
+        """OPTIONS /token returns CORS headers."""
+        mw = _make_middleware()
+        scope = {
+            "type": "http",
+            "path": "/token",
+            "method": "OPTIONS",
+            "headers": [],
+            "client": ("1.1.1.1", 1234),
+        }
+        status, _, headers = await _collect_response(mw, scope)
+        assert status == 204
+        header_dict = dict(headers)
+        assert b"access-control-allow-origin" in header_dict
+        assert b"access-control-allow-methods" in header_dict
+
+    @pytest.mark.anyio
+    async def test_cors_preflight_register(self) -> None:
+        """OPTIONS /register returns CORS headers."""
+        mw = _make_middleware()
+        scope = {
+            "type": "http",
+            "path": "/register",
+            "method": "OPTIONS",
+            "headers": [],
+            "client": ("1.1.1.1", 1234),
+        }
+        status, _, _headers = await _collect_response(mw, scope)
+        assert status == 204
+
+    @pytest.mark.anyio
+    async def test_register_404_when_not_discovered(self) -> None:
+        """POST /register returns 404 when registration_endpoint was not discovered."""
+        mw = _make_middleware(
+            endpoints={
+                "authorization_endpoint": "https://auth.example.com/authorize",
+                "token_endpoint": "https://auth.example.com/token",
+                "registration_endpoint": None,
+            }
+        )
+        scope = {
+            "type": "http",
+            "path": "/register",
+            "method": "POST",
+            "headers": [(b"content-type", b"application/json")],
+            "client": ("1.1.1.1", 1234),
+        }
+        status, _, _ = await _collect_response(mw, scope)
+        assert status == 404
+
+    @pytest.mark.anyio
+    async def test_bogus_request_returns_403(self) -> None:
+        """A request with injection patterns returns 403."""
+        mw = _make_middleware()
+        scope = {
+            "type": "http",
+            "path": "/authorize",
+            "method": "GET",
+            "query_string": b"response_type=code&client_id=../../etc/passwd&redirect_uri=https://x.com/cb",
+            "headers": [],
+            "client": ("1.1.1.1", 1234),
+        }
+        status, _, _ = await _collect_response(mw, scope)
+        assert status == 403
+
+    @pytest.mark.anyio
+    async def test_rate_limited_returns_429(self) -> None:
+        """Exceeding rate limit returns 429."""
+        mw = _make_middleware()
+        # Override the authorize rate limiter to a very low limit for testing
+        mw._rate_limiters["/authorize"] = RateLimiter(max_requests=1, window_seconds=60)
+        scope = {
+            "type": "http",
+            "path": "/authorize",
+            "method": "GET",
+            "query_string": b"response_type=code&client_id=abc&redirect_uri=https://x.com/cb",
+            "headers": [],
+            "client": ("1.1.1.1", 1234),
+        }
+        status1, _, _ = await _collect_response(mw, scope)
+        assert status1 == 302
+        status2, _, _ = await _collect_response(mw, scope)
+        assert status2 == 429
+
+    @pytest.mark.anyio
+    async def test_upstream_timeout_returns_502(self) -> None:
+        """Upstream timeout returns 502."""
+        mw = _make_middleware()
+        scope = {
+            "type": "http",
+            "path": "/token",
+            "method": "POST",
+            "headers": [(b"content-type", b"application/x-www-form-urlencoded")],
+            "client": ("1.1.1.1", 1234),
+        }
+        with patch("urllib.request.urlopen", side_effect=Exception("timeout")):
+            status, _, _ = await _collect_response(
+                mw, scope, body=b"grant_type=authorization_code&code=abc"
+            )
+        assert status == 502
+
+    @pytest.mark.anyio
+    async def test_non_http_passthrough(self) -> None:
+        """WebSocket and other non-HTTP scopes pass through."""
+        mw = _make_middleware()
+        scope = {
+            "type": "websocket",
+            "path": "/authorize",
+            "headers": [],
+            "client": ("1.1.1.1", 1234),
+        }
+        status, _body, _ = await _collect_response(mw, scope)
+        assert status == 200
+
+    @pytest.mark.anyio
+    async def test_completed_flow_tracked(self) -> None:
+        """A successful /token proxy increments completed_flows in stats."""
+        mw = _make_middleware()
+        scope = {
+            "type": "http",
+            "path": "/token",
+            "method": "POST",
+            "headers": [(b"content-type", b"application/x-www-form-urlencoded")],
+            "client": ("1.1.1.1", 1234),
+        }
+        upstream_body = json.dumps({"access_token": "tok_123"}).encode()
+        mock_resp = MagicMock()
+        mock_resp.status = 200
+        mock_resp.read.return_value = upstream_body
+        mock_resp.getheader.side_effect = lambda h, d=None: {
+            "Content-Type": "application/json",
+        }.get(h, d)
+        mock_resp.__enter__ = lambda s: s
+        mock_resp.__exit__ = MagicMock(return_value=False)
+
+        with patch("urllib.request.urlopen", return_value=mock_resp):
+            await _collect_response(mw, scope, body=b"grant_type=authorization_code&code=abc")
+
+        stats = mw.health_stats()
+        assert stats["completed_flows"] == 1
+
+    @pytest.mark.anyio
+    async def test_health_stats_structure(self) -> None:
+        """health_stats() returns the expected structure."""
+        mw = _make_middleware()
+        stats = mw.health_stats()
+        assert "enabled" in stats
+        assert "completed_flows" in stats
+        assert "raw_hits" in stats
