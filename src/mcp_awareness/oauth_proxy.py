@@ -462,7 +462,7 @@ class OAuthProxyMiddleware:
             req.add_header("Content-Type", content_type)
 
         try:
-            with urllib.request.urlopen(req, timeout=30) as resp:
+            with urllib.request.urlopen(req, timeout=15) as resp:
                 resp_body = resp.read()
                 headers: dict[str, str] = {}
                 for h in _FORWARDED_HEADERS:
