@@ -633,6 +633,112 @@ class TestOAuthProxyMiddleware:
         assert "completed_flows" in stats
         assert "raw_hits" in stats
 
+    @pytest.mark.anyio
+    async def test_token_endpoint_none_returns_404(self) -> None:
+        """POST /token returns 404 when token_endpoint is missing."""
+        mw = _make_middleware(
+            endpoints={
+                "authorization_endpoint": "https://auth.example.com/authorize",
+                "token_endpoint": None,
+                "registration_endpoint": None,
+            }
+        )
+        scope = {
+            "type": "http",
+            "path": "/token",
+            "method": "POST",
+            "headers": [(b"content-type", b"application/x-www-form-urlencoded")],
+            "client": ("1.1.1.1", 1234),
+        }
+        status, _, _ = await _collect_response(mw, scope, body=b"grant_type=authorization_code")
+        assert status == 404
+
+    @pytest.mark.anyio
+    async def test_upstream_http_error_relayed(self) -> None:
+        """Upstream 4xx/5xx errors are relayed to the client."""
+        mw = _make_middleware()
+        scope = {
+            "type": "http",
+            "path": "/token",
+            "method": "POST",
+            "headers": [(b"content-type", b"application/x-www-form-urlencoded")],
+            "client": ("1.1.1.1", 1234),
+        }
+        import urllib.error
+
+        error_body = json.dumps({"error": "invalid_grant"}).encode()
+        http_error = urllib.error.HTTPError(
+            url="https://auth.example.com/token",
+            code=400,
+            msg="Bad Request",
+            hdrs=MagicMock(),  # type: ignore[arg-type]
+            fp=None,
+        )
+        http_error.read = lambda: error_body  # type: ignore[assignment]
+        http_error.headers = {"Content-Type": "application/json"}  # type: ignore[assignment]
+
+        with patch("urllib.request.urlopen", side_effect=http_error):
+            status, body, _ = await _collect_response(
+                mw, scope, body=b"grant_type=authorization_code&code=bad"
+            )
+        assert status == 400
+        data = json.loads(body)
+        assert data["error"] == "invalid_grant"
+
+    @pytest.mark.anyio
+    async def test_non_json_token_response_no_crash(self) -> None:
+        """Non-JSON token response doesn't crash completed flow tracking."""
+        mw = _make_middleware()
+        scope = {
+            "type": "http",
+            "path": "/token",
+            "method": "POST",
+            "headers": [(b"content-type", b"application/x-www-form-urlencoded")],
+            "client": ("1.1.1.1", 1234),
+        }
+        mock_resp = MagicMock()
+        mock_resp.status = 200
+        mock_resp.read.return_value = b"not-json"
+        mock_resp.getheader.side_effect = lambda h, d=None: {
+            "Content-Type": "text/plain",
+        }.get(h, d)
+        mock_resp.__enter__ = lambda s: s
+        mock_resp.__exit__ = MagicMock(return_value=False)
+
+        with patch("urllib.request.urlopen", return_value=mock_resp):
+            status, body, _ = await _collect_response(
+                mw, scope, body=b"grant_type=authorization_code&code=abc"
+            )
+        assert status == 200
+        assert body == b"not-json"
+        # completed_flows should NOT be incremented
+        assert mw.health_stats()["completed_flows"] == 0
+
+    @pytest.mark.anyio
+    async def test_health_stats_with_rate_limit_timestamps(self) -> None:
+        """health_stats aggregates rate limiter timestamps correctly."""
+        mw = _make_middleware()
+        mw._rate_limiters["/authorize"] = RateLimiter(max_requests=1, window_seconds=60)
+        scope = {
+            "type": "http",
+            "path": "/authorize",
+            "method": "GET",
+            "query_string": b"response_type=code&client_id=abc&redirect_uri=https://x.com/cb",
+            "headers": [],
+            "client": ("1.1.1.1", 1234),
+        }
+        # First request passes
+        await _collect_response(mw, scope)
+        # Second triggers rate limit
+        await _collect_response(mw, scope)
+        stats = mw.health_stats()
+        assert stats["last_rate_limited"] is not None
+
+    def test_detect_bogus_unknown_path(self) -> None:
+        """detect_bogus_request returns None for unknown paths."""
+        result = detect_bogus_request("/unknown", "GET", {})
+        assert result is None
+
 
 # ---------------------------------------------------------------------------
 # Server wiring tests
