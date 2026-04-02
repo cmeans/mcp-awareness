@@ -634,6 +634,22 @@ class TestOAuthProxyMiddleware:
         assert "raw_hits" in stats
 
     @pytest.mark.anyio
+    async def test_get_header_returns_none_when_missing(self) -> None:
+        """_get_header returns None when the header is not present."""
+        mw = _make_middleware()
+        scope: dict[str, Any] = {"headers": [(b"other-header", b"value")]}
+        assert mw._get_header(scope, b"content-type") is None
+
+    @pytest.mark.anyio
+    async def test_health_stats_with_ban_timestamp(self) -> None:
+        """health_stats aggregates ban timestamps from rate limiters."""
+        mw = _make_middleware()
+        mw._rate_limiters["/authorize"].ban("9.9.9.9", reason="test ban")
+        stats = mw.health_stats()
+        assert stats["last_ban"] is not None
+        assert stats["banned_ips"] >= 1
+
+    @pytest.mark.anyio
     async def test_token_endpoint_none_returns_404(self) -> None:
         """POST /token returns 404 when token_endpoint is missing."""
         mw = _make_middleware(
