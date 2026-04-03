@@ -29,7 +29,7 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime, timedelta
+from datetime import timedelta
 from typing import Any
 
 from . import server as _srv
@@ -40,22 +40,17 @@ from .helpers import (
     VALID_ALERT_LEVELS,
     VALID_ALERT_TYPES,
     VALID_URGENCY,
+    _error_response,
     _paginate,
     _parse_entry_type,
     _timed,
+    _validate_enum,
     _validate_pagination,
+    _validate_timestamp,
 )
-from .schema import Entry, EntryType, ensure_dt, make_id, now_utc, to_iso
+from .schema import Entry, EntryType, make_id, now_utc, to_iso
 
 logger = logging.getLogger(__name__)
-
-
-def _safe_ensure_dt(val: str | datetime) -> tuple[datetime | None, str | None]:
-    """Wrap ensure_dt with error handling. Returns (datetime, None) or (None, error_message)."""
-    try:
-        return ensure_dt(val), None
-    except (ValueError, TypeError) as exc:
-        return None, f"Invalid date format: {exc}"
 
 
 # ---------------------------------------------------------------------------
@@ -95,17 +90,16 @@ async def get_alerts(
     error, the failure is in the transport or platform layer, not in awareness."""
     pv = _validate_pagination(limit, offset)
     if isinstance(pv, str):
-        return json.dumps({"error": pv})
+        _error_response(
+            "invalid_parameter",
+            pv,
+            retryable=False,
+            param="limit" if "limit" in pv else "offset",
+            value=limit if "limit" in pv else offset,
+        )
     limit, offset = pv
     assert limit is not None  # _validate_pagination guarantees a default
-    if since is not None and not since:
-        return json.dumps({"error": "since cannot be empty; omit or provide an ISO 8601 timestamp"})
-    if since:
-        since_dt, err = _safe_ensure_dt(since)
-        if err:
-            return json.dumps({"status": "error", "message": err})
-    else:
-        since_dt = None
+    since_dt = _validate_timestamp(since, "since")
     alerts = _srv.store.get_active_alerts(
         _srv._owner_id(), source, since=since_dt, limit=limit + 1, offset=offset
     )
@@ -128,7 +122,13 @@ async def get_status(source: str) -> str:
     entry = _srv.store.get_latest_status(_srv._owner_id(), source)
     if entry:
         return json.dumps(entry.to_dict(), indent=2)
-    return json.dumps({"error": f"No status found for source: {source}"})
+    _error_response(
+        "not_found",
+        f"No status found for source: '{source}'",
+        retryable=False,
+        param="source",
+        value=source,
+    )
 
 
 @_srv.mcp.tool()
@@ -178,40 +178,22 @@ async def get_knowledge(
     This tool always returns JSON with a status field or an entry list.
     If you receive an unstructured error, the failure is in the transport
     or platform layer, not in awareness."""
-    if since is not None and not since:
-        return json.dumps({"error": "since cannot be empty; omit or provide an ISO 8601 timestamp"})
     pv = _validate_pagination(limit, offset)
     if isinstance(pv, str):
-        return json.dumps({"error": pv})
+        _error_response(
+            "invalid_parameter",
+            pv,
+            retryable=False,
+            param="limit" if "limit" in pv else "offset",
+            value=limit if "limit" in pv else offset,
+        )
     limit, offset = pv
     assert limit is not None  # _validate_pagination guarantees a default
-    if since:
-        since_dt, err = _safe_ensure_dt(since)
-        if err:
-            return json.dumps({"status": "error", "message": err})
-    else:
-        since_dt = None
-    if until:
-        until_dt, err = _safe_ensure_dt(until)
-        if err:
-            return json.dumps({"status": "error", "message": err})
-    else:
-        until_dt = None
-    if created_after:
-        created_after_dt, err = _safe_ensure_dt(created_after)
-        if err:
-            return json.dumps({"status": "error", "message": err})
-    else:
-        created_after_dt = None
-    if created_before:
-        created_before_dt, err = _safe_ensure_dt(created_before)
-        if err:
-            return json.dumps({"status": "error", "message": err})
-    else:
-        created_before_dt = None
-    et, et_err = _parse_entry_type(entry_type)
-    if et_err:
-        return json.dumps({"error": et_err})
+    since_dt = _validate_timestamp(since, "since")
+    until_dt = _validate_timestamp(until, "until")
+    created_after_dt = _validate_timestamp(created_after, "created_after")
+    created_before_dt = _validate_timestamp(created_before, "created_before")
+    et = _parse_entry_type(entry_type)
     entries = _srv.store.get_knowledge(
         _srv._owner_id(),
         tags=tags,
@@ -332,17 +314,8 @@ async def report_alert(
     captured at detection time — evidence may be transient. Use resolved=True
     to mark an existing alert as resolved. Alert levels: 'warning', 'critical'.
     Alert types: 'threshold', 'structural', 'baseline'."""
-    if level not in VALID_ALERT_LEVELS:
-        return json.dumps(
-            {"error": f"invalid level '{level}', must be one of: {sorted(VALID_ALERT_LEVELS)}"}
-        )
-    if alert_type not in VALID_ALERT_TYPES:
-        return json.dumps(
-            {
-                "error": f"invalid alert_type '{alert_type}',"
-                f" must be one of: {sorted(VALID_ALERT_TYPES)}"
-            }
-        )
+    _validate_enum(level, "level", VALID_ALERT_LEVELS)
+    _validate_enum(alert_type, "alert_type", VALID_ALERT_TYPES)
     data: dict[str, Any] = {
         "alert_id": alert_id,
         "level": level,
@@ -493,14 +466,21 @@ async def update_entry(
     if content_type is not None:
         updates["content_type"] = content_type
     if not updates:
-        return json.dumps({"status": "error", "message": "No fields to update"})
+        _error_response(
+            "invalid_parameter",
+            "No fields to update — provide at least one of: "
+            "description, tags, source, content, content_type",
+            retryable=False,
+            param="content",
+        )
     result = _srv.store.update_entry(_srv._owner_id(), entry_id, updates)
     if result is None:
-        return json.dumps(
-            {
-                "status": "error",
-                "message": "Entry not found or type is immutable (status/alert/suppression)",
-            }
+        _error_response(
+            "not_found",
+            f"Entry not found or type is immutable (status/alert/suppression): '{entry_id}'",
+            retryable=False,
+            param="entry_id",
+            value=entry_id,
         )
     _srv._generate_embedding(result)
     return json.dumps(
@@ -548,12 +528,15 @@ async def suppress_alert(
     Not a plain-text memory edit — survives across agent platforms.
     Use this when the user says things like 'stop bugging me about disk I/O'.
     Escalation override means critical alerts will still break through."""
-    if level not in VALID_ALERT_LEVELS:
-        return json.dumps(
-            {"error": f"invalid level '{level}', must be one of: {sorted(VALID_ALERT_LEVELS)}"}
-        )
+    _validate_enum(level, "level", VALID_ALERT_LEVELS)
     if duration_minutes < 1:
-        return json.dumps({"error": "duration_minutes must be at least 1"})
+        _error_response(
+            "invalid_parameter",
+            "duration_minutes must be at least 1",
+            retryable=False,
+            param="duration_minutes",
+            value=duration_minutes,
+        )
     now = now_utc()
     expires = now + timedelta(minutes=duration_minutes)
     entry = Entry(
@@ -590,7 +573,13 @@ async def add_context(
     Quick test: still true in 30 days? -> remember instead. Happening now,
     will become stale? -> add_context. Any agent on any platform can read this."""
     if expires_days < 1:
-        return json.dumps({"error": "expires_days must be at least 1"})
+        _error_response(
+            "invalid_parameter",
+            "expires_days must be at least 1",
+            retryable=False,
+            param="expires_days",
+            value=expires_days,
+        )
     now = now_utc()
     expires = now + timedelta(days=expires_days)
     entry = Entry(
@@ -682,10 +671,12 @@ async def delete_entry(
             }
         )
     if not source:
-        return json.dumps({"status": "error", "message": "Provide entry_id, tags, or source"})
-    et, et_err = _parse_entry_type(entry_type)
-    if et_err:
-        return json.dumps({"status": "error", "message": et_err})
+        _error_response(
+            "invalid_parameter",
+            "Provide entry_id, tags, or source",
+            retryable=False,
+        )
+    et = _parse_entry_type(entry_type)
     if not confirm:
         entries = _srv.store.get_entries(_srv._owner_id(), entry_type=et, source=source)
         return json.dumps(
@@ -731,7 +722,11 @@ async def restore_entry(
     if tags:
         count = _srv.store.restore_by_tags(_srv._owner_id(), tags)
         return json.dumps({"status": "ok", "restored": count, "tags": tags})
-    return json.dumps({"status": "error", "message": "Provide entry_id or tags"})
+    _error_response(
+        "invalid_parameter",
+        "Provide entry_id or tags",
+        retryable=False,
+    )
 
 
 @_srv.mcp.tool()
@@ -750,17 +745,16 @@ async def get_deleted(
     Use limit/offset for pagination."""
     pv = _validate_pagination(limit, offset)
     if isinstance(pv, str):
-        return json.dumps({"error": pv})
+        _error_response(
+            "invalid_parameter",
+            pv,
+            retryable=False,
+            param="limit" if "limit" in pv else "offset",
+            value=limit if "limit" in pv else offset,
+        )
     limit, offset = pv
     assert limit is not None  # _validate_pagination guarantees a default
-    if since is not None and not since:
-        return json.dumps({"error": "since cannot be empty; omit or provide an ISO 8601 timestamp"})
-    if since:
-        since_dt, err = _safe_ensure_dt(since)
-        if err:
-            return json.dumps({"status": "error", "message": err})
-    else:
-        since_dt = None
+    since_dt = _validate_timestamp(since, "since")
     entries = _srv.store.get_deleted(
         _srv._owner_id(), since=since_dt, limit=limit + 1, offset=offset
     )
@@ -823,12 +817,7 @@ async def get_reads(
     This tool always returns structured JSON."""
     if limit is None:
         limit = DEFAULT_QUERY_LIMIT
-    if since:
-        since_dt, err = _safe_ensure_dt(since)
-        if err:
-            return json.dumps({"status": "error", "message": err})
-    else:
-        since_dt = None
+    since_dt = _validate_timestamp(since, "since")
     reads = _srv.store.get_reads(
         _srv._owner_id(), entry_id=entry_id, since=since_dt, platform=platform, limit=limit + 1
     )
@@ -851,12 +840,7 @@ async def get_actions(
     This tool always returns structured JSON."""
     if limit is None:
         limit = DEFAULT_QUERY_LIMIT
-    if since:
-        since_dt, err = _safe_ensure_dt(since)
-        if err:
-            return json.dumps({"status": "error", "message": err})
-    else:
-        since_dt = None
+    since_dt = _validate_timestamp(since, "since")
     actions = _srv.store.get_actions(
         _srv._owner_id(),
         entry_id=entry_id,
@@ -881,12 +865,7 @@ async def get_unread(since: str | None = None, limit: int | None = None) -> str:
     This tool always returns structured JSON."""
     if limit is None:
         limit = DEFAULT_QUERY_LIMIT
-    if since:
-        since_dt, err = _safe_ensure_dt(since)
-        if err:
-            return json.dumps({"status": "error", "message": err})
-    else:
-        since_dt = None
+    since_dt = _validate_timestamp(since, "since")
     entries = _srv.store.get_unread(_srv._owner_id(), since=since_dt, limit=limit + 1)
     page = _paginate([e.to_list_dict() for e in entries], limit, None)
     return json.dumps(page, indent=2)
@@ -906,12 +885,7 @@ async def get_activity(
     This tool always returns structured JSON."""
     if limit is None:
         limit = DEFAULT_QUERY_LIMIT
-    if since:
-        since_dt, err = _safe_ensure_dt(since)
-        if err:
-            return json.dumps({"status": "error", "message": err})
-    else:
-        since_dt = None
+    since_dt = _validate_timestamp(since, "since")
     activity = _srv.store.get_activity(
         _srv._owner_id(), since=since_dt, platform=platform, limit=limit + 1
     )
@@ -947,17 +921,9 @@ async def remind(
     urgency: 'low', 'normal', or 'high'. High-urgency intentions surface more prominently.
     recurrence: reserved for future use. Currently only one-shot intentions are supported.
     This tool always returns structured JSON."""
-    if urgency not in VALID_URGENCY:
-        return json.dumps(
-            {"error": f"invalid urgency '{urgency}', must be one of: {sorted(VALID_URGENCY)}"}
-        )
+    _validate_enum(urgency, "urgency", VALID_URGENCY)
     now = now_utc()
-    if deliver_at:
-        deliver_at_dt, err = _safe_ensure_dt(deliver_at)
-        if err:
-            return json.dumps({"status": "error", "message": err})
-    else:
-        deliver_at_dt = None
+    deliver_at_dt = _validate_timestamp(deliver_at, "deliver_at")
     entry = Entry(
         id=make_id(),
         type=EntryType.INTENTION,
@@ -1019,13 +985,16 @@ async def update_intention(
     This tool always returns structured JSON."""
     from .schema import INTENTION_STATES
 
-    if state not in INTENTION_STATES:
-        return json.dumps(
-            {"status": "error", "message": f"Invalid state: {state}. Valid: {INTENTION_STATES}"}
-        )
+    _validate_enum(state, "state", INTENTION_STATES)
     result = _srv.store.update_intention_state(_srv._owner_id(), entry_id, state, reason)
     if result is None:
-        return json.dumps({"status": "error", "message": "Intention not found"})
+        _error_response(
+            "not_found",
+            "Intention not found",
+            retryable=False,
+            param="entry_id",
+            value=entry_id,
+        )
     return json.dumps({"status": "ok", "id": entry_id, "state": state, "reason": reason}, indent=2)
 
 
@@ -1051,44 +1020,24 @@ async def semantic_search(
     Requires an embedding provider (AWARENESS_EMBEDDING_PROVIDER env var).
     mode: omit for full entries, 'list' for metadata only + similarity."""
     limit = max(1, min(limit, 100))
-    if since is not None and not since:
-        return json.dumps({"error": "since cannot be empty; omit or provide an ISO 8601 timestamp"})
-    if until is not None and not until:
-        return json.dumps({"error": "until cannot be empty; omit or provide an ISO 8601 timestamp"})
-    et, et_err = _parse_entry_type(entry_type)
-    if et_err:
-        return json.dumps({"status": "error", "message": et_err})
+    since_dt = _validate_timestamp(since, "since")
+    until_dt = _validate_timestamp(until, "until")
+    et = _parse_entry_type(entry_type)
     provider = _srv._get_embedding_provider()
     if not provider.is_available():
-        return json.dumps(
-            {
-                "status": "error",
-                "message": (
-                    "Semantic search requires an embedding provider. "
-                    "Set AWARENESS_EMBEDDING_PROVIDER=ollama and ensure Ollama is running."
-                ),
-            }
+        _error_response(
+            "unavailable",
+            "Semantic search requires an embedding provider. "
+            "Set AWARENESS_EMBEDDING_PROVIDER=ollama and ensure Ollama is running.",
+            retryable=True,
         )
     # Generate query embedding
     try:
         vectors = provider.embed([query])
         if not vectors:
-            return json.dumps({"status": "error", "message": "Failed to generate query embedding"})
+            _error_response("unavailable", "Failed to generate query embedding", retryable=True)
     except Exception as exc:
-        return json.dumps({"status": "error", "message": f"Embedding error: {exc}"})
-
-    if since:
-        since_dt, err = _safe_ensure_dt(since)
-        if err:
-            return json.dumps({"status": "error", "message": err})
-    else:
-        since_dt = None
-    if until:
-        until_dt, err = _safe_ensure_dt(until)
-        if err:
-            return json.dumps({"status": "error", "message": err})
-    else:
-        until_dt = None
+        _error_response("unavailable", f"Embedding error: {exc}", retryable=True)
 
     results = _srv.store.semantic_search(
         _srv._owner_id(),
@@ -1132,14 +1081,10 @@ async def backfill_embeddings(
     Requires an embedding provider (AWARENESS_EMBEDDING_PROVIDER env var)."""
     provider = _srv._get_embedding_provider()
     if not provider.is_available():
-        return json.dumps(
-            {
-                "status": "error",
-                "message": (
-                    "Backfill requires an embedding provider. "
-                    "Set AWARENESS_EMBEDDING_PROVIDER=ollama."
-                ),
-            }
+        _error_response(
+            "unavailable",
+            "Backfill requires an embedding provider. Set AWARENESS_EMBEDDING_PROVIDER=ollama.",
+            retryable=True,
         )
 
     # Phase 1: entries without embeddings
@@ -1212,7 +1157,13 @@ async def get_related(
     oid = _srv._owner_id()
     entry = _srv.store.get_entry_by_id(oid, entry_id)
     if entry is None:
-        return json.dumps({"status": "error", "message": f"Entry not found: {entry_id}"})
+        _error_response(
+            "not_found",
+            f"Entry not found: '{entry_id}'",
+            retryable=False,
+            param="entry_id",
+            value=entry_id,
+        )
 
     # Forward: entries this entry references
     forward_ids: list[str] = [rid for rid in entry.data.get("related_ids", []) if rid != entry_id]

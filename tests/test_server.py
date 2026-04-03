@@ -22,11 +22,18 @@ import json
 import os
 
 import pytest
+from mcp.server.fastmcp.exceptions import ToolError
 
 from mcp_awareness import server as server_mod
 from mcp_awareness.embeddings import OllamaEmbedding
 from mcp_awareness.postgres_store import PostgresStore
 from mcp_awareness.store import Store
+
+
+def _parse_tool_error(exc_info: pytest.ExceptionInfo[ToolError]) -> dict:
+    """Parse the structured JSON envelope from a ToolError."""
+    return json.loads(str(exc_info.value))
+
 
 TEST_OWNER = "test-owner"
 
@@ -355,7 +362,7 @@ class TestLearnPatternTool:
 class TestInputValidation:
     @pytest.mark.anyio
     async def test_report_alert_invalid_level(self) -> None:
-        result = json.loads(
+        with pytest.raises(ToolError) as exc_info:
             await server_mod.report_alert(
                 source="nas",
                 tags=["infra"],
@@ -364,13 +371,13 @@ class TestInputValidation:
                 alert_type="threshold",
                 message="test",
             )
-        )
-        assert "error" in result
-        assert "invalid level" in result["error"]
+        body = _parse_tool_error(exc_info)
+        assert body["error"]["code"] == "invalid_parameter"
+        assert body["error"]["param"] == "level"
 
     @pytest.mark.anyio
     async def test_report_alert_invalid_type(self) -> None:
-        result = json.loads(
+        with pytest.raises(ToolError) as exc_info:
             await server_mod.report_alert(
                 source="nas",
                 tags=["infra"],
@@ -379,59 +386,67 @@ class TestInputValidation:
                 alert_type="bogus",
                 message="test",
             )
-        )
-        assert "error" in result
-        assert "invalid alert_type" in result["error"]
+        body = _parse_tool_error(exc_info)
+        assert body["error"]["code"] == "invalid_parameter"
+        assert body["error"]["param"] == "alert_type"
 
     @pytest.mark.anyio
     async def test_suppress_alert_invalid_level(self) -> None:
-        result = json.loads(await server_mod.suppress_alert(source="nas", level="bogus"))
-        assert "error" in result
-        assert "invalid level" in result["error"]
+        with pytest.raises(ToolError) as exc_info:
+            await server_mod.suppress_alert(source="nas", level="bogus")
+        body = _parse_tool_error(exc_info)
+        assert body["error"]["code"] == "invalid_parameter"
+        assert body["error"]["param"] == "level"
 
     @pytest.mark.anyio
     async def test_suppress_alert_zero_duration(self) -> None:
-        result = json.loads(await server_mod.suppress_alert(source="nas", duration_minutes=0))
-        assert "error" in result
-        assert "duration_minutes" in result["error"]
+        with pytest.raises(ToolError) as exc_info:
+            await server_mod.suppress_alert(source="nas", duration_minutes=0)
+        body = _parse_tool_error(exc_info)
+        assert body["error"]["code"] == "invalid_parameter"
+        assert "duration_minutes" in body["error"]["message"]
 
     @pytest.mark.anyio
     async def test_remind_invalid_urgency(self) -> None:
-        result = json.loads(
+        with pytest.raises(ToolError) as exc_info:
             await server_mod.remind(
                 goal="test",
                 source="test",
                 tags=[],
                 urgency="bogus",
             )
-        )
-        assert "error" in result
-        assert "invalid urgency" in result["error"]
+        body = _parse_tool_error(exc_info)
+        assert body["error"]["code"] == "invalid_parameter"
+        assert body["error"]["param"] == "urgency"
 
     @pytest.mark.anyio
     async def test_add_context_zero_expires_days(self) -> None:
-        result = json.loads(
+        with pytest.raises(ToolError) as exc_info:
             await server_mod.add_context(
                 source="test",
                 tags=[],
                 description="test",
                 expires_days=0,
             )
-        )
-        assert "error" in result
-        assert "expires_days" in result["error"]
+        body = _parse_tool_error(exc_info)
+        assert body["error"]["code"] == "invalid_parameter"
+        assert "expires_days" in body["error"]["message"]
 
     @pytest.mark.anyio
     async def test_get_knowledge_negative_offset(self) -> None:
-        result = json.loads(await server_mod.get_knowledge(offset=-1))
-        assert "error" in result
-        assert "offset" in result["error"]
+        with pytest.raises(ToolError) as exc_info:
+            await server_mod.get_knowledge(offset=-1)
+        body = _parse_tool_error(exc_info)
+        assert body["error"]["code"] == "invalid_parameter"
+        assert body["error"]["param"] == "offset"
 
     @pytest.mark.anyio
     async def test_get_knowledge_negative_limit(self) -> None:
-        result = json.loads(await server_mod.get_knowledge(limit=-1))
-        assert "error" in result
-        assert "limit" in result["error"]
+        with pytest.raises(ToolError) as exc_info:
+            await server_mod.get_knowledge(limit=-1)
+        body = _parse_tool_error(exc_info)
+        assert body["error"]["code"] == "invalid_parameter"
+        assert body["error"]["param"] == "limit"
 
 
 class TestSuppressAlertTool:
@@ -593,15 +608,17 @@ class TestGetAlertsTool:
 
     @pytest.mark.anyio
     async def test_get_alerts_negative_limit(self) -> None:
-        result = json.loads(await server_mod.get_alerts(limit=-1))
-        assert "error" in result
-        assert "limit" in result["error"]
+        with pytest.raises(ToolError) as exc_info:
+            await server_mod.get_alerts(limit=-1)
+        body = _parse_tool_error(exc_info)
+        assert body["error"]["param"] == "limit"
 
     @pytest.mark.anyio
     async def test_get_alerts_negative_offset(self) -> None:
-        result = json.loads(await server_mod.get_alerts(offset=-1))
-        assert "error" in result
-        assert "offset" in result["error"]
+        with pytest.raises(ToolError) as exc_info:
+            await server_mod.get_alerts(offset=-1)
+        body = _parse_tool_error(exc_info)
+        assert body["error"]["param"] == "offset"
 
 
 class TestGetStatusTool:
@@ -616,8 +633,10 @@ class TestGetStatusTool:
 
     @pytest.mark.anyio
     async def test_get_status_not_found(self) -> None:
-        result = await server_mod.get_status(source="nonexistent")
-        assert "error" in json.loads(result)
+        with pytest.raises(ToolError) as exc_info:
+            await server_mod.get_status(source="nonexistent")
+        body = _parse_tool_error(exc_info)
+        assert body["error"]["code"] == "not_found"
 
 
 class TestGetKnowledgeTool:
@@ -676,38 +695,42 @@ class TestGetKnowledgeTool:
 class TestInvalidEntryType:
     @pytest.mark.anyio
     async def test_get_knowledge_invalid_entry_type(self) -> None:
-        result = await server_mod.get_knowledge(entry_type="bogus")
-        parsed = json.loads(result)
-        assert "error" in parsed
-        assert "bogus" in parsed["error"]
-        assert "Valid:" in parsed["error"]
+        with pytest.raises(ToolError) as exc_info:
+            await server_mod.get_knowledge(entry_type="bogus")
+        body = _parse_tool_error(exc_info)
+        assert body["error"]["code"] == "invalid_parameter"
+        assert body["error"]["param"] == "entry_type"
+        assert "bogus" in body["error"]["message"]
 
     @pytest.mark.anyio
     async def test_delete_entry_invalid_entry_type(self) -> None:
-        result = await server_mod.delete_entry(source="test", entry_type="fake")
-        parsed = json.loads(result)
-        assert parsed["status"] == "error"
-        assert "fake" in parsed["message"]
+        with pytest.raises(ToolError) as exc_info:
+            await server_mod.delete_entry(source="test", entry_type="fake")
+        body = _parse_tool_error(exc_info)
+        assert body["error"]["code"] == "invalid_parameter"
+        assert "fake" in body["error"]["message"]
 
     @pytest.mark.anyio
     async def test_semantic_search_invalid_entry_type(self) -> None:
-        result = await server_mod.semantic_search(query="test", entry_type="nope")
-        parsed = json.loads(result)
-        assert parsed["status"] == "error"
-        assert "nope" in parsed["message"]
+        with pytest.raises(ToolError) as exc_info:
+            await server_mod.semantic_search(query="test", entry_type="nope")
+        body = _parse_tool_error(exc_info)
+        assert body["error"]["code"] == "invalid_parameter"
+        assert "nope" in body["error"]["message"]
 
     @pytest.mark.anyio
     async def test_semantic_search_limit_clamped(self) -> None:
         """Limit is clamped to 1-100 range — no unbounded queries."""
         # Limit=0 or negative should be clamped to 1, limit>100 to 100.
-        # The tool returns an error about missing embedding provider (expected in test),
+        # The tool raises ToolError about missing embedding provider (expected in test),
         # but the limit clamping happens before that check.
-        result = await server_mod.semantic_search(query="test", limit=999)
-        parsed = json.loads(result)
+        with pytest.raises(ToolError) as exc_info:
+            await server_mod.semantic_search(query="test", limit=999)
+        body = _parse_tool_error(exc_info)
         # If we got here without crashing, the clamp worked.
         # Error about embedding provider is expected in test environment.
-        assert parsed["status"] == "error"
-        assert "embedding" in parsed["message"].lower()
+        assert body["error"]["code"] == "unavailable"
+        assert "embedding" in body["error"]["message"].lower()
 
 
 class TestSuppressAlertTagsNotDuplicated:
@@ -806,9 +829,10 @@ class TestDeleteEntryTool:
 
     @pytest.mark.anyio
     async def test_delete_requires_source_or_id(self) -> None:
-        result = await server_mod.delete_entry()
-        data = json.loads(result)
-        assert data["status"] == "error"
+        with pytest.raises(ToolError) as exc_info:
+            await server_mod.delete_entry()
+        body = _parse_tool_error(exc_info)
+        assert body["error"]["code"] == "invalid_parameter"
 
 
 class TestRestoreEntryTool:
@@ -849,11 +873,12 @@ class TestRestoreEntryTool:
 
     @pytest.mark.anyio
     async def test_restore_no_args(self) -> None:
-        """Restore with no entry_id or tags returns error."""
-        result = await server_mod.restore_entry()
-        data = json.loads(result)
-        assert data["status"] == "error"
-        assert "Provide entry_id or tags" in data["message"]
+        """Restore with no entry_id or tags raises ToolError."""
+        with pytest.raises(ToolError) as exc_info:
+            await server_mod.restore_entry()
+        body = _parse_tool_error(exc_info)
+        assert body["error"]["code"] == "invalid_parameter"
+        assert "Provide entry_id or tags" in body["error"]["message"]
 
 
 class TestGetDeletedTool:
@@ -873,15 +898,17 @@ class TestGetDeletedTool:
 
     @pytest.mark.anyio
     async def test_get_deleted_negative_limit(self) -> None:
-        result = json.loads(await server_mod.get_deleted(limit=-1))
-        assert "error" in result
-        assert "limit" in result["error"]
+        with pytest.raises(ToolError) as exc_info:
+            await server_mod.get_deleted(limit=-1)
+        body = _parse_tool_error(exc_info)
+        assert body["error"]["param"] == "limit"
 
     @pytest.mark.anyio
     async def test_get_deleted_negative_offset(self) -> None:
-        result = json.loads(await server_mod.get_deleted(offset=-1))
-        assert "error" in result
-        assert "offset" in result["error"]
+        with pytest.raises(ToolError) as exc_info:
+            await server_mod.get_deleted(offset=-1)
+        body = _parse_tool_error(exc_info)
+        assert body["error"]["param"] == "offset"
 
 
 class TestRememberTool:
@@ -1001,23 +1028,26 @@ class TestUpdateEntryTool:
             message="CPU high",
         )
         alerts = _store().get_active_alerts(TEST_OWNER)
-        result = await server_mod.update_entry(entry_id=alerts[0].id, description="changed")
-        data = json.loads(result)
-        assert data["status"] == "error"
-        assert "immutable" in data["message"]
+        with pytest.raises(ToolError) as exc_info:
+            await server_mod.update_entry(entry_id=alerts[0].id, description="changed")
+        body = _parse_tool_error(exc_info)
+        assert body["error"]["code"] == "not_found"
+        assert "immutable" in body["error"]["message"]
 
     @pytest.mark.anyio
     async def test_update_not_found(self) -> None:
-        result = await server_mod.update_entry(entry_id="nonexistent", description="test")
-        data = json.loads(result)
-        assert data["status"] == "error"
+        with pytest.raises(ToolError) as exc_info:
+            await server_mod.update_entry(entry_id="nonexistent", description="test")
+        body = _parse_tool_error(exc_info)
+        assert body["error"]["code"] == "not_found"
 
     @pytest.mark.anyio
     async def test_update_no_fields(self) -> None:
-        result = await server_mod.update_entry(entry_id="anything")
-        data = json.loads(result)
-        assert data["status"] == "error"
-        assert "No fields" in data["message"]
+        with pytest.raises(ToolError) as exc_info:
+            await server_mod.update_entry(entry_id="anything")
+        body = _parse_tool_error(exc_info)
+        assert body["error"]["code"] == "invalid_parameter"
+        assert "No fields" in body["error"]["message"]
 
     @pytest.mark.anyio
     async def test_update_noop_same_value(self) -> None:
@@ -1826,26 +1856,28 @@ class TestListModeAndSince:
 
     @pytest.mark.anyio
     async def test_since_empty_string_returns_error(self) -> None:
-        result = json.loads(await server_mod.get_knowledge(since=""))
-        assert "error" in result
+        with pytest.raises(ToolError):
+            await server_mod.get_knowledge(since="")
 
-        result = json.loads(await server_mod.get_alerts(since=""))
-        assert "error" in result
+        with pytest.raises(ToolError):
+            await server_mod.get_alerts(since="")
 
-        result = json.loads(await server_mod.get_deleted(since=""))
-        assert "error" in result
+        with pytest.raises(ToolError):
+            await server_mod.get_deleted(since="")
 
     @pytest.mark.anyio
     async def test_semantic_search_empty_since_returns_error(self) -> None:
-        result = json.loads(await server_mod.semantic_search(query="test", since=""))
-        assert "error" in result
-        assert "since" in result["error"]
+        with pytest.raises(ToolError) as exc_info:
+            await server_mod.semantic_search(query="test", since="")
+        body = _parse_tool_error(exc_info)
+        assert body["error"]["param"] == "since"
 
     @pytest.mark.anyio
     async def test_semantic_search_empty_until_returns_error(self) -> None:
-        result = json.loads(await server_mod.semantic_search(query="test", until=""))
-        assert "error" in result
-        assert "until" in result["error"]
+        with pytest.raises(ToolError) as exc_info:
+            await server_mod.semantic_search(query="test", until="")
+        body = _parse_tool_error(exc_info)
+        assert body["error"]["param"] == "until"
 
 
 # ---------------------------------------------------------------------------
@@ -2138,16 +2170,18 @@ class TestIntentionTools:
     @pytest.mark.anyio
     async def test_update_intention_invalid_state(self) -> None:
         result = json.loads(await server_mod.remind(goal="test", source="test", tags=[]))
-        error = json.loads(
+        with pytest.raises(ToolError) as exc_info:
             await server_mod.update_intention(entry_id=result["id"], state="invalid")
-        )
-        assert error["status"] == "error"
-        assert "Invalid state" in error["message"]
+        body = _parse_tool_error(exc_info)
+        assert body["error"]["code"] == "invalid_parameter"
+        assert body["error"]["param"] == "state"
 
     @pytest.mark.anyio
     async def test_update_intention_not_found(self) -> None:
-        error = json.loads(await server_mod.update_intention(entry_id="nonexistent", state="fired"))
-        assert error["status"] == "error"
+        with pytest.raises(ToolError) as exc_info:
+            await server_mod.update_intention(entry_id="nonexistent", state="fired")
+        body = _parse_tool_error(exc_info)
+        assert body["error"]["code"] == "not_found"
 
     @pytest.mark.anyio
     async def test_briefing_surfaces_fired_intentions(self) -> None:
@@ -2287,17 +2321,19 @@ class TestSemanticSearchTool:
 
     @pytest.mark.anyio
     async def test_no_provider_returns_error(self, monkeypatch) -> None:
-        """When no embedding provider is configured, returns helpful error."""
+        """When no embedding provider is configured, raises ToolError."""
         from mcp_awareness.embeddings import NullEmbedding
 
         monkeypatch.setattr(server_mod, "_embedding_provider", NullEmbedding())
-        result = json.loads(await server_mod.semantic_search(query="test"))
-        assert result["status"] == "error"
-        assert "embedding provider" in result["message"].lower()
+        with pytest.raises(ToolError) as exc_info:
+            await server_mod.semantic_search(query="test")
+        body = _parse_tool_error(exc_info)
+        assert body["error"]["code"] == "unavailable"
+        assert "embedding provider" in body["error"]["message"].lower()
 
     @pytest.mark.anyio
     async def test_embed_returns_empty(self, monkeypatch) -> None:
-        """When embed returns empty list, returns error."""
+        """When embed returns empty list, raises ToolError."""
 
         class EmptyProvider:
             model_name = "mock"
@@ -2310,13 +2346,15 @@ class TestSemanticSearchTool:
                 return True
 
         monkeypatch.setattr(server_mod, "_embedding_provider", EmptyProvider())
-        result = json.loads(await server_mod.semantic_search(query="test"))
-        assert result["status"] == "error"
-        assert "failed" in result["message"].lower()
+        with pytest.raises(ToolError) as exc_info:
+            await server_mod.semantic_search(query="test")
+        body = _parse_tool_error(exc_info)
+        assert body["error"]["code"] == "unavailable"
+        assert "failed" in body["error"]["message"].lower()
 
     @pytest.mark.anyio
     async def test_embed_raises_exception(self, monkeypatch) -> None:
-        """When embed raises, returns error with message."""
+        """When embed raises, raises ToolError with message."""
 
         class FailingProvider:
             model_name = "mock"
@@ -2329,9 +2367,11 @@ class TestSemanticSearchTool:
                 return True
 
         monkeypatch.setattr(server_mod, "_embedding_provider", FailingProvider())
-        result = json.loads(await server_mod.semantic_search(query="test"))
-        assert result["status"] == "error"
-        assert "Ollama down" in result["message"]
+        with pytest.raises(ToolError) as exc_info:
+            await server_mod.semantic_search(query="test")
+        body = _parse_tool_error(exc_info)
+        assert body["error"]["code"] == "unavailable"
+        assert "Ollama down" in body["error"]["message"]
 
     @pytest.mark.anyio
     async def test_search_with_mock_provider(self, monkeypatch) -> None:
@@ -2555,8 +2595,10 @@ class TestBackfillEmbeddings:
         from mcp_awareness.embeddings import NullEmbedding
 
         monkeypatch.setattr(server_mod, "_embedding_provider", NullEmbedding())
-        result = json.loads(await server_mod.backfill_embeddings())
-        assert result["status"] == "error"
+        with pytest.raises(ToolError) as exc_info:
+            await server_mod.backfill_embeddings()
+        body = _parse_tool_error(exc_info)
+        assert body["error"]["code"] == "unavailable"
 
     @pytest.mark.anyio
     async def test_backfill_creates_embeddings(self, monkeypatch) -> None:
@@ -2879,8 +2921,10 @@ class TestGetRelated:
 
     @pytest.mark.anyio
     async def test_not_found(self) -> None:
-        result = json.loads(await server_mod.get_related(entry_id="nonexistent"))
-        assert result["status"] == "error"
+        with pytest.raises(ToolError) as exc_info:
+            await server_mod.get_related(entry_id="nonexistent")
+        body = _parse_tool_error(exc_info)
+        assert body["error"]["code"] == "not_found"
 
     @pytest.mark.anyio
     async def test_no_relations(self) -> None:
@@ -3080,127 +3124,119 @@ def test_fallback_user_on_getpass_failure(monkeypatch):
 class TestDateValidation:
     @pytest.mark.anyio
     async def test_get_alerts_malformed_since(self) -> None:
-        result = await server_mod.get_alerts(since="not-a-date")
-        parsed = json.loads(result)
-        assert "error" in parsed or parsed.get("status") == "error"
-        assert "date" in parsed.get("message", parsed.get("error", "")).lower()
+        with pytest.raises(ToolError) as exc_info:
+            await server_mod.get_alerts(since="not-a-date")
+        body = _parse_tool_error(exc_info)
+        assert body["error"]["code"] == "invalid_parameter"
+        assert body["error"]["param"] == "since"
 
     @pytest.mark.anyio
     async def test_get_knowledge_malformed_since(self) -> None:
-        result = await server_mod.get_knowledge(since="not-a-date")
-        parsed = json.loads(result)
-        assert "error" in parsed or parsed.get("status") == "error"
+        with pytest.raises(ToolError) as exc_info:
+            await server_mod.get_knowledge(since="not-a-date")
+        body = _parse_tool_error(exc_info)
+        assert body["error"]["code"] == "invalid_parameter"
 
     @pytest.mark.anyio
     async def test_get_knowledge_malformed_until(self) -> None:
-        result = await server_mod.get_knowledge(until="2026-13-45")
-        parsed = json.loads(result)
-        assert "error" in parsed or parsed.get("status") == "error"
+        with pytest.raises(ToolError) as exc_info:
+            await server_mod.get_knowledge(until="2026-13-45")
+        body = _parse_tool_error(exc_info)
+        assert body["error"]["code"] == "invalid_parameter"
 
     @pytest.mark.anyio
     async def test_get_knowledge_malformed_created_after(self) -> None:
-        result = await server_mod.get_knowledge(created_after="bad")
-        parsed = json.loads(result)
-        assert "error" in parsed or parsed.get("status") == "error"
+        with pytest.raises(ToolError) as exc_info:
+            await server_mod.get_knowledge(created_after="bad")
+        body = _parse_tool_error(exc_info)
+        assert body["error"]["code"] == "invalid_parameter"
 
     @pytest.mark.anyio
     async def test_remind_malformed_deliver_at(self) -> None:
-        result = await server_mod.remind(
-            goal="test", source="test", tags=["test"], deliver_at="not-a-date"
-        )
-        parsed = json.loads(result)
-        assert "error" in parsed or parsed.get("status") == "error"
+        with pytest.raises(ToolError) as exc_info:
+            await server_mod.remind(
+                goal="test", source="test", tags=["test"], deliver_at="not-a-date"
+            )
+        body = _parse_tool_error(exc_info)
+        assert body["error"]["code"] == "invalid_parameter"
 
     @pytest.mark.anyio
     async def test_get_deleted_malformed_since(self) -> None:
-        result = await server_mod.get_deleted(since="not-a-date")
-        parsed = json.loads(result)
-        assert "error" in parsed or parsed.get("status") == "error"
+        with pytest.raises(ToolError) as exc_info:
+            await server_mod.get_deleted(since="not-a-date")
+        body = _parse_tool_error(exc_info)
+        assert body["error"]["code"] == "invalid_parameter"
 
     @pytest.mark.anyio
     async def test_semantic_search_malformed_since(self) -> None:
-        result = await server_mod.semantic_search(query="test", since="not-a-date")
-        parsed = json.loads(result)
-        assert "error" in parsed or parsed.get("status") == "error"
+        with pytest.raises(ToolError) as exc_info:
+            await server_mod.semantic_search(query="test", since="not-a-date")
+        body = _parse_tool_error(exc_info)
+        assert body["error"]["code"] == "invalid_parameter"
 
     @pytest.mark.anyio
     async def test_get_knowledge_malformed_created_before(self) -> None:
-        result = await server_mod.get_knowledge(created_before="nope")
-        parsed = json.loads(result)
-        assert parsed.get("status") == "error"
-        assert "date" in parsed["message"].lower()
+        with pytest.raises(ToolError) as exc_info:
+            await server_mod.get_knowledge(created_before="nope")
+        body = _parse_tool_error(exc_info)
+        assert body["error"]["code"] == "invalid_parameter"
+        assert body["error"]["param"] == "created_before"
 
     @pytest.mark.anyio
     async def test_get_reads_malformed_since(self) -> None:
-        result = await server_mod.get_reads(since="not-a-date")
-        parsed = json.loads(result)
-        assert parsed.get("status") == "error"
-        assert "date" in parsed["message"].lower()
+        with pytest.raises(ToolError) as exc_info:
+            await server_mod.get_reads(since="not-a-date")
+        body = _parse_tool_error(exc_info)
+        assert body["error"]["code"] == "invalid_parameter"
+        assert body["error"]["param"] == "since"
 
     @pytest.mark.anyio
     async def test_get_actions_malformed_since(self) -> None:
-        result = await server_mod.get_actions(since="not-a-date")
-        parsed = json.loads(result)
-        assert parsed.get("status") == "error"
-        assert "date" in parsed["message"].lower()
+        with pytest.raises(ToolError) as exc_info:
+            await server_mod.get_actions(since="not-a-date")
+        body = _parse_tool_error(exc_info)
+        assert body["error"]["code"] == "invalid_parameter"
+        assert body["error"]["param"] == "since"
 
     @pytest.mark.anyio
     async def test_get_unread_malformed_since(self) -> None:
-        result = await server_mod.get_unread(since="not-a-date")
-        parsed = json.loads(result)
-        assert parsed.get("status") == "error"
-        assert "date" in parsed["message"].lower()
+        with pytest.raises(ToolError) as exc_info:
+            await server_mod.get_unread(since="not-a-date")
+        body = _parse_tool_error(exc_info)
+        assert body["error"]["code"] == "invalid_parameter"
+        assert body["error"]["param"] == "since"
 
     @pytest.mark.anyio
     async def test_get_activity_malformed_since(self) -> None:
-        result = await server_mod.get_activity(since="not-a-date")
-        parsed = json.loads(result)
-        assert parsed.get("status") == "error"
-        assert "date" in parsed["message"].lower()
+        with pytest.raises(ToolError) as exc_info:
+            await server_mod.get_activity(since="not-a-date")
+        body = _parse_tool_error(exc_info)
+        assert body["error"]["code"] == "invalid_parameter"
+        assert body["error"]["param"] == "since"
 
     @pytest.mark.anyio
     async def test_semantic_search_malformed_since_with_provider(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Date validation in semantic_search requires a working embedding provider."""
+        """Date validation in semantic_search now happens before provider check."""
 
-        class MockProvider:
-            model_name = "mock"
-            dimensions = 768
-
-            def embed(self, texts: list[str]) -> list[list[float]]:
-                return [[0.0] * 768 for _ in texts]
-
-            def is_available(self) -> bool:
-                return True
-
-        monkeypatch.setattr(server_mod, "_embedding_provider", MockProvider())
-        result = await server_mod.semantic_search(query="test", since="not-a-date")
-        parsed = json.loads(result)
-        assert parsed.get("status") == "error"
-        assert "date" in parsed["message"].lower()
+        with pytest.raises(ToolError) as exc_info:
+            await server_mod.semantic_search(query="test", since="not-a-date")
+        body = _parse_tool_error(exc_info)
+        assert body["error"]["code"] == "invalid_parameter"
+        assert body["error"]["param"] == "since"
 
     @pytest.mark.anyio
     async def test_semantic_search_malformed_until_with_provider(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Date validation for until in semantic_search requires a working embedding provider."""
+        """Date validation for until in semantic_search now happens before provider check."""
 
-        class MockProvider:
-            model_name = "mock"
-            dimensions = 768
-
-            def embed(self, texts: list[str]) -> list[list[float]]:
-                return [[0.0] * 768 for _ in texts]
-
-            def is_available(self) -> bool:
-                return True
-
-        monkeypatch.setattr(server_mod, "_embedding_provider", MockProvider())
-        result = await server_mod.semantic_search(query="test", until="2026-99-99")
-        parsed = json.loads(result)
-        assert parsed.get("status") == "error"
-        assert "date" in parsed["message"].lower()
+        with pytest.raises(ToolError) as exc_info:
+            await server_mod.semantic_search(query="test", until="2026-99-99")
+        body = _parse_tool_error(exc_info)
+        assert body["error"]["code"] == "invalid_parameter"
+        assert body["error"]["param"] == "until"
 
     @pytest.mark.anyio
     async def test_get_alerts_valid_date_still_works(self) -> None:

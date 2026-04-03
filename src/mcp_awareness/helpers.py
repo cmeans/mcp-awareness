@@ -25,10 +25,11 @@ so that test monkeypatching works through a single module.
 from __future__ import annotations
 
 import functools
+import json
 import time
 from collections.abc import Callable
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, NoReturn
 
 from .schema import EntryType
 
@@ -58,14 +59,15 @@ def canonical_email(email: str) -> str:
 _VALID_ENTRY_TYPES = [e.value for e in EntryType]
 
 
-def _parse_entry_type(entry_type: str | None) -> tuple[EntryType | None, str | None]:
-    """Parse entry_type string. Returns (value, None) or (None, error)."""
+def _parse_entry_type(entry_type: str | None) -> EntryType | None:
+    """Parse entry_type string. Returns EntryType or None. Raises on invalid."""
     if not entry_type:
-        return None, None
+        return None
     try:
-        return EntryType(entry_type), None
+        return EntryType(entry_type)
     except ValueError:
-        return None, f"Invalid entry_type: {entry_type!r}. Valid: {_VALID_ENTRY_TYPES}"
+        _validate_enum(entry_type, "entry_type", _VALID_ENTRY_TYPES)
+        raise  # pragma: no cover — unreachable, _validate_enum always raises
 
 
 def _validate_pagination(
@@ -102,6 +104,146 @@ def _paginate(
         "offset": offset or 0,
         "has_more": has_more,
     }
+
+
+def _levenshtein(a: str, b: str) -> int:
+    """Compute Levenshtein edit distance between two strings."""
+    if len(a) < len(b):
+        return _levenshtein(b, a)
+    if not b:
+        return len(a)
+    prev = list(range(len(b) + 1))
+    for i, ca in enumerate(a):
+        curr = [i + 1]
+        for j, cb in enumerate(b):
+            curr.append(
+                min(
+                    prev[j + 1] + 1,
+                    curr[j] + 1,
+                    prev[j] + (ca != cb),
+                )
+            )
+        prev = curr
+    return prev[-1]
+
+
+def _suggest(value: str, valid_values: set[str] | list[str]) -> str | None:
+    """Return the closest valid value if edit distance <= 2, else None.
+
+    Returns None for exact matches (the value is already valid).
+    Case-insensitive comparison — suggestion returned in its original case.
+    """
+    if value in valid_values:
+        return None  # exact match (already valid)
+    lower_value = value.lower()
+    best: str | None = None
+    best_dist = 3  # threshold: only suggest if distance <= 2
+    for v in valid_values:
+        dist = _levenshtein(lower_value, v.lower())
+        if dist < best_dist:
+            best_dist = dist
+            best = v
+    return best
+
+
+def _error_response(
+    code: str,
+    message: str,
+    *,
+    retryable: bool,
+    param: str | None = None,
+    value: Any | None = None,
+    valid: list[str] | None = None,
+    suggestion: str | None = None,
+    help_url: str | None = None,
+) -> NoReturn:
+    """Build a structured error envelope and raise ToolError.
+
+    The MCP SDK wraps ToolError in a CallToolResult with isError=True,
+    so clients get proper error signaling. The JSON envelope provides
+    structured fields for smart clients alongside a human-readable message.
+
+    Raises:
+        ToolError: always — this function never returns.
+    """
+    from mcp.server.fastmcp.exceptions import ToolError
+
+    error: dict[str, Any] = {
+        "code": code,
+        "message": message,
+        "retryable": retryable,
+    }
+    if param is not None:
+        error["param"] = param
+    if value is not None:
+        error["value"] = value
+    if valid is not None:
+        error["valid"] = valid
+    if suggestion is not None:
+        error["suggestion"] = suggestion
+    if help_url is not None:
+        error["help_url"] = help_url
+
+    raise ToolError(json.dumps({"status": "error", "error": error}))
+
+
+ISO_8601_HELP = "https://en.wikipedia.org/wiki/ISO_8601"
+
+
+def _validate_enum(value: str, param: str, valid_values: set[str] | list[str]) -> None:
+    """Raise structured error if value is not in valid_values.
+
+    Includes did-you-mean suggestion if the value is close to a valid one.
+    """
+    if value in valid_values:
+        return
+    sorted_valid = sorted(valid_values)
+    suggestion = _suggest(value, valid_values)
+    msg = f"Invalid {param}: '{value}'. Valid: {', '.join(repr(v) for v in sorted_valid)}"
+    if suggestion:
+        msg += f". Did you mean '{suggestion}'?"
+    _error_response(
+        "invalid_parameter",
+        msg,
+        retryable=False,
+        param=param,
+        value=value,
+        valid=sorted_valid,
+        suggestion=suggestion,
+    )
+
+
+def _validate_timestamp(value: str | None, param: str) -> Any:
+    """Validate and parse an ISO 8601 timestamp parameter.
+
+    Returns parsed datetime if valid, None if value is None.
+    Raises structured error for empty strings or unparseable values.
+    """
+    if value is None:
+        return None
+    if not value:
+        _error_response(
+            "invalid_parameter",
+            f"{param} cannot be empty; omit or provide an ISO 8601 timestamp ({ISO_8601_HELP})",
+            retryable=False,
+            param=param,
+            value="",
+            help_url=ISO_8601_HELP,
+        )
+    from .schema import ensure_dt
+
+    try:
+        return ensure_dt(value)
+    except (ValueError, TypeError):
+        _error_response(
+            "invalid_parameter",
+            f"Invalid timestamp for '{param}': '{value}'."
+            f" Provide an ISO 8601 timestamp ({ISO_8601_HELP})",
+            retryable=False,
+            param=param,
+            value=value,
+            help_url=ISO_8601_HELP,
+        )
 
 
 def _log_timing(tool_name: str, elapsed_ms: float) -> None:
