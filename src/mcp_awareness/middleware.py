@@ -36,6 +36,30 @@ HealthBuilder = Callable[[], dict[str, Any]]
 _FAVICON_PATH = pathlib.Path(__file__).parent / "favicon.ico"
 _FAVICON_BYTES: bytes | None = _FAVICON_PATH.read_bytes() if _FAVICON_PATH.exists() else None
 
+# SVG icons loaded once at import time from the bundled icons/ directory.
+_ICONS_DIR = pathlib.Path(__file__).parent / "icons"
+_ICON_CACHE: dict[str, bytes] = {}
+if _ICONS_DIR.is_dir():
+    for _svg_file in _ICONS_DIR.glob("*.svg"):
+        _ICON_CACHE[_svg_file.name] = _svg_file.read_bytes()
+
+
+def _serve_icon(path: str) -> Response | None:
+    """Return a Response for /icons/<name> requests, or None if not found."""
+    if not path.startswith("/icons/"):
+        return None
+    filename = path[7:]  # Strip "/icons/"
+    if "/" in filename or "\\" in filename or ".." in filename:
+        return Response("Not Found", status_code=404)
+    content = _ICON_CACHE.get(filename)
+    if content is None:
+        return Response("Not Found", status_code=404)
+    return Response(
+        content,
+        media_type="image/svg+xml",
+        headers={"Cache-Control": "public, max-age=86400"},
+    )
+
 
 class SecretPathMiddleware:
     """Rewrite /SECRET/mcp -> /mcp, serve /SECRET/health, reject everything else."""
@@ -58,6 +82,11 @@ class SecretPathMiddleware:
             if path == "/favicon.ico" and _FAVICON_BYTES is not None:
                 resp = Response(_FAVICON_BYTES, media_type="image/x-icon")
                 await resp(scope, receive, send)
+                return
+            # Icons — served publicly (no secret path required)
+            icon_resp = _serve_icon(path)
+            if icon_resp is not None:
+                await icon_resp(scope, receive, send)
                 return
             # Health endpoint — served at /SECRET/health
             if path == f"{self.prefix}/health":
@@ -93,6 +122,10 @@ class HealthMiddleware:
             if path == "/favicon.ico" and _FAVICON_BYTES is not None:
                 resp = Response(_FAVICON_BYTES, media_type="image/x-icon")
                 await resp(scope, receive, send)
+                return
+            icon_resp = _serve_icon(path)
+            if icon_resp is not None:
+                await icon_resp(scope, receive, send)
                 return
         await self.app(scope, receive, send)
 
@@ -179,8 +212,12 @@ class AuthMiddleware:
             return
 
         path = scope.get("path", "")
-        # Skip auth for health, favicon, well-known, and non-MCP paths
-        if path in ("/health", "/favicon.ico") or path.startswith("/.well-known/"):
+        # Skip auth for health, favicon, well-known, icons, and non-MCP paths
+        if (
+            path in ("/health", "/favicon.ico")
+            or path.startswith("/.well-known/")
+            or path.startswith("/icons/")
+        ):
             await self.app(scope, receive, send)
             return
 
