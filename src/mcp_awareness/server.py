@@ -271,38 +271,41 @@ mcp = FastMCP(
     port=PORT,
     instructions=_INSTRUCTIONS,
     website_url="https://mcpawareness.com",
+    # Icon theme field is in the MCP spec (2025-11-25) but not yet typed
+    # in the Python SDK's Icon model.  additionalProperties passes it at
+    # runtime; type: ignore silences mypy until the SDK catches up.
     icons=[
-        Icon(
+        Icon(  # type: ignore[call-arg]
             src=f"{_PUBLIC_URL}/icons/awareness-32.svg",
             mimeType="image/svg+xml",
             sizes=["32x32"],
             theme="light",
         ),
-        Icon(
+        Icon(  # type: ignore[call-arg]
             src=f"{_PUBLIC_URL}/icons/awareness-32-dark.svg",
             mimeType="image/svg+xml",
             sizes=["32x32"],
             theme="dark",
         ),
-        Icon(
+        Icon(  # type: ignore[call-arg]
             src=f"{_PUBLIC_URL}/icons/awareness-64.svg",
             mimeType="image/svg+xml",
             sizes=["64x64"],
             theme="light",
         ),
-        Icon(
+        Icon(  # type: ignore[call-arg]
             src=f"{_PUBLIC_URL}/icons/awareness-64-dark.svg",
             mimeType="image/svg+xml",
             sizes=["64x64"],
             theme="dark",
         ),
-        Icon(
+        Icon(  # type: ignore[call-arg]
             src=f"{_PUBLIC_URL}/icons/awareness-200.svg",
             mimeType="image/svg+xml",
             sizes=["200x200"],
             theme="light",
         ),
-        Icon(
+        Icon(  # type: ignore[call-arg]
             src=f"{_PUBLIC_URL}/icons/awareness-200-dark.svg",
             mimeType="image/svg+xml",
             sizes=["200x200"],
