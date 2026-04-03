@@ -152,6 +152,31 @@ class TestSecretPathMiddleware:
         assert body == _FAVICON_BYTES
 
     @pytest.mark.anyio
+    async def test_icon_served_without_secret_path(self) -> None:
+        """/icons/<name> is served publicly without the secret prefix."""
+        app = self._make_app()
+        scope = {"type": "http", "path": "/icons/awareness-64.svg", "method": "GET"}
+        status, body = await _collect_response(app, scope)
+        assert status == 200
+        assert b"<svg" in body
+
+    @pytest.mark.anyio
+    async def test_icon_not_found_returns_404(self) -> None:
+        """/icons/<nonexistent> returns 404."""
+        app = self._make_app()
+        scope = {"type": "http", "path": "/icons/nonexistent.svg", "method": "GET"}
+        status, _body = await _collect_response(app, scope)
+        assert status == 404
+
+    @pytest.mark.anyio
+    async def test_icon_directory_traversal_blocked(self) -> None:
+        """Path traversal attempts in /icons/ are rejected."""
+        app = self._make_app()
+        scope = {"type": "http", "path": "/icons/../server.py", "method": "GET"}
+        status, _body = await _collect_response(app, scope)
+        assert status == 404
+
+    @pytest.mark.anyio
     async def test_non_http_scope_passes_through(self) -> None:
         """Non-HTTP scope (e.g. lifespan) passes through to wrapped app."""
         calls: list[dict[str, Any]] = []
@@ -238,6 +263,23 @@ class TestHealthMiddleware:
         status, body = await _collect_response(app, scope)
         assert status == 200
         assert body == _FAVICON_BYTES
+
+    @pytest.mark.anyio
+    async def test_icon_served(self) -> None:
+        """/icons/<name> returns SVG with correct content type."""
+        app = HealthMiddleware(_dummy_app, _health_builder)
+        scope = {"type": "http", "path": "/icons/awareness-64.svg", "method": "GET"}
+        status, body = await _collect_response(app, scope)
+        assert status == 200
+        assert b"<svg" in body
+
+    @pytest.mark.anyio
+    async def test_icon_not_found(self) -> None:
+        """/icons/<nonexistent> returns 404."""
+        app = HealthMiddleware(_dummy_app, _health_builder)
+        scope = {"type": "http", "path": "/icons/nonexistent.svg", "method": "GET"}
+        status, _body = await _collect_response(app, scope)
+        assert status == 404
 
     @pytest.mark.anyio
     async def test_non_http_scope_passes_through(self) -> None:
@@ -665,6 +707,19 @@ class TestAuthMiddleware:
         scope = {
             "type": "http",
             "path": "/favicon.ico",
+            "method": "GET",
+            "headers": [],
+        }
+        status, _body = await _collect_response(app, scope)
+        assert status == 200
+
+    @pytest.mark.anyio
+    async def test_icon_path_skips_auth(self) -> None:
+        """/icons/<name> bypasses JWT auth."""
+        app = AuthMiddleware(_dummy_app, jwt_secret="test-secret")
+        scope = {
+            "type": "http",
+            "path": "/icons/awareness-64.svg",
             "method": "GET",
             "headers": [],
         }

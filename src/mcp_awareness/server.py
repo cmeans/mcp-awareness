@@ -37,6 +37,7 @@ from datetime import datetime, timezone
 from typing import Any, Literal
 
 from mcp.server.fastmcp import FastMCP
+from mcp.types import Icon
 
 from .embeddings import (
     EmbeddingProvider,
@@ -262,11 +263,55 @@ def _log_reads(entries: list[Any], tool_name: str) -> None:
 _INSTRUCTIONS_PATH = pathlib.Path(__file__).parent / "instructions.md"
 _INSTRUCTIONS = _INSTRUCTIONS_PATH.read_text(encoding="utf-8").strip()
 
+_PUBLIC_URL = os.environ.get("AWARENESS_PUBLIC_URL", "")
+
 mcp = FastMCP(
     name="mcp-awareness",
     host=HOST,
     port=PORT,
     instructions=_INSTRUCTIONS,
+    website_url="https://mcpawareness.com",
+    # Icon theme field is in the MCP spec (2025-11-25) but not yet typed
+    # in the Python SDK's Icon model.  additionalProperties passes it at
+    # runtime; type: ignore silences mypy until the SDK catches up.
+    icons=[
+        Icon(  # type: ignore[call-arg]
+            src=f"{_PUBLIC_URL}/icons/awareness-32.svg",
+            mimeType="image/svg+xml",
+            sizes=["32x32"],
+            theme="light",
+        ),
+        Icon(  # type: ignore[call-arg]
+            src=f"{_PUBLIC_URL}/icons/awareness-32-dark.svg",
+            mimeType="image/svg+xml",
+            sizes=["32x32"],
+            theme="dark",
+        ),
+        Icon(  # type: ignore[call-arg]
+            src=f"{_PUBLIC_URL}/icons/awareness-64.svg",
+            mimeType="image/svg+xml",
+            sizes=["64x64"],
+            theme="light",
+        ),
+        Icon(  # type: ignore[call-arg]
+            src=f"{_PUBLIC_URL}/icons/awareness-64-dark.svg",
+            mimeType="image/svg+xml",
+            sizes=["64x64"],
+            theme="dark",
+        ),
+        Icon(  # type: ignore[call-arg]
+            src=f"{_PUBLIC_URL}/icons/awareness-200.svg",
+            mimeType="image/svg+xml",
+            sizes=["200x200"],
+            theme="light",
+        ),
+        Icon(  # type: ignore[call-arg]
+            src=f"{_PUBLIC_URL}/icons/awareness-200-dark.svg",
+            mimeType="image/svg+xml",
+            sizes=["200x200"],
+            theme="dark",
+        ),
+    ],
 )
 
 # ---------------------------------------------------------------------------

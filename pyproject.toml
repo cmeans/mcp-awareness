@@ -44,6 +44,7 @@ packages = ["src/mcp_awareness"]
 "src/mcp_awareness/instructions.md" = "mcp_awareness/instructions.md"
 "src/mcp_awareness/favicon.ico" = "mcp_awareness/favicon.ico"
 "src/mcp_awareness/sql" = "mcp_awareness/sql"
+"src/mcp_awareness/icons" = "mcp_awareness/icons"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
