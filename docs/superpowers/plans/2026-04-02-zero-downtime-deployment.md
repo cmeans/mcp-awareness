@@ -22,8 +22,48 @@
 - **`[CT 203]`** = SSH/exec into CT 203 (awareness-lb, 192.168.200.103) — new
 - **`[CT 210]`** = SSH/exec into CT 210 (awareness-app-a, 192.168.200.110) — new
 - **`[CT 211]`** = SSH/exec into CT 211 (awareness-app-b, 192.168.200.111) — new
-- **`[laptop]`** = Commands on Chris's Fedora workstation
+- **`[laptop]`** = Commands on Chris's Fedora workstation (engineering10)
 - Steps marked **[USER]** require the user to provide secrets, make UI decisions, or run commands on systems the agent can't reach
+
+### Remote access (VPN / travel)
+
+LXC IPs (192.168.200.x) are only reachable from the home LAN. When working
+remotely, access holodeck and all CTs via Tailscale + SSH ProxyJump:
+
+- **Holodeck** is on Tailscale as `holodeck.tail5ce4eb.ts.net` (100.84.32.49)
+- **CTs** are reached by jumping through holodeck (ProxyJump)
+- **SSH key:** `~/.ssh/id_ed25519` (ed25519, no passphrase, `cmeans@engineering10`)
+
+SSH config for remote access:
+
+```
+Host holodeck
+    HostName holodeck.tail5ce4eb.ts.net
+    User root
+    IdentityFile ~/.ssh/id_ed25519
+
+Host awareness-lb
+    HostName 192.168.200.103
+    User root
+    ProxyJump holodeck
+
+Host awareness-app-a
+    HostName 192.168.200.110
+    User root
+    ProxyJump holodeck
+
+Host awareness-app-b
+    HostName 192.168.200.111
+    User root
+    ProxyJump holodeck
+```
+
+With this config, all `ssh` and `scp` commands in the plan work as written
+(using hostnames like `awareness-app-a` instead of raw IPs). The deploy
+script's SSH commands resolve transparently through the jump host.
+
+**Note:** The new ed25519 key must be in `authorized_keys` on holodeck and
+each CT. The provisioning script (Task 2) handles this for new CTs.
 
 ---
 
@@ -815,33 +855,27 @@ Expected: Creates snapshots for all 5 containers.
 
 **Where:** `[laptop]`
 
-- [ ] **Step 1: Add SSH aliases**
+- [ ] **Step 1: Update SSH config**
 
-Add to `~/.ssh/config`:
+Replace the existing `holodeck` entry and add the new CT aliases in `~/.ssh/config`.
+Use the config from the **Remote access** section in Conventions above — it uses
+Tailscale hostname + ProxyJump so it works from both home LAN and remotely.
 
-```
-Host awareness-lb
-    HostName 192.168.200.103
-    User root
+Key changes:
+- `holodeck` HostName changes from `192.168.200.70` to `holodeck.tail5ce4eb.ts.net`
+- `holodeck` IdentityFile changes from `id_ed25519_github` to `id_ed25519`
+- New entries for `awareness-lb`, `awareness-app-a`, `awareness-app-b` with ProxyJump
 
-Host awareness-app-a
-    HostName 192.168.200.110
-    User root
-
-Host awareness-app-b
-    HostName 192.168.200.111
-    User root
-```
-
-- [ ] **Step 2: Verify**
+- [ ] **Step 2: Verify from workstation**
 
 ```bash
+ssh holodeck hostname
 ssh awareness-lb hostname
 ssh awareness-app-a hostname
 ssh awareness-app-b hostname
 ```
 
-Expected: `awareness-lb`, `awareness-app-a`, `awareness-app-b`
+Expected: `holodeck`, `awareness-lb`, `awareness-app-a`, `awareness-app-b`
 
 ---
 
