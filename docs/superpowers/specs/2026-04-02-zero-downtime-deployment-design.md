@@ -142,7 +142,7 @@ New app LXCs are provisioned identically via a script. Fixes all CT 201 operatio
 
 ### Provisioning script
 
-`scripts/holodeck/create-app-ct.sh <ct-id> <ip>` — creates an app LXC from scratch:
+`scripts/holodeck/create-app-ct.sh <ct-id> <ip-suffix> <hostname>` — creates an app LXC from scratch:
 
 1. Create LXC from Debian 12 template (1 core, 512MB, 8GB)
 2. Install openssh-server, push workstation SSH key

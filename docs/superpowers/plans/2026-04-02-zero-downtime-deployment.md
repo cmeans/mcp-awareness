@@ -117,11 +117,11 @@ defaults
     timeout server  300s
     timeout http-keep-alive 300s
 
-frontend awareness_front
+frontend awareness-front
     bind *:8420
-    default_backend awareness_backend
+    default_backend awareness-backend
 
-backend awareness_backend
+backend awareness-backend
     balance roundrobin
     option httpchk GET /health
     http-check expect status 200
@@ -254,6 +254,9 @@ echo "Creating awareness user..."
 pct exec "$CT_ID" -- bash -c "useradd --system --create-home --shell /bin/bash awareness"
 
 echo "Cloning repo and installing..."
+# NOTE: HTTPS clone requires the repo to be public, or a deploy key / credential
+# helper configured on the container. If the repo is private, set up a read-only
+# deploy key on each app node before running this script.
 pct exec "$CT_ID" -- bash -c "mkdir -p /opt/mcp-awareness && chown awareness:awareness /opt/mcp-awareness"
 pct exec "$CT_ID" -- bash -c "sudo -u awareness git clone https://github.com/cmeans/mcp-awareness.git /opt/mcp-awareness"
 pct exec "$CT_ID" -- bash -c "sudo -u awareness python3 -m venv /opt/mcp-awareness/venv"
@@ -473,7 +476,7 @@ Expected: Returns data (the session was routed to the same backend that created 
 Set app-a to drain and verify new requests go to app-b:
 
 ```bash
-ssh root@192.168.200.103 'echo "set server awareness_backend/app-a state drain" | socat stdio /var/run/haproxy/admin.sock'
+ssh root@192.168.200.103 'echo "set server awareness-backend/app-a state drain" | socat stdio /var/run/haproxy/admin.sock'
 ```
 
 Send a new request (no session ID — should go to app-b):
@@ -485,7 +488,7 @@ curl -s http://192.168.200.103:8420/health | python3 -m json.tool
 Re-enable app-a:
 
 ```bash
-ssh root@192.168.200.103 'echo "set server awareness_backend/app-a state ready" | socat stdio /var/run/haproxy/admin.sock'
+ssh root@192.168.200.103 'echo "set server awareness-backend/app-a state ready" | socat stdio /var/run/haproxy/admin.sock'
 ```
 
 ---
@@ -542,12 +545,12 @@ node_name() { echo "${1##*:}"; }
 drain_node() {
     local name="$1"
     echo "  Draining ${name}..."
-    haproxy_cmd "set server awareness_backend/${name} state drain"
+    haproxy_cmd "set server awareness-backend/${name} state drain"
 
     local waited=0
     while (( waited < DRAIN_TIMEOUT )); do
         local conns
-        conns=$(haproxy_cmd "show stat" | grep "awareness_backend,${name}," | cut -d, -f5)
+        conns=$(haproxy_cmd "show stat" | grep "awareness-backend,${name}," | cut -d, -f5)
         if [[ "${conns:-0}" == "0" ]]; then
             echo "  ${name}: all connections drained"
             return 0
@@ -561,7 +564,7 @@ drain_node() {
 
 enable_node() {
     local name="$1"
-    haproxy_cmd "set server awareness_backend/${name} state ready"
+    haproxy_cmd "set server awareness-backend/${name} state ready"
     echo "  ${name}: re-enabled"
 }
 
@@ -630,7 +633,7 @@ maintenance_deploy() {
     local first_ip
     first_ip=$(node_ip "${APP_NODES[0]}")
     ssh "root@${first_ip}" 'cd /opt/mcp-awareness && git pull origin main && venv/bin/pip install -e . -q'
-    ssh "root@${first_ip}" 'cd /opt/mcp-awareness && AWARENESS_DATABASE_URL=$(grep AWARENESS_DATABASE_URL /etc/awareness/env | cut -d= -f2-) venv/bin/mcp-awareness-migrate upgrade head'
+    ssh "root@${first_ip}" 'cd /opt/mcp-awareness && set -a && source /etc/awareness/env && set +a && venv/bin/mcp-awareness-migrate upgrade head'
     echo "  Migration complete on ${first_ip}"
 
     echo ""
@@ -768,7 +771,21 @@ pct set 210 --onboot 1 --startup order=3,up=15
 pct set 211 --onboot 1 --startup order=3,up=15
 ```
 
-Boot order: CT 200 (Postgres, order=1) → CT 203 (HAProxy, order=2, 5s delay) → CT 210+211 (apps, order=3, 15s delay for Postgres) → CT 202 (tunnel, existing order).
+Boot order: CT 200 (Postgres, order=1) → CT 203 (HAProxy, order=2, 5s delay) → CT 210+211 (apps, order=3, 15s delay for Postgres) → CT 202 (tunnel, order=4).
+
+- [ ] **Step 2b: Verify CT 202 boot order**
+
+CT 202 (tunnel) must boot after HAProxy (CT 203) and the app nodes, otherwise cloudflared starts before its upstream is available.
+
+```bash
+pct config 202 | grep -E 'onboot|startup'
+```
+
+If order is not set or is lower than 4, fix it:
+
+```bash
+pct set 202 --onboot 1 --startup order=4,up=5
+```
 
 - [ ] **Step 3: Update snapshot script**
 
