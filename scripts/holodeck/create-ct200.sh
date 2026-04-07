@@ -15,7 +15,8 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-# Create CT 200 — Postgres LXC for awareness
+# Create CT 200 — Postgres LXC for awareness.
+# No arguments — creates CT 200 with fixed parameters (IP .100, 2 cores, 1GB RAM).
 # Run on holodeck host: bash create-ct200.sh
 set -euo pipefail
 
