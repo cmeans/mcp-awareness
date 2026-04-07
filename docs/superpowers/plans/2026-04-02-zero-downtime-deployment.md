@@ -71,7 +71,7 @@ each CT. The provisioning script (Task 2) handles this for new CTs.
 
 **Where:** `[holodeck]`
 
-- [ ] **Step 1: Identify the Debian 12 template**
+- [x] **Step 1: Identify the Debian 12 template**
 
 ```bash
 pveam list local | grep debian-12
@@ -79,39 +79,39 @@ pveam list local | grep debian-12
 
 Expected: Shows a `debian-12-standard_*.tar.zst` template. Note the exact filename.
 
-- [ ] **Step 2: Create the LXC**
+- [x] **Step 2: Create the LXC**
 
 ```bash
-pct create 203 local:vztmpl/debian-12-standard_12.12-1_amd64.tar.zst --hostname awareness-lb --cores 1 --memory 256 --swap 128 --rootfs local-lvm:4 --net0 name=eth0,bridge=vmbr0,ip=192.168.200.103/24,gw=192.168.200.1 --nameserver 192.168.200.1 --unprivileged 1 --features nesting=0 --start 0 --password
+pct create 203 local:vztmpl/debian-12-standard_12.12-1_amd64.tar.zst --hostname awareness-lb --cores 1 --memory 256 --swap 128 --rootfs local-lvm:4 --net0 name=eth0,bridge=vmbr0,ip=192.168.200.103/24,gw=192.168.200.1 --nameserver 192.168.200.10 --unprivileged 1 --features nesting=0 --start 0 --password
 ```
 
 **[USER]** Set root password, store in KeePass.
 
 Adjust the template filename if it differs from step 1.
 
-- [ ] **Step 3: Start and enter CT 203**
+- [x] **Step 3: Start and enter CT 203**
 
 ```bash
 pct start 203
 pct enter 203
 ```
 
-- [ ] **Step 4: Update base system**
+- [x] **Step 4: Update base system**
 
 ```bash
 apt update && apt upgrade -y
 ```
 
-- [ ] **Step 5: Install HAProxy and socat**
+- [x] **Step 5: Install HAProxy, socat, and curl**
 
 ```bash
-apt install -y haproxy socat
+apt install -y haproxy socat curl
 haproxy -v
 ```
 
 Expected: HAProxy version 2.6+ (Debian 12 ships 2.6.x).
 
-- [ ] **Step 6: Install openssh-server and push SSH key**
+- [x] **Step 6: Install openssh-server and push SSH key**
 
 ```bash
 apt install -y openssh-server
@@ -131,7 +131,7 @@ ssh root@192.168.200.103 hostname
 
 Expected: `awareness-lb`
 
-- [ ] **Step 7: Configure HAProxy**
+- [x] **Step 7: Configure HAProxy**
 
 Create `/etc/haproxy/haproxy.cfg`:
 
@@ -167,6 +167,7 @@ backend awareness-backend
     http-check expect status 200
     stick-table type string len 64 size 10k expire 30m
     stick on req.hdr(mcp-session-id) if { req.hdr(mcp-session-id) -m found }
+    stick store-response res.hdr(mcp-session-id) if { res.hdr(mcp-session-id) -m found }
     server app-a 192.168.200.110:8420 check inter 5s fall 3 rise 2
     server app-b 192.168.200.111:8420 check inter 5s fall 3 rise 2
 
@@ -181,14 +182,14 @@ EOF
 
 **[USER]** Change the stats password (`admin:haproxy-stats`) to something from KeePass.
 
-- [ ] **Step 8: Create runtime socket directory**
+- [x] **Step 8: Create runtime socket directory**
 
 ```bash
 mkdir -p /var/run/haproxy
 chown haproxy:haproxy /var/run/haproxy
 ```
 
-- [ ] **Step 9: Validate config and restart**
+- [x] **Step 9: Validate config and restart**
 
 ```bash
 haproxy -c -f /etc/haproxy/haproxy.cfg
@@ -199,7 +200,7 @@ systemctl status haproxy
 
 Expected: Config valid, service active. Backends will show as DOWN until app LXCs are provisioned.
 
-- [ ] **Step 10: Verify stats page**
+- [x] **Step 10: Verify stats page**
 
 From workstation:
 ```bash
@@ -216,7 +217,7 @@ Expected: Non-zero (stats page is serving, shows backend names).
 
 This script automates creating new app LXCs with all operational fixes applied.
 
-- [ ] **Step 1: Create the provisioning script**
+- [x] **Step 1: Create the provisioning script**
 
 Create `scripts/holodeck/create-app-ct.sh`:
 
@@ -273,7 +274,7 @@ pct create "$CT_ID" "$TEMPLATE" \
     --swap 256 \
     --rootfs local-lvm:8 \
     --net0 "name=eth0,bridge=vmbr0,ip=${IP}/24,gw=192.168.200.1" \
-    --nameserver 192.168.200.1 \
+    --nameserver 192.168.200.10 \
     --unprivileged 1 \
     --features nesting=0 \
     --start 1 \
@@ -283,7 +284,7 @@ echo "Waiting for container to start..."
 sleep 5
 
 echo "Installing base packages..."
-pct exec "$CT_ID" -- bash -c "apt update -qq && apt install -y -qq openssh-server python3 python3-pip python3-venv python3-dev git build-essential libpq-dev > /dev/null 2>&1"
+pct exec "$CT_ID" -- bash -c "apt update -qq && apt install -y -qq openssh-server sudo python3 python3-pip python3-venv python3-dev git build-essential libpq-dev curl > /dev/null 2>&1"
 
 echo "Configuring SSH..."
 pct exec "$CT_ID" -- bash -c "mkdir -p /root/.ssh && chmod 700 /root/.ssh"
@@ -341,13 +342,13 @@ echo "  2. Start service: pct exec ${CT_ID} -- systemctl start mcp-awareness"
 echo "  3. Verify health: curl -s http://${IP}:8420/health | python3 -m json.tool"
 ```
 
-- [ ] **Step 2: Make executable**
+- [x] **Step 2: Make executable**
 
 ```bash
 chmod +x scripts/holodeck/create-app-ct.sh
 ```
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add scripts/holodeck/create-app-ct.sh
@@ -360,21 +361,21 @@ git commit -m "infra: add app LXC provisioning script for holodeck"
 
 **Where:** `[holodeck]`
 
-- [ ] **Step 1: Copy SSH key to holodeck**
+- [x] **Step 1: Copy SSH key to holodeck**
 
 From workstation:
 ```bash
 scp ~/.ssh/id_ed25519.pub root@192.168.200.70:/tmp/awareness-ssh-key.pub
 ```
 
-- [ ] **Step 2: Copy provisioning script to holodeck**
+- [x] **Step 2: Copy provisioning script to holodeck**
 
 From workstation:
 ```bash
 scp scripts/holodeck/create-app-ct.sh root@192.168.200.70:/tmp/create-app-ct.sh
 ```
 
-- [ ] **Step 3: Run provisioning script**
+- [x] **Step 3: Run provisioning script**
 
 From holodeck:
 ```bash
@@ -385,14 +386,14 @@ bash /tmp/create-app-ct.sh 210 110 awareness-app-a
 
 Expected: Script completes with "CT 210 (awareness-app-a) provisioned at 192.168.200.110."
 
-- [ ] **Step 4: Copy env file from CT 201**
+- [x] **Step 4: Copy env file from CT 201**
 
 From holodeck:
 ```bash
 pct exec 201 -- cat /etc/awareness/env | pct exec 210 -- bash -c 'cat > /etc/awareness/env && chmod 600 /etc/awareness/env'
 ```
 
-- [ ] **Step 5: Start the service**
+- [x] **Step 5: Start the service**
 
 ```bash
 pct exec 210 -- systemctl start mcp-awareness
@@ -401,7 +402,7 @@ pct exec 210 -- systemctl status mcp-awareness
 
 Expected: Active (running).
 
-- [ ] **Step 6: Verify health**
+- [x] **Step 6: Verify health**
 
 From holodeck:
 ```bash
@@ -410,7 +411,7 @@ curl -s http://192.168.200.110:8420/health | python3 -m json.tool
 
 Expected: `{"status": "ok", ...}`
 
-- [ ] **Step 7: Verify SSH from workstation**
+- [x] **Step 7: Verify SSH from workstation**
 
 From workstation:
 ```bash
@@ -419,7 +420,7 @@ ssh root@192.168.200.110 hostname
 
 Expected: `awareness-app-a`
 
-- [ ] **Step 8: Verify CLI tools**
+- [x] **Step 8: Verify CLI tools**
 
 ```bash
 ssh root@192.168.200.110 mcp-awareness-user list
@@ -435,7 +436,7 @@ Expected: Shows user list (may fail if env isn't sourced — the CLI tools need 
 
 Repeat Task 3 with different parameters.
 
-- [ ] **Step 1: Run provisioning script**
+- [x] **Step 1: Run provisioning script**
 
 From holodeck:
 ```bash
@@ -444,13 +445,13 @@ bash /tmp/create-app-ct.sh 211 111 awareness-app-b
 
 **[USER]** Set root password when prompted, store in KeePass.
 
-- [ ] **Step 2: Copy env file from CT 201**
+- [x] **Step 2: Copy env file from CT 201**
 
 ```bash
 pct exec 201 -- cat /etc/awareness/env | pct exec 211 -- bash -c 'cat > /etc/awareness/env && chmod 600 /etc/awareness/env'
 ```
 
-- [ ] **Step 3: Start and verify**
+- [x] **Step 3: Start and verify**
 
 ```bash
 pct exec 211 -- systemctl start mcp-awareness
@@ -459,7 +460,7 @@ curl -s http://192.168.200.111:8420/health | python3 -m json.tool
 
 Expected: `{"status": "ok", ...}`
 
-- [ ] **Step 4: Verify SSH from workstation**
+- [x] **Step 4: Verify SSH from workstation**
 
 ```bash
 ssh root@192.168.200.111 hostname
@@ -475,7 +476,7 @@ Expected: `awareness-app-b`
 
 Both app nodes should now be visible and healthy in HAProxy.
 
-- [ ] **Step 1: Check HAProxy stats**
+- [x] **Step 1: Check HAProxy stats**
 
 ```bash
 curl -s -u admin:haproxy-stats http://192.168.200.103:8421/\;csv | grep -E "app-a|app-b" | cut -d, -f1,2,18
@@ -483,7 +484,7 @@ curl -s -u admin:haproxy-stats http://192.168.200.103:8421/\;csv | grep -E "app-
 
 Expected: Both `app-a` and `app-b` show status `UP`.
 
-- [ ] **Step 2: Test traffic routing**
+- [x] **Step 2: Test traffic routing**
 
 Send a request through HAProxy and verify it reaches an app node:
 
@@ -493,7 +494,7 @@ curl -s http://192.168.200.103:8420/health | python3 -m json.tool
 
 Expected: `{"status": "ok", ...}` — response came from one of the app nodes via HAProxy.
 
-- [ ] **Step 3: Test session stickiness**
+- [x] **Step 3: Test session stickiness**
 
 Initialize an MCP session through HAProxy and verify subsequent requests go to the same backend:
 
@@ -511,7 +512,7 @@ curl -s http://192.168.200.103:8420/mcp -X POST -H "Content-Type: application/js
 
 Expected: Returns data (the session was routed to the same backend that created it).
 
-- [ ] **Step 4: Test connection draining**
+- [x] **Step 4: Test connection draining**
 
 Set app-a to drain and verify new requests go to app-b:
 
@@ -537,7 +538,7 @@ ssh root@192.168.200.103 'echo "set server awareness-backend/app-a state ready" 
 
 **Where:** `[laptop]`
 
-- [ ] **Step 1: Create the deploy script**
+- [x] **Step 1: Create the deploy script**
 
 Create `scripts/holodeck/deploy.sh`:
 
@@ -669,16 +670,17 @@ maintenance_deploy() {
     done
 
     echo ""
-    echo "Step 2: All nodes drained. Running migration..."
+    echo "Step 2: Updating first node and running migration..."
     local first_ip
     first_ip=$(node_ip "${APP_NODES[0]}")
-    ssh "root@${first_ip}" 'cd /opt/mcp-awareness && git pull origin main && venv/bin/pip install -e . -q'
-    ssh "root@${first_ip}" 'cd /opt/mcp-awareness && set -a && source /etc/awareness/env && set +a && venv/bin/mcp-awareness-migrate upgrade head'
+    update_node "$first_ip"
+    ssh "root@${first_ip}" 'cd /opt/mcp-awareness && sudo -u awareness bash -c "set -a && source /etc/awareness/env && set +a && /opt/mcp-awareness/venv/bin/mcp-awareness-migrate upgrade head"'
     echo "  Migration complete on ${first_ip}"
+    wait_healthy "$first_ip" || echo "  WARNING: ${first_ip} not healthy after migration"
 
     echo ""
-    echo "Step 3: Updating and restarting all nodes..."
-    for entry in "${APP_NODES[@]}"; do
+    echo "Step 3: Updating remaining nodes..."
+    for entry in "${APP_NODES[@]:1}"; do
         local ip
         ip=$(node_ip "$entry")
         update_node "$ip"
@@ -714,13 +716,13 @@ case "$MODE" in
 esac
 ```
 
-- [ ] **Step 2: Make executable**
+- [x] **Step 2: Make executable**
 
 ```bash
 chmod +x scripts/holodeck/deploy.sh
 ```
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add scripts/holodeck/deploy.sh
@@ -735,7 +737,7 @@ git commit -m "infra: add zero-downtime deploy script (hot + maintenance modes)"
 
 This is the cutover — traffic starts flowing through HAProxy.
 
-- [ ] **Step 1: Verify CT 201 is still serving (fallback ready)**
+- [x] **Step 1: Verify CT 201 is still serving (fallback ready)**
 
 ```bash
 curl -s http://192.168.200.101:8420/health | python3 -m json.tool
@@ -743,7 +745,7 @@ curl -s http://192.168.200.101:8420/health | python3 -m json.tool
 
 Expected: `{"status": "ok", ...}`
 
-- [ ] **Step 2: Update tunnel config**
+- [x] **Step 2: Update tunnel config**
 
 SSH to CT 202 and update the cloudflared config:
 
@@ -765,7 +767,7 @@ ingress:
   - service: http_status:404
 ```
 
-- [ ] **Step 3: Restart cloudflared**
+- [x] **Step 3: Restart cloudflared**
 
 ```bash
 systemctl restart cloudflared
@@ -775,7 +777,7 @@ journalctl -u cloudflared -n 10 --no-pager
 
 Expected: Active, "Connection established", "Registered tunnel connection".
 
-- [ ] **Step 4: Verify end-to-end**
+- [x] **Step 4: Verify end-to-end**
 
 From workstation, test via the public URL:
 
@@ -796,14 +798,14 @@ Expected: Health response (or auth challenge, depending on mount path config).
 
 **Where:** `[holodeck]`
 
-- [ ] **Step 1: Create resource pool**
+- [x] **Step 1: Create resource pool**
 
 ```bash
 pvesh create /pools --poolid awareness
 pvesh set /pools/awareness --vms 200,202,203,210,211
 ```
 
-- [ ] **Step 2: Set boot order for new containers**
+- [x] **Step 2: Set boot order for new containers**
 
 ```bash
 pct set 203 --onboot 1 --startup order=2,up=5
@@ -813,7 +815,7 @@ pct set 211 --onboot 1 --startup order=3,up=15
 
 Boot order: CT 200 (Postgres, order=1) → CT 203 (HAProxy, order=2, 5s delay) → CT 210+211 (apps, order=3, 15s delay for Postgres) → CT 202 (tunnel, order=4).
 
-- [ ] **Step 2b: Verify CT 202 boot order**
+- [x] **Step 2b: Verify CT 202 boot order**
 
 CT 202 (tunnel) must boot after HAProxy (CT 203) and the app nodes, otherwise cloudflared starts before its upstream is available.
 
@@ -827,27 +829,29 @@ If order is not set or is lower than 4, fix it:
 pct set 202 --onboot 1 --startup order=4,up=5
 ```
 
-- [ ] **Step 3: Update snapshot script**
+- [x] **Step 3: Create backup script**
 
-Edit `/usr/local/bin/awareness-snapshots.sh` on holodeck:
+The plan originally called for `pct snapshot`, but local-lvm storage doesn't support
+container snapshots. Created `/usr/local/bin/awareness-snapshots.sh` using `vzdump`
+instead:
 
-Change:
 ```bash
-for ct in 200 201 202; do
-```
-
-To:
-```bash
+#!/usr/bin/env bash
+set -euo pipefail
 for ct in 200 202 203 210 211; do
+    echo "Backing up CT ${ct}..."
+    vzdump "$ct" --mode snapshot --compress zstd --storage local
+done
+echo "Done."
 ```
 
-- [ ] **Step 4: Verify snapshot script**
+- [x] **Step 4: Verify backup script**
 
 ```bash
 bash /usr/local/bin/awareness-snapshots.sh
 ```
 
-Expected: Creates snapshots for all 5 containers.
+Expected: Creates vzdump backups for all 5 containers. Verified — ~1.9GB total (600MB pg, 214MB tunnel, 199MB lb, 436MB app-a, 435MB app-b).
 
 ---
 
@@ -855,7 +859,7 @@ Expected: Creates snapshots for all 5 containers.
 
 **Where:** `[laptop]`
 
-- [ ] **Step 1: Update SSH config**
+- [x] **Step 1: Update SSH config**
 
 Replace the existing `holodeck` entry and add the new CT aliases in `~/.ssh/config`.
 Use the config from the **Remote access** section in Conventions above — it uses
@@ -866,7 +870,7 @@ Key changes:
 - `holodeck` IdentityFile changes from `id_ed25519_github` to `id_ed25519`
 - New entries for `awareness-lb`, `awareness-app-a`, `awareness-app-b` with ProxyJump
 
-- [ ] **Step 2: Verify from workstation**
+- [x] **Step 2: Verify from workstation**
 
 ```bash
 ssh holodeck hostname
@@ -883,7 +887,7 @@ Expected: `holodeck`, `awareness-lb`, `awareness-app-a`, `awareness-app-b`
 
 **Where:** `[laptop]`
 
-- [ ] **Step 1: Run a hot deploy**
+- [x] **Step 1: Run a hot deploy**
 
 ```bash
 scripts/holodeck/deploy.sh hot
@@ -910,7 +914,7 @@ Expected output:
 === Hot deploy complete ===
 ```
 
-- [ ] **Step 2: Verify service is healthy after deploy**
+- [x] **Step 2: Verify service is healthy after deploy**
 
 ```bash
 curl -s http://192.168.200.103:8420/health | python3 -m json.tool
@@ -918,7 +922,7 @@ curl -s http://192.168.200.103:8420/health | python3 -m json.tool
 
 Expected: `{"status": "ok", ...}`
 
-- [ ] **Step 3: Verify from Claude Desktop**
+- [x] **Step 3: Verify from Claude Desktop**
 
 **[USER]** Call `get_briefing` from Claude Desktop. Should work without reconnecting — existing sessions should have survived (they were drained, not killed).
 
@@ -960,7 +964,7 @@ Remove CT 201 from any snapshot scripts or resource pools if it was added.
 
 **Where:** `[laptop]`
 
-- [ ] **Step 1: Update maintenance guide**
+- [x] **Step 1: Update maintenance guide**
 
 Update `docs/maintenance/holodeck/update-mcp-awareness.md` to reference the deploy script instead of manual steps:
 
@@ -984,11 +988,11 @@ scripts/holodeck/deploy.sh maintenance
 See `docs/superpowers/specs/2026-04-02-zero-downtime-deployment-design.md` for details.
 ```
 
-- [ ] **Step 2: Update deployment design spec topology diagram**
+- [x] **Step 2: Update deployment design spec topology diagram**
 
 Update `docs/superpowers/specs/2026-04-01-holodeck-deployment-design.md` topology section to reflect the new architecture (HAProxy + app pool instead of single CT 201).
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add docs/

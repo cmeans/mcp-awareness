@@ -31,31 +31,46 @@ Holodeck is a Proxmox VE host with 40 Xeon threads, 128GB RAM, 2x Quadro P4000 G
 ## Topology
 
 ```
-┌──────────────────────────────────────────────────────────────┐
-│  holodeck (192.168.200.70)  ·  Proxmox VE 8.4.1             │
-│                                                              │
-│  ┌──────────────────┐  ┌──────────────────┐  ┌────────────┐ │
-│  │ CT 200           │  │ CT 201           │  │ CT 202     │ │
-│  │ awareness-pg     │  │ awareness-app    │  │ awareness- │ │
-│  │ 192.168.200.100  │  │ 192.168.200.101  │  │ tunnel     │ │
-│  │                  │  │                  │  │ 192.168.   │ │
-│  │ Postgres 17      │  │ mcp-awareness    │  │ 200.102    │ │
-│  │ pgvector         │  │ (pip from git)   │  │            │ │
-│  │ PostGIS          │  │ systemd service  │  │ cloudflared│ │
-│  │ pg_stat_stmts    │  │                  │  │ systemd    │ │
-│  │                  │  │ OAuth enabled    │  │            │ │
-│  │ :5432 LAN        │  │ :8420            │  │ → CF tunnel│ │
-│  └──────────────────┘  └──────────────────┘  └────────────┘ │
-│         ↑                    ↑        ↑            │        │
-│         │ pg connect         │        │ embed      │        │
-│         └────────────────────┘        │            │        │
-│                                       │            │        │
-│  Ollama (bare metal, 2x P4000)  ◄─────┘            │        │
-│  :11434                                             │        │
-│                                                     │        │
-│  Internet → Cloudflare → staging.mcpawareness.com ──┘        │
-│             → CT 202 tunnel → CT 201 awareness               │
-└──────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────────┐
+│  holodeck (192.168.200.70)  ·  Proxmox VE 8.4.1                        │
+│                                                                         │
+│  ┌──────────────────┐  ┌──────────────────┐  ┌──────────────────┐      │
+│  │ CT 200           │  │ CT 203           │  │ CT 202           │      │
+│  │ awareness-pg     │  │ awareness-lb     │  │ awareness-tunnel │      │
+│  │ 192.168.200.100  │  │ 192.168.200.103  │  │ 192.168.200.102  │      │
+│  │                  │  │                  │  │                  │      │
+│  │ Postgres 17      │  │ HAProxy 2.6      │  │ cloudflared      │      │
+│  │ pgvector         │  │ session sticky   │  │ systemd          │      │
+│  │ PostGIS          │  │ :8420 frontend   │  │ → CF tunnel      │      │
+│  │ pg_stat_stmts    │  │ :8421 stats      │  │                  │      │
+│  │ :5432 LAN        │  │                  │  │                  │      │
+│  └──────────────────┘  └──────────────────┘  └──────────────────┘      │
+│         ↑                  │          │              │                  │
+│         │ pg connect       │          │              │                  │
+│         │        ┌─────────┘          └─────────┐    │                  │
+│         │        ↓                              ↓    │                  │
+│  ┌──────────────────┐              ┌──────────────────┐                │
+│  │ CT 210           │              │ CT 211           │                │
+│  │ awareness-app-a  │              │ awareness-app-b  │                │
+│  │ 192.168.200.110  │              │ 192.168.200.111  │                │
+│  │                  │              │                  │                │
+│  │ mcp-awareness    │              │ mcp-awareness    │                │
+│  │ (pip from git)   │              │ (pip from git)   │                │
+│  │ systemd service  │              │ systemd service  │                │
+│  │ OAuth enabled    │              │ OAuth enabled    │                │
+│  │ :8420            │              │ :8420            │                │
+│  └──────────────────┘              └──────────────────┘                │
+│         ↑        ↑                        ↑        ↑                   │
+│         │        │ embed                  │        │ embed             │
+│         │        │                        │        │                   │
+│  Ollama (bare metal, 2x P4000)  ◄─────────┘────────┘                   │
+│  :11434                                                                 │
+│                                                                         │
+│  Internet → Cloudflare → staging.mcpawareness.com ──→ CT 202 tunnel    │
+│             → CT 203 HAProxy → CT 210/211 (round-robin, sticky)        │
+└─────────────────────────────────────────────────────────────────────────┘
+
+CT 201 (awareness-app, 192.168.200.101) — decommissioned, replaced by CT 210/211.
 
 Synology NAS "Seska" (192.168.200.52)
   └─ /volume1/awareness-backups (encrypted, NFS, 10GB quota)
@@ -93,20 +108,40 @@ Synology NAS "Seska" (192.168.200.52)
 192.168.200.52:/volume1/awareness-backups /mnt/backup nfs rw,hard,intr 0 0
 ```
 
-## CT 201 — Awareness App (`awareness-app`)
+## CT 203 — HAProxy Load Balancer (`awareness-lb`)
 
 ### Provisioning
-- CT ID: 201
-- Hostname: `awareness-app`
+- CT ID: 203
+- Hostname: `awareness-lb`
 - Template: Debian 12
-- Static IP: `192.168.200.101/24`, gateway `192.168.200.1`
-- Resources: 1 CPU core, 512MB RAM, 8GB disk (`local-lvm`)
+- Static IP: `192.168.200.103/24`, gateway `192.168.200.1`
+- Resources: 1 CPU core, 256MB RAM, 4GB disk (`local-lvm`)
 
 ### Software
-- Python 3.12 (Debian repos or deadsnakes PPA)
+- HAProxy 2.6 (Debian 12 repos), socat, curl
+
+### Configuration
+- Frontend: `:8420` → backend pool
+- Backend: round-robin with `mcp-session-id` header stickiness (request + response)
+- Health checks: `GET /health` every 5s
+- Stats: `:8421` (admin-only)
+- Session stick table: captures `mcp-session-id` from both request headers and server response headers to maintain MCP session affinity
+
+## CT 210/211 — Awareness App Pool (`awareness-app-a`, `awareness-app-b`)
+
+### Provisioning
+- CT IDs: 210, 211
+- Hostnames: `awareness-app-a`, `awareness-app-b`
+- Template: Debian 12
+- Static IPs: `192.168.200.110/24`, `192.168.200.111/24`, gateway `192.168.200.1`
+- Resources: 1 CPU core, 512MB RAM, 8GB disk (`local-lvm`) each
+- Provisioned via `scripts/holodeck/create-app-ct.sh`
+
+### Software
+- Python 3.11 (Debian repos)
 - Clone `cmeans/mcp-awareness` from GitHub
 - `pip install -e .` (editable install from source)
-- Alembic migrations run on first deploy
+- Alembic migrations run on first deploy (from one node only)
 
 ### Runtime — systemd service (`mcp-awareness.service`)
 ```ini
@@ -148,12 +183,9 @@ AWARENESS_OLLAMA_URL=http://192.168.200.70:11434
 ```
 
 ### Updates
-```bash
-cd /opt/mcp-awareness
-git pull
-pip install -e .
-sudo systemctl restart mcp-awareness
-```
+Deployed via `scripts/holodeck/deploy.sh`:
+- `deploy.sh hot` — rolling zero-downtime update (drain → update → health check → re-enable, one node at a time)
+- `deploy.sh maintenance` — full stop, migrate, restart (brief downtime for schema changes)
 
 ### User provisioning
 Pre-provision Chris's user before first OAuth login:
@@ -176,17 +208,16 @@ This tests the flow where OAuth login finds an existing user by email match.
 
 ### Runtime
 - Install as system service: `cloudflared service install`
-- Tunnel config points to `http://192.168.200.101:8420`
+- Tunnel config points to `http://192.168.200.103:8420` (HAProxy)
 - Credentials file copied from laptop (`~/.cloudflared/staging-config.yml` and tunnel JSON)
 
-### Tunnel config update
-The existing staging tunnel config references `http://awareness-oauth:8421` (Docker network). Must update to:
+### Tunnel config
 ```yaml
 tunnel: <tunnel-id>
 credentials-file: /etc/cloudflared/credentials.json
 ingress:
   - hostname: staging.mcpawareness.com
-    service: http://192.168.200.101:8420
+    service: http://192.168.200.103:8420
   - service: http_status:404
 ```
 
@@ -237,7 +268,8 @@ Each LXC has cgroup-enforced resource limits that Proxmox tracks. These metrics 
 | LXC | Metric | Cloud equivalent |
 |-----|--------|-----------------|
 | CT 200 (Postgres) | CPU, RAM, disk I/O | RDS/Cloud SQL instance tier |
-| CT 201 (Awareness) | CPU, RAM, request rate | Cloud Run instance sizing |
+| CT 203 (HAProxy) | CPU, RAM, connections | Cloud LB (ALB/Cloud LB) |
+| CT 210/211 (Awareness) | CPU, RAM, request rate | Cloud Run instance sizing |
 | CT 202 (Tunnel) | CPU, RAM, bandwidth | Cloudflare handles this in cloud (free) |
 | Host (Ollama) | GPU util, VRAM, latency | GPU instance or API costs |
 
@@ -264,8 +296,10 @@ The Docker image, Postgres config, and load profiling data all carry forward at 
 | holodeck | 192.168.200.70 | Proxmox host, Ollama bare metal |
 | Seska (Synology) | 192.168.200.52 | NAS, backup storage |
 | CT 200 | 192.168.200.100 | Postgres |
-| CT 201 | 192.168.200.101 | Awareness app |
 | CT 202 | 192.168.200.102 | Cloudflare tunnel |
+| CT 203 | 192.168.200.103 | HAProxy load balancer |
+| CT 210 | 192.168.200.110 | Awareness app-a |
+| CT 211 | 192.168.200.111 | Awareness app-b |
 | Laptop | (DHCP) | Fallback production stack |
 
 ## Implementation Order
