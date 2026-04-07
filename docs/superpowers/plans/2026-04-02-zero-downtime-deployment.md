@@ -735,7 +735,7 @@ git commit -m "infra: add zero-downtime deploy script (hot + maintenance modes)"
 
 This is the cutover — traffic starts flowing through HAProxy.
 
-- [ ] **Step 1: Verify CT 201 is still serving (fallback ready)**
+- [x] **Step 1: Verify CT 201 is still serving (fallback ready)**
 
 ```bash
 curl -s http://192.168.200.101:8420/health | python3 -m json.tool
@@ -743,7 +743,7 @@ curl -s http://192.168.200.101:8420/health | python3 -m json.tool
 
 Expected: `{"status": "ok", ...}`
 
-- [ ] **Step 2: Update tunnel config**
+- [x] **Step 2: Update tunnel config**
 
 SSH to CT 202 and update the cloudflared config:
 
@@ -765,7 +765,7 @@ ingress:
   - service: http_status:404
 ```
 
-- [ ] **Step 3: Restart cloudflared**
+- [x] **Step 3: Restart cloudflared**
 
 ```bash
 systemctl restart cloudflared
@@ -775,7 +775,7 @@ journalctl -u cloudflared -n 10 --no-pager
 
 Expected: Active, "Connection established", "Registered tunnel connection".
 
-- [ ] **Step 4: Verify end-to-end**
+- [x] **Step 4: Verify end-to-end**
 
 From workstation, test via the public URL:
 
@@ -796,14 +796,14 @@ Expected: Health response (or auth challenge, depending on mount path config).
 
 **Where:** `[holodeck]`
 
-- [ ] **Step 1: Create resource pool**
+- [x] **Step 1: Create resource pool**
 
 ```bash
 pvesh create /pools --poolid awareness
 pvesh set /pools/awareness --vms 200,202,203,210,211
 ```
 
-- [ ] **Step 2: Set boot order for new containers**
+- [x] **Step 2: Set boot order for new containers**
 
 ```bash
 pct set 203 --onboot 1 --startup order=2,up=5
@@ -813,7 +813,7 @@ pct set 211 --onboot 1 --startup order=3,up=15
 
 Boot order: CT 200 (Postgres, order=1) → CT 203 (HAProxy, order=2, 5s delay) → CT 210+211 (apps, order=3, 15s delay for Postgres) → CT 202 (tunnel, order=4).
 
-- [ ] **Step 2b: Verify CT 202 boot order**
+- [x] **Step 2b: Verify CT 202 boot order**
 
 CT 202 (tunnel) must boot after HAProxy (CT 203) and the app nodes, otherwise cloudflared starts before its upstream is available.
 
@@ -827,27 +827,29 @@ If order is not set or is lower than 4, fix it:
 pct set 202 --onboot 1 --startup order=4,up=5
 ```
 
-- [ ] **Step 3: Update snapshot script**
+- [x] **Step 3: Create backup script**
 
-Edit `/usr/local/bin/awareness-snapshots.sh` on holodeck:
+The plan originally called for `pct snapshot`, but local-lvm storage doesn't support
+container snapshots. Created `/usr/local/bin/awareness-snapshots.sh` using `vzdump`
+instead:
 
-Change:
 ```bash
-for ct in 200 201 202; do
-```
-
-To:
-```bash
+#!/usr/bin/env bash
+set -euo pipefail
 for ct in 200 202 203 210 211; do
+    echo "Backing up CT ${ct}..."
+    vzdump "$ct" --mode snapshot --compress zstd --storage local
+done
+echo "Done."
 ```
 
-- [ ] **Step 4: Verify snapshot script**
+- [x] **Step 4: Verify backup script**
 
 ```bash
 bash /usr/local/bin/awareness-snapshots.sh
 ```
 
-Expected: Creates snapshots for all 5 containers.
+Expected: Creates vzdump backups for all 5 containers. Verified — ~1.9GB total (600MB pg, 214MB tunnel, 199MB lb, 436MB app-a, 435MB app-b).
 
 ---
 

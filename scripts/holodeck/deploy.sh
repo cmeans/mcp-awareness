@@ -16,6 +16,7 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 # Zero-downtime deploy for mcp-awareness on holodeck.
+# Run from holodeck host (requires SSH access to app nodes and HAProxy socket).
 # Usage: deploy.sh hot              — rolling code update, zero-downtime
 #        deploy.sh maintenance      — full stop, migrate, restart (scheduled)
 set -euo pipefail
@@ -67,7 +68,7 @@ enable_node() {
 update_node() {
     local ip="$1"
     echo "  Updating ${ip}..."
-    ssh "root@${ip}" 'cd /opt/mcp-awareness && git pull origin main && venv/bin/pip install -e . -q && systemctl restart mcp-awareness'
+    ssh "root@${ip}" 'cd /opt/mcp-awareness && sudo -u awareness git pull origin main && sudo -u awareness venv/bin/pip install -e . -q && systemctl restart mcp-awareness'
 }
 
 wait_healthy() {
@@ -128,8 +129,8 @@ maintenance_deploy() {
     echo "Step 2: All nodes drained. Running migration..."
     local first_ip
     first_ip=$(node_ip "${APP_NODES[0]}")
-    ssh "root@${first_ip}" 'cd /opt/mcp-awareness && git pull origin main && venv/bin/pip install -e . -q'
-    ssh "root@${first_ip}" 'cd /opt/mcp-awareness && set -a && source /etc/awareness/env && set +a && venv/bin/mcp-awareness-migrate upgrade head'
+    ssh "root@${first_ip}" 'cd /opt/mcp-awareness && sudo -u awareness git pull origin main && sudo -u awareness venv/bin/pip install -e . -q'
+    ssh "root@${first_ip}" 'cd /opt/mcp-awareness && set -a && source /etc/awareness/env && set +a && sudo -u awareness venv/bin/mcp-awareness-migrate upgrade head'
     echo "  Migration complete on ${first_ip}"
 
     echo ""
