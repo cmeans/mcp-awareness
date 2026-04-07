@@ -64,32 +64,106 @@ Client → Cloudflare → HAProxy → CT 210 or 211
 
 **Subsequent request (session ID present):**
 
-1. `lookup(session_id)` in Postgres
-2. If not found → pass through to FastMCP (returns 404)
+1. `lookup(session_id)` in Postgres (includes `WHERE expires_at > NOW()` —
+   expired sessions are treated as not found, same as truly invalid ones)
+2. If not found → check `redirect_lookup(session_id)` for old→new mapping
+   (see session continuity below). If redirect found, rewrite request header
+   to new session_id and continue at step 3. If no redirect → pass through
+   to FastMCP (returns 404)
 3. If found, validate `owner_id` matches JWT → reject 403 on mismatch
 4. Pass request through to FastMCP
-5. If FastMCP returns success → `touch()` (debounced), done
-6. If FastMCP returns 404 (session not in local memory) → **re-initialize**:
-   strip session header, replay request, register new session with new ID,
-   invalidate old session ID
+5. If FastMCP returns success → `touch()` (debounced, also extends
+   `expires_at = NOW() + TTL` for sliding-window expiry), done
+6. If FastMCP returns 404 (session not in local memory) → **re-initialize**
+   (see below)
+
+**Re-initialization (cross-node recovery):**
+
+When a session exists in the registry but not in FastMCP's local memory (node
+restart or HAProxy routed to a different node), the middleware performs a
+two-step re-initialization:
+
+1. Build a synthetic `initialize` request using stored metadata from the
+   registry: `capabilities` and `client_info` columns provide the original
+   handshake parameters, `protocol_version` provides the negotiated version
+2. Send the synthetic `initialize` to FastMCP → FastMCP creates a new local
+   session and returns a new `mcp-session-id`
+3. Register the new session_id in Postgres
+4. Store a redirect mapping: old_session_id → new_session_id (see session
+   continuity below)
+5. Invalidate the old session_id in the registry (mark expired, not deleted —
+   the redirect mapping references it)
+6. Replay the original request (e.g., `tools/call`) with the new session_id
+7. Return the response to the client with the new `mcp-session-id` header
+
+**Session continuity after rotation:**
+
+After re-init, the client still holds the old session_id. To avoid breaking
+the client on its next request:
+
+- The middleware maintains a **redirect table** (`session_redirects`) mapping
+  old_session_id → new_session_id with a grace period (default: 5 minutes)
+- When a request arrives with an old session_id that has a redirect, the
+  middleware transparently rewrites the request header to the new session_id
+- The response includes the new `mcp-session-id` header so the client can
+  update (if the client supports it — Claude Desktop/Claude.ai may not)
+- After the grace period, the redirect expires and the old session_id becomes
+  truly invalid
+
+Redirect table schema (same database):
+
+```sql
+CREATE TABLE session_redirects (
+    old_session_id  TEXT PRIMARY KEY,
+    new_session_id  TEXT NOT NULL,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    expires_at      TIMESTAMPTZ NOT NULL  -- created_at + 5 min
+);
+```
+
+**HAProxy stick table after rotation:**
+
+After re-init issues a new session_id, HAProxy's stick table has no entry for
+it. The `stick store-response` rule captures it from the re-init response, but
+there is a brief window where the next request may round-robin to the wrong
+node and trigger another re-init. This is self-healing (the second re-init
+succeeds and a new stick entry is created) but operators should expect a brief
+burst of re-inits (2-3 per session) immediately after a deploy. This settles
+within seconds.
 
 **Terminate (DELETE /mcp):**
 
 1. `invalidate(session_id)` in Postgres
-2. Pass through to FastMCP for local cleanup
+2. Delete any redirect mappings pointing to this session
+3. Pass through to FastMCP for local cleanup
 
 ### Key design decisions
 
 - **No FastMCP internals dependency.** We detect "session not on this node" by
   catching FastMCP's 404 response, not by inspecting `_server_instances`.
-- **Session rotation on re-init.** When a session is re-created on a different
-  node, a new session_id is issued and the old one is invalidated. Prevents
-  session fixation.
+- **Synthetic initialize for re-init.** Most re-inits are triggered by
+  `tools/call` or similar, not `initialize`. The middleware sends a synthetic
+  `initialize` using stored registry metadata before replaying the original
+  request. FastMCP always sees a valid handshake sequence.
+- **Redirect table for session continuity.** Clients holding old session_ids
+  are transparently redirected to the new session_id for a 5-minute grace
+  period. Avoids breaking clients that don't update their session_id from
+  response headers.
+- **Sliding-window TTL.** `touch()` extends `expires_at` on each request, so
+  active sessions never expire. Only idle sessions expire after TTL. This
+  matches the "30 minutes of inactivity" intent from issue #161.
+- **lookup() filters expired sessions.** Expired-but-not-yet-cleaned sessions
+  are treated as "not found" — no re-init path, clean 404. This prevents
+  zombie sessions from accumulating via re-init loops.
 - **Feature-gated.** Disabled unless `AWARENESS_SESSION_DATABASE_URL` is set.
   Zero behavioral change for stdio or single-node deployments.
 - **Graceful degradation.** If the session database is unreachable, the
   middleware logs an error and passes requests through unmodified, falling back
   to FastMCP's in-memory behavior.
+- **LOGGED tables (deliberate deviation from issue #161).** Issue suggested
+  UNLOGGED for performance. Spec chose LOGGED because write volume is low
+  (single-digit sessions/minute) and WAL overhead is negligible. Can revisit
+  if write volume increases significantly.
 
 ## Database
 
@@ -179,13 +253,15 @@ Two classes:
 
 **`SessionStore`** — Postgres client for the session registry:
 
-- `register(session_id, owner_id, node, capabilities, client_info) -> None`
-- `lookup(session_id) -> dict | None`
-- `touch(session_id) -> None` (debounced last_seen update)
+- `register(session_id, owner_id, node, protocol_version, capabilities, client_info) -> None`
+- `lookup(session_id) -> dict | None` (filters `expires_at > NOW()`)
+- `touch(session_id) -> None` (debounced: updates `last_seen` and extends `expires_at`)
 - `invalidate(session_id) -> None`
 - `count_active(owner_id) -> int`
-- `cleanup_expired() -> int`
-- `ensure_schema() -> None` (idempotent DDL)
+- `add_redirect(old_session_id, new_session_id) -> None` (5-min grace period)
+- `redirect_lookup(session_id) -> str | None` (returns new_session_id if redirect exists and not expired)
+- `cleanup_expired() -> int` (purges expired sessions and expired redirects)
+- `ensure_schema() -> None` (idempotent DDL for both tables)
 
 Uses `psycopg_pool.ConnectionPool` (min 1, max 5). Follows the same patterns
 as `PostgresStore`: connection context manager, transaction scope, background
