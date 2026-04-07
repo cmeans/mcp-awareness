@@ -167,6 +167,7 @@ backend awareness-backend
     http-check expect status 200
     stick-table type string len 64 size 10k expire 30m
     stick on req.hdr(mcp-session-id) if { req.hdr(mcp-session-id) -m found }
+    stick store-response res.hdr(mcp-session-id) if { res.hdr(mcp-session-id) -m found }
     server app-a 192.168.200.110:8420 check inter 5s fall 3 rise 2
     server app-b 192.168.200.111:8420 check inter 5s fall 3 rise 2
 
@@ -720,7 +721,7 @@ esac
 chmod +x scripts/holodeck/deploy.sh
 ```
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add scripts/holodeck/deploy.sh
@@ -857,7 +858,7 @@ Expected: Creates vzdump backups for all 5 containers. Verified — ~1.9GB total
 
 **Where:** `[laptop]`
 
-- [ ] **Step 1: Update SSH config**
+- [x] **Step 1: Update SSH config**
 
 Replace the existing `holodeck` entry and add the new CT aliases in `~/.ssh/config`.
 Use the config from the **Remote access** section in Conventions above — it uses
@@ -868,7 +869,7 @@ Key changes:
 - `holodeck` IdentityFile changes from `id_ed25519_github` to `id_ed25519`
 - New entries for `awareness-lb`, `awareness-app-a`, `awareness-app-b` with ProxyJump
 
-- [ ] **Step 2: Verify from workstation**
+- [x] **Step 2: Verify from workstation**
 
 ```bash
 ssh holodeck hostname
@@ -885,7 +886,7 @@ Expected: `holodeck`, `awareness-lb`, `awareness-app-a`, `awareness-app-b`
 
 **Where:** `[laptop]`
 
-- [ ] **Step 1: Run a hot deploy**
+- [x] **Step 1: Run a hot deploy**
 
 ```bash
 scripts/holodeck/deploy.sh hot
@@ -912,7 +913,7 @@ Expected output:
 === Hot deploy complete ===
 ```
 
-- [ ] **Step 2: Verify service is healthy after deploy**
+- [x] **Step 2: Verify service is healthy after deploy**
 
 ```bash
 curl -s http://192.168.200.103:8420/health | python3 -m json.tool
@@ -920,7 +921,7 @@ curl -s http://192.168.200.103:8420/health | python3 -m json.tool
 
 Expected: `{"status": "ok", ...}`
 
-- [ ] **Step 3: Verify from Claude Desktop**
+- [x] **Step 3: Verify from Claude Desktop**
 
 **[USER]** Call `get_briefing` from Claude Desktop. Should work without reconnecting — existing sessions should have survived (they were drained, not killed).
 
@@ -962,7 +963,7 @@ Remove CT 201 from any snapshot scripts or resource pools if it was added.
 
 **Where:** `[laptop]`
 
-- [ ] **Step 1: Update maintenance guide**
+- [x] **Step 1: Update maintenance guide**
 
 Update `docs/maintenance/holodeck/update-mcp-awareness.md` to reference the deploy script instead of manual steps:
 
@@ -986,11 +987,11 @@ scripts/holodeck/deploy.sh maintenance
 See `docs/superpowers/specs/2026-04-02-zero-downtime-deployment-design.md` for details.
 ```
 
-- [ ] **Step 2: Update deployment design spec topology diagram**
+- [x] **Step 2: Update deployment design spec topology diagram**
 
 Update `docs/superpowers/specs/2026-04-01-holodeck-deployment-design.md` topology section to reflect the new architecture (HAProxy + app pool instead of single CT 201).
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add docs/

@@ -43,6 +43,7 @@ fi
 
 echo "Creating CT ${CT_ID} (${HOSTNAME}) at ${IP}..."
 
+echo "You will be prompted to set a root password for the container."
 pct create "$CT_ID" "$TEMPLATE" \
     --hostname "$HOSTNAME" \
     --cores 1 \
