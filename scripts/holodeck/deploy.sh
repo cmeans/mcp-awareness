@@ -16,7 +16,7 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 # Zero-downtime deploy for mcp-awareness on holodeck.
-# Run from holodeck host (requires SSH access to app nodes and HAProxy socket).
+# Run from any host with SSH access to app nodes and HAProxy.
 # Usage: deploy.sh hot              — rolling code update, zero-downtime
 #        deploy.sh maintenance      — full stop, migrate, restart (scheduled)
 set -euo pipefail
