@@ -11,70 +11,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.15.0] - 2026-04-07
 
 ### Added
-- **OAuth proxy workaround**: feature-gated middleware (`AWARENESS_OAUTH_PROXY=true`) that proxies `/authorize`, `/token`, `/register` to the external OAuth provider (e.g. WorkOS) — works around Claude Desktop/Claude.ai bugs that ignore external auth endpoints
-- **OAuth proxy rate limiting**: per-IP sliding window rate limits with auto-ban for bogus requests (injection patterns, wrong HTTP methods, missing required params)
-- **OAuth proxy health stats**: `/health` endpoint includes `oauth_proxy` section with completed flows, raw hits, rate-limited counts, and banned IP counts — enables detection of when upstream bugs are fixed
-- **Configurable IP resolution**: `AWARENESS_OAUTH_PROXY_IP_HEADERS` env var for infrastructure-portable client IP detection (default: `CF-Connecting-IP,X-Real-IP`)
-- **OAuth staging compose**: `docker-compose.oauth.yaml` for isolated OAuth/WorkOS AuthKit testing with separate Postgres, Cloudflare tunnel, and optional Ollama — runs on port 8421 alongside production
-- **OAuth env template**: `.env.oauth.example` with all required/optional variables for staging deployment
-- **Gzip response compression**: HTTP transport compresses non-SSE responses over 500 bytes via Starlette GZipMiddleware — applies to health checks and JSON endpoints; MCP tool responses use SSE (`text/event-stream`) which Starlette excludes from compression, so rely on Cloudflare or reverse proxy for tool traffic compression (#112)
-- **Did-you-mean suggestions**: enum parameter errors include `suggestion` field and "Did you mean '...'?" in message when the supplied value is within edit distance 2 of a valid value (#142)
-- **Help URLs**: timestamp and content-type errors include reference URLs inline in message and as `help_url` field — ISO 8601 (Wikipedia), MIME types (MDN) (#142)
-- **Retryable flag**: every error includes `retryable: true/false` so agents know whether to retry or self-correct (#142)
-
-### Changed
-- **Default query limit reduced**: `DEFAULT_QUERY_LIMIT` lowered from 200 to 100 — reduces default response size for all paginated tools (#112)
-- **Pagination metadata**: all paginated tools now return `{entries, limit, offset, has_more}` instead of a bare list — agents can detect when more data exists without a separate count query (#112)
-- **Structured error responses**: all tool errors now return `{"status": "error", "error": {"code", "message", "retryable", ...}}` with contextual fields (`param`, `value`, `valid`, `suggestion`, `help_url`) instead of flat strings — enables smart rendering by any consumer (#142)
-- **MCP isError flag**: tool errors now raise `ToolError` so the MCP SDK sets `isError: true` on `CallToolResult` — clients that support error styling can use this signal (#142)
-
-### Security
-- **JWT issued-at validation**: both self-signed and OAuth token paths now reject tokens with future `iat` claims via `verify_iat: True` — prevents acceptance of not-yet-valid tokens
-
-### Fixed
-- **JSON content rejected by Pydantic validation**: `remember` and `update_entry` now accept `dict` and `list` content in addition to `str` — fixes `string_type` validation error when MCP transport auto-parses JSON strings before they reach the handler (#130)
-
-### Documentation
-- **Migration backfill notes**: added performance advisory comments to `f1a2b3c4d5e6` (owner_id backfill) and `h3c4d5e6f7g8` (updated nullability backfill) migrations — for large tables (>100K rows), includes a batched UPDATE example to avoid long-held locks (MEDIUM #7)
-- **Hash stability**: documented embedding hash behavior in `embeddings.py` module docstring and function docstrings — explains that changes to `compose_embedding_text()` invalidate all stored hashes and trigger mass re-embedding (MEDIUM #22)
-- **Data dictionary**: expanded `text_hash` column description in `docs/data-dictionary.md` to explain staleness detection and mass re-embedding on composition changes
-
-### Changed
-- **`upsert_by_logical_key` single-connection refactor**: the INSERT, existing-row fetch, and conditional UPDATE now share a single pooled connection and transaction instead of acquiring up to 3 separate connections, reducing pool contention under concurrency (MEDIUM #2)
-- **Richer embedding text for preferences and status entries**: `compose_embedding_text()` now includes key/value/scope for preferences, metrics keys/values and inventory for status entries, and truncates long content to 500 chars — produces higher-quality embeddings for previously sparse entry types (MEDIUM #20)
-
-### Added
-- **JWKS auto-discovery**: when `AWARENESS_OAUTH_JWKS_URI` is not set, the server now fetches `<issuer>/.well-known/openid-configuration` to discover the correct `jwks_uri` before falling back to `<issuer>/.well-known/jwks.json` — fixes WorkOS compatibility (#126)
-- **OAuth user profile enrichment**: email and display_name populated from token claims on subsequent logins if missing
-- **Userinfo endpoint**: when access tokens lack `email`/`name` claims (e.g. WorkOS AuthKit), the server now calls the provider's OIDC userinfo endpoint to fetch identity fields for user resolution (#125)
-
-### Fixed
-- **Data dictionary: missing OAuth columns**: added `oauth_subject` and `oauth_issuer` columns to users table documentation (MEDIUM #24)
-- **Data dictionary: missing OAuth indexes**: added `ix_users_oauth_identity` and `ix_users_oauth_subject` indexes to users table documentation (MEDIUM #25)
-- **Data dictionary: missing intention state**: added `active` to intention `state` field's valid values to match `schema.py` INTENTION_STATES (MEDIUM #26)
-- **Data dictionary: entries `updated` nullability**: corrected `updated` column from NOT NULL to nullable, matching the actual schema (MEDIUM #27)
-- **Undocumented `AWARENESS_PUBLIC_URL`**: added to README, auth-setup.md, and data dictionary — required for correct `/.well-known/oauth-protected-resource` URLs behind reverse proxies (MEDIUM #28)
-
-### Removed
-- **Dead code**: removed unused `validate_entry_data` function from `schema.py` and its tests (MEDIUM #17)
-
-### Security
-- **Parameterized LIMIT clauses**: `get_reads`, `get_actions`, and `get_activity` now use bind parameters (`%s`) for LIMIT values instead of f-string interpolation, eliminating a fragile SQL construction pattern (MEDIUM #3)
-
-### Fixed
-- **Ollama response validation**: `OllamaEmbedding.embed()` now validates that the number of returned embeddings matches the number of input texts, raising `ValueError` on partial responses instead of silently dropping entries via `zip(strict=False)` (MEDIUM #21)
-- **Embedding upsert preserves `created`**: `upsert_embedding.sql` no longer overwrites the `created` timestamp on conflict — only the vector, hash, and dimensions are updated (MEDIUM #8)
-- **Alert expiry filter**: `get_active_alerts` and `get_all_active_alerts` now filter out expired alerts (`expires > NOW()`), matching the behavior of `get_active_suppressions` (MEDIUM #18)
-- **Intention lifecycle**: `generate_briefing` now transitions fired intentions from "pending" to "fired" state, preventing them from firing on every subsequent briefing read
-- **Custom prompt sync uses DEFAULT_OWNER**: `_sync_custom_prompts` now queries `DEFAULT_OWNER` instead of the request-scoped `_owner_id()`, preventing User A's prompt sync from leaking into User B's prompt registry in multi-tenant deployments (MEDIUM #14)
-- **Custom prompt sync debounce**: `_sync_custom_prompts` now skips the DB query if called again within 60 seconds, avoiding a round-trip on every `agent_instructions` invocation (MEDIUM #15)
-- **`semantic_search` empty-string guard**: add missing empty-string validation for `since` and `until` parameters — passing `""` now returns a clear error instead of a `ValueError` (MEDIUM #16)
-
-### Changed
-- **Fired intentions SQL filter**: `get_fired_intentions` now filters by `deliver_at` in the SQL WHERE clause instead of fetching all pending intentions and filtering in Python (MEDIUM #5)
-- **Cleanup logging**: replaced `print()` in `_do_cleanup` with `logger.error()` to use the module's logging infrastructure (MEDIUM #6)
-
-### Added
 - **OAuth 2.1 resource server**: provider-agnostic JWKS-based token validation for external OAuth providers (WorkOS, Auth0, Cloudflare Access, Keycloak, etc.)
 - **Dual auth**: self-signed JWTs (via CLI) and OAuth provider tokens both accepted — OAuth for interactive clients, self-signed for edge providers/scripts
 - **User auto-provisioning**: auto-create user record on first valid OAuth login (`AWARENESS_OAUTH_AUTO_PROVISION`, default: false for tighter control during early access)
@@ -90,18 +26,54 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Users table**: full user schema with email (+ canonical normalization for uniqueness), E.164 phone, argon2id password hash, timezone, preferences JSONB
 - **Owner isolation**: all store methods, tools, resources, and collator now thread `owner_id` — queries are scoped per-owner
 - **`AWARENESS_DEFAULT_OWNER`**: env var (falls back to system username) sets the default owner for stdio and unauthenticated HTTP
+- **OAuth proxy workaround**: feature-gated middleware (`AWARENESS_OAUTH_PROXY=true`) that proxies `/authorize`, `/token`, `/register` to the external OAuth provider (e.g. WorkOS) — works around Claude Desktop/Claude.ai bugs that ignore external auth endpoints
+- **OAuth proxy rate limiting**: per-IP sliding window rate limits with auto-ban for bogus requests (injection patterns, wrong HTTP methods, missing required params)
+- **OAuth proxy health stats**: `/health` endpoint includes `oauth_proxy` section with completed flows, raw hits, rate-limited counts, and banned IP counts — enables detection of when upstream bugs are fixed
+- **Configurable IP resolution**: `AWARENESS_OAUTH_PROXY_IP_HEADERS` env var for infrastructure-portable client IP detection (default: `CF-Connecting-IP,X-Real-IP`)
+- **OAuth staging compose**: `docker-compose.oauth.yaml` for isolated OAuth/WorkOS AuthKit testing with separate Postgres, Cloudflare tunnel, and optional Ollama — runs on port 8421 alongside production
+- **OAuth env template**: `.env.oauth.example` with all required/optional variables for staging deployment
+- **Gzip response compression**: HTTP transport compresses non-SSE responses over 500 bytes via Starlette GZipMiddleware — applies to health checks and JSON endpoints; MCP tool responses use SSE (`text/event-stream`) which Starlette excludes from compression, so rely on Cloudflare or reverse proxy for tool traffic compression (#112)
+- **Did-you-mean suggestions**: enum parameter errors include `suggestion` field and "Did you mean '...'?" in message when the supplied value is within edit distance 2 of a valid value (#142)
+- **Help URLs**: timestamp and content-type errors include reference URLs inline in message and as `help_url` field — ISO 8601 (Wikipedia), MIME types (MDN) (#142)
+- **Retryable flag**: every error includes `retryable: true/false` so agents know whether to retry or self-correct (#142)
+- **JWKS auto-discovery**: when `AWARENESS_OAUTH_JWKS_URI` is not set, the server now fetches `<issuer>/.well-known/openid-configuration` to discover the correct `jwks_uri` before falling back to `<issuer>/.well-known/jwks.json` — fixes WorkOS compatibility (#126)
+- **OAuth user profile enrichment**: email and display_name populated from token claims on subsequent logins if missing
+- **Userinfo endpoint**: when access tokens lack `email`/`name` claims (e.g. WorkOS AuthKit), the server now calls the provider's OIDC userinfo endpoint to fetch identity fields for user resolution (#125)
 
 ### Changed
 - **Briefing batch queries**: `generate_briefing` now uses 5 fixed queries instead of 3-4 per source (N+1 → batch), reducing DB round trips from 80+ to 5 for 20 sources
 - **Dependency version caps**: all runtime dependencies now have upper-bound constraints (e.g., `mcp[cli]>=1.0.0,<2.0`) to prevent breaking major version upgrades
 - **`entries.updated` nullable**: column is now NULL on insert, set only on actual updates — aligns with `users.updated` semantics; sort and filter queries use `COALESCE(updated, created)` for consistency
-
-### Security
-- **`cleanup_expired` RLS-safe**: background cleanup now uses `SET LOCAL row_security = off` so expired entries are cleaned regardless of RLS enforcement
-- **`clear()` scoped to owner**: `clear(owner_id)` deletes only that owner's data instead of truncating all tenants
-- **Argon2 time_cost bumped to 3**: stronger password hashing for new and changed passwords (existing hashes remain valid)
+- **Default query limit reduced**: `DEFAULT_QUERY_LIMIT` lowered from 200 to 100 — reduces default response size for all paginated tools (#112)
+- **Pagination metadata**: all paginated tools now return `{entries, limit, offset, has_more}` instead of a bare list — agents can detect when more data exists without a separate count query (#112)
+- **Structured error responses**: all tool errors now return `{"status": "error", "error": {"code", "message", "retryable", ...}}` with contextual fields (`param`, `value`, `valid`, `suggestion`, `help_url`) instead of flat strings — enables smart rendering by any consumer (#142)
+- **MCP isError flag**: tool errors now raise `ToolError` so the MCP SDK sets `isError: true` on `CallToolResult` — clients that support error styling can use this signal (#142)
+- **`upsert_by_logical_key` single-connection refactor**: the INSERT, existing-row fetch, and conditional UPDATE now share a single pooled connection and transaction instead of acquiring up to 3 separate connections, reducing pool contention under concurrency (MEDIUM #2)
+- **Richer embedding text for preferences and status entries**: `compose_embedding_text()` now includes key/value/scope for preferences, metrics keys/values and inventory for status entries, and truncates long content to 500 chars — produces higher-quality embeddings for previously sparse entry types (MEDIUM #20)
+- **Fired intentions SQL filter**: `get_fired_intentions` now filters by `deliver_at` in the SQL WHERE clause instead of fetching all pending intentions and filtering in Python (MEDIUM #5)
+- **Cleanup logging**: replaced `print()` in `_do_cleanup` with `logger.error()` to use the module's logging infrastructure (MEDIUM #6)
+- **Bearer scheme case-insensitive**: `AuthMiddleware` now accepts `bearer`, `Bearer`, `BEARER` per RFC 7235
+- **`AWARENESS_PUBLIC_URL`**: new env var for `/.well-known/oauth-protected-resource` resource URL — required for Cloudflare tunnel deployments where `0.0.0.0:8420` is not the public address
+- **docker-compose.yaml**: auth/OAuth env vars now passed through (AUTH_REQUIRED, JWT_SECRET, OAUTH_ISSUER, etc.)
+- **Dockerfile license**: corrected from `Apache-2.0` to `AGPL-3.0-or-later`
+- **Per-owner concurrency limit**: `AuthMiddleware` enforces max 3 concurrent requests per owner_id — prevents a single aggressive client from saturating the connection pool and DOSing other tenants (returns 429)
+- **Connection pool default**: bumped from 5 to 10 for multi-tenant deployments
+- **Sync DB I/O off event loop**: `_try_oauth` and `_resolve_user` now run in `asyncio.to_thread()` to avoid blocking the async event loop with sync psycopg calls
 
 ### Fixed
+- **JSON content rejected by Pydantic validation**: `remember` and `update_entry` now accept `dict` and `list` content in addition to `str` — fixes `string_type` validation error when MCP transport auto-parses JSON strings before they reach the handler (#130)
+- **Data dictionary: missing OAuth columns**: added `oauth_subject` and `oauth_issuer` columns to users table documentation (MEDIUM #24)
+- **Data dictionary: missing OAuth indexes**: added `ix_users_oauth_identity` and `ix_users_oauth_subject` indexes to users table documentation (MEDIUM #25)
+- **Data dictionary: missing intention state**: added `active` to intention `state` field's valid values to match `schema.py` INTENTION_STATES (MEDIUM #26)
+- **Data dictionary: entries `updated` nullability**: corrected `updated` column from NOT NULL to nullable, matching the actual schema (MEDIUM #27)
+- **Undocumented `AWARENESS_PUBLIC_URL`**: added to README, auth-setup.md, and data dictionary — required for correct `/.well-known/oauth-protected-resource` URLs behind reverse proxies (MEDIUM #28)
+- **Ollama response validation**: `OllamaEmbedding.embed()` now validates that the number of returned embeddings matches the number of input texts, raising `ValueError` on partial responses instead of silently dropping entries via `zip(strict=False)` (MEDIUM #21)
+- **Embedding upsert preserves `created`**: `upsert_embedding.sql` no longer overwrites the `created` timestamp on conflict — only the vector, hash, and dimensions are updated (MEDIUM #8)
+- **Alert expiry filter**: `get_active_alerts` and `get_all_active_alerts` now filter out expired alerts (`expires > NOW()`), matching the behavior of `get_active_suppressions` (MEDIUM #18)
+- **Intention lifecycle**: `generate_briefing` now transitions fired intentions from "pending" to "fired" state, preventing them from firing on every subsequent briefing read
+- **Custom prompt sync uses DEFAULT_OWNER**: `_sync_custom_prompts` now queries `DEFAULT_OWNER` instead of the request-scoped `_owner_id()`, preventing User A's prompt sync from leaking into User B's prompt registry in multi-tenant deployments (MEDIUM #14)
+- **Custom prompt sync debounce**: `_sync_custom_prompts` now skips the DB query if called again within 60 seconds, avoiding a round-trip on every `agent_instructions` invocation (MEDIUM #15)
+- **`semantic_search` empty-string guard**: add missing empty-string validation for `since` and `until` parameters — passing `""` now returns a clear error instead of a `ValueError` (MEDIUM #16)
 - **`update_intention_state` owner isolation**: SQL WHERE clause now enforces `owner_id`, consistent with all other UPDATE statements (defense-in-depth alongside RLS)
 - **`upsert_alert` race condition**: rewritten to use single connection with `pg_advisory_xact_lock` + `SELECT FOR UPDATE`, eliminating TOCTOU duplicate/lost-update window
 - **`upsert_preference` race condition**: rewritten to use single connection with `pg_advisory_xact_lock` + `SELECT FOR UPDATE`, eliminating TOCTOU duplicate/lost-update window
@@ -114,7 +86,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **PR label automation**: added explicit `checks: read` permission
 - **PR label automation**: `on-ci-pass` now finds PRs from dependabot and other non-default branches by falling back to head branch search when the `pull_requests` array is empty
 
+### Removed
+- **Dead code**: removed unused `validate_entry_data` function from `schema.py` and its tests (MEDIUM #17)
+
 ### Security
+- **JWT issued-at validation**: both self-signed and OAuth token paths now reject tokens with future `iat` claims via `verify_iat: True` — prevents acceptance of not-yet-valid tokens
+- **Parameterized LIMIT clauses**: `get_reads`, `get_actions`, and `get_activity` now use bind parameters (`%s`) for LIMIT values instead of f-string interpolation, eliminating a fragile SQL construction pattern (MEDIUM #3)
+- **`cleanup_expired` RLS-safe**: background cleanup now uses `SET LOCAL row_security = off` so expired entries are cleaned regardless of RLS enforcement
+- **`clear()` scoped to owner**: `clear(owner_id)` deletes only that owner's data instead of truncating all tenants
+- **Argon2 time_cost bumped to 3**: stronger password hashing for new and changed passwords (existing hashes remain valid)
 - **Auth exception logging**: `_try_oauth` and `_resolve_user` now log warnings on failure instead of silently swallowing exceptions — operators get visibility into OAuth/user-resolution errors
 - **Password hash excluded from GDPR export**: `mcp-awareness-user export` now uses explicit column list instead of `SELECT *` — password hashes are no longer included in export output
 - **Semantic search limit clamped**: `semantic_search` limit parameter now clamped to 1–100 range, preventing unbounded result sets
@@ -125,16 +105,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **OAuth canonical_email matching**: auto-provisioning and identity linking now use `canonical_email` (strips Gmail dots/+tags) — prevents duplicate accounts from email variants
 - **AuthMiddleware default**: `auto_provision` parameter defaults to `False` (was `True`) — prevents accidental auto-provisioning when instantiated directly
 
-### Changed
-- **Bearer scheme case-insensitive**: `AuthMiddleware` now accepts `bearer`, `Bearer`, `BEARER` per RFC 7235
-- **`AWARENESS_PUBLIC_URL`**: new env var for `/.well-known/oauth-protected-resource` resource URL — required for Cloudflare tunnel deployments where `0.0.0.0:8420` is not the public address
-- **docker-compose.yaml**: auth/OAuth env vars now passed through (AUTH_REQUIRED, JWT_SECRET, OAUTH_ISSUER, etc.)
-- **Dockerfile license**: corrected from `Apache-2.0` to `AGPL-3.0-or-later`
-- **Per-owner concurrency limit**: `AuthMiddleware` enforces max 3 concurrent requests per owner_id — prevents a single aggressive client from saturating the connection pool and DOSing other tenants (returns 429)
-- **Connection pool default**: bumped from 5 to 10 for multi-tenant deployments
-- **Sync DB I/O off event loop**: `_try_oauth` and `_resolve_user` now run in `asyncio.to_thread()` to avoid blocking the async event loop with sync psycopg calls
-
 ### Documentation
+- **Migration backfill notes**: added performance advisory comments to `f1a2b3c4d5e6` (owner_id backfill) and `h3c4d5e6f7g8` (updated nullability backfill) migrations — for large tables (>100K rows), includes a batched UPDATE example to avoid long-held locks (MEDIUM #7)
+- **Hash stability**: documented embedding hash behavior in `embeddings.py` module docstring and function docstrings — explains that changes to `compose_embedding_text()` invalidate all stored hashes and trigger mass re-embedding (MEDIUM #22)
+- **Data dictionary**: expanded `text_hash` column description in `docs/data-dictionary.md` to explain staleness detection and mass re-embedding on composition changes
 - **Auth setup guide** (`docs/auth-setup.md`): JWT authentication, OAuth 2.1, CLI tools reference, user provisioning, WorkOS walkthrough, known limitations
 - **README**: auth/OAuth env vars tables, CLI tools, security section rewritten (4-layer table), test count 383→490, removed stale "not yet implemented" auth line
 - **CLAUDE.md**: architecture file tree updated with all 16 modules (added tools.py, resources.py, prompts.py, helpers.py, migrate.py, instructions.md, sql/), server.py description corrected, mcp-awareness-migrate CLI added
