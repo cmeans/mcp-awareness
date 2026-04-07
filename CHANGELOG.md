@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-04-07
+
 ### Added
 - **OAuth proxy workaround**: feature-gated middleware (`AWARENESS_OAUTH_PROXY=true`) that proxies `/authorize`, `/token`, `/register` to the external OAuth provider (e.g. WorkOS) — works around Claude Desktop/Claude.ai bugs that ignore external auth endpoints
 - **OAuth proxy rate limiting**: per-IP sliding window rate limits with auto-ban for bogus requests (injection patterns, wrong HTTP methods, missing required params)
@@ -470,7 +472,8 @@ Initial implementation.
 - **Dockerfile** for container deployment
 - Design docs: core spec and collation layer
 
-[Unreleased]: https://github.com/cmeans/mcp-awareness/compare/v0.14.0...HEAD
+[Unreleased]: https://github.com/cmeans/mcp-awareness/compare/v0.15.0...HEAD
+[0.15.0]: https://github.com/cmeans/mcp-awareness/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/cmeans/mcp-awareness/compare/v0.12.0...v0.14.0
 [0.12.0]: https://github.com/cmeans/mcp-awareness/compare/v0.11.2...v0.12.0
 [0.11.2]: https://github.com/cmeans/mcp-awareness/compare/v0.11.1...v0.11.2
