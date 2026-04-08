@@ -158,9 +158,11 @@ EOF
 
 - [ ] **Step 7: Configure authentication**
 
-Edit `/etc/postgresql/17/main/pg_hba.conf` — add this line before any existing `host` rules:
+Edit `/etc/postgresql/17/main/pg_hba.conf` — add this line before any existing `host` rules.
+Use `all` for the database field so the `awareness` user can access any database it owns
+(e.g., `awareness`, `awareness_sessions`, `postgres` for auto-create):
 ```bash
-echo "host    awareness    awareness    192.168.200.0/24    scram-sha-256" >> /etc/postgresql/17/main/pg_hba.conf
+echo "host    all    awareness    192.168.200.0/24    scram-sha-256" >> /etc/postgresql/17/main/pg_hba.conf
 ```
 
 - [ ] **Step 8: Restart Postgres**
