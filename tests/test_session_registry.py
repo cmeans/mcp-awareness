@@ -1276,6 +1276,41 @@ class TestCreateDatabaseSqlIntegrity:
             f"(including those in comments). Must be exactly 1."
         )
 
+    def test_ensure_database_rejects_multiple_placeholders(self, pg_container: Any) -> None:
+        """_ensure_database fails safely when SQL has multiple {} placeholders."""
+        from mcp_awareness.session_registry import _sql_cache
+
+        base_url = pg_container.get_connection_url().replace(
+            "postgresql+psycopg2://", "postgresql://"
+        )
+        from psycopg import conninfo
+
+        params = conninfo.conninfo_to_dict(base_url)
+        params["dbname"] = "should_not_exist"
+        test_dsn = conninfo.make_conninfo(**params)
+
+        original = _sql_cache.get("session_create_database")
+        try:
+            _sql_cache["session_create_database"] = "-- {} comment\nCREATE DATABASE {}"
+            # ValueError is caught by the except block — DB should not be created
+            SessionStore._ensure_database(test_dsn)
+
+            import psycopg
+
+            admin_params = {**params, "dbname": "postgres"}
+            admin_dsn = conninfo.make_conninfo(**admin_params)
+            with psycopg.connect(admin_dsn, autocommit=True) as conn, conn.cursor() as cur:
+                cur.execute(
+                    "SELECT 1 FROM pg_database WHERE datname = %s",
+                    ("should_not_exist",),
+                )
+                assert cur.fetchone() is None, "DB should not have been created"
+        finally:
+            if original is not None:
+                _sql_cache["session_create_database"] = original
+            else:
+                _sql_cache.pop("session_create_database", None)
+
 
 # ---------------------------------------------------------------------------
 # Integration tests — real FastMCP + SessionRegistryMiddleware
