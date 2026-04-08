@@ -234,6 +234,7 @@ The server is running on port 8420. Point any MCP client at `http://localhost:84
 | `AWARENESS_OAUTH_PROXY_RATE_AUTHORIZE` | `60` | Max `/authorize` requests per minute per IP |
 | `AWARENESS_OAUTH_PROXY_RATE_TOKEN` | `60` | Max `/token` requests per minute per IP |
 | `AWARENESS_OAUTH_PROXY_RATE_REGISTER` | `30` | Max `/register` requests per minute per IP |
+| `AWARENESS_OAUTH_PROXY_RATE_WINDOW` | `60` | Rate limit sliding window in seconds |
 | `AWARENESS_PUBLIC_URL` | _(empty)_ | Public base URL for this server (e.g., `https://mcpawareness.com`). Required when behind a reverse proxy or Cloudflare Tunnel so that `/.well-known/oauth-protected-resource` returns the correct `resource` URL. |
 
 See the [Auth Setup Guide](docs/auth-setup.md) for complete configuration instructions.

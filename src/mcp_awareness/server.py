@@ -97,6 +97,7 @@ MAX_CONCURRENT_PER_OWNER = int(os.environ.get("AWARENESS_MAX_CONCURRENT_PER_OWNE
 OAUTH_PROXY_RATE_AUTHORIZE = int(os.environ.get("AWARENESS_OAUTH_PROXY_RATE_AUTHORIZE", "60"))
 OAUTH_PROXY_RATE_TOKEN = int(os.environ.get("AWARENESS_OAUTH_PROXY_RATE_TOKEN", "60"))
 OAUTH_PROXY_RATE_REGISTER = int(os.environ.get("AWARENESS_OAUTH_PROXY_RATE_REGISTER", "30"))
+OAUTH_PROXY_RATE_WINDOW = int(os.environ.get("AWARENESS_OAUTH_PROXY_RATE_WINDOW", "60"))
 OAUTH_PROXY_IP_HEADERS = [
     h.strip()
     for h in os.environ.get("AWARENESS_OAUTH_PROXY_IP_HEADERS", "CF-Connecting-IP,X-Real-IP").split(
@@ -511,6 +512,7 @@ def _wrap_with_oauth_proxy(app: Any) -> Any:
                 "/token": OAUTH_PROXY_RATE_TOKEN,
                 "/register": OAUTH_PROXY_RATE_REGISTER,
             },
+            rate_window=OAUTH_PROXY_RATE_WINDOW,
         )
         logger.info("OAuth proxy: enabled — intercepting /authorize, /token, /register")
         return _oauth_proxy

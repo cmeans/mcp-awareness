@@ -279,6 +279,7 @@ class OAuthProxyMiddleware:
         ban_duration: int = 3600,
         ip_headers: list[str] | None = None,
         rate_limits: dict[str, int] | None = None,
+        rate_window: int = 60,
     ) -> None:
         self._app = app
         self._endpoints = endpoints
@@ -288,17 +289,17 @@ class OAuthProxyMiddleware:
         self._rate_limiters: dict[str, RateLimiter] = {
             "/authorize": RateLimiter(
                 max_requests=limits.get("/authorize", 60),
-                window_seconds=60,
+                window_seconds=rate_window,
                 ban_duration=ban_duration,
             ),
             "/token": RateLimiter(
                 max_requests=limits.get("/token", 60),
-                window_seconds=60,
+                window_seconds=rate_window,
                 ban_duration=ban_duration,
             ),
             "/register": RateLimiter(
                 max_requests=limits.get("/register", 30),
-                window_seconds=60,
+                window_seconds=rate_window,
                 ban_duration=ban_duration,
             ),
         }
