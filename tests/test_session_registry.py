@@ -95,3 +95,62 @@ class TestSessionStoreRegisterLookup:
         )
         assert short_store.lookup("sess-expired") is None
         short_store.close()
+
+
+class TestSessionStoreTouchInvalidateCount:
+    """Tests for touch, invalidate, and count_active."""
+
+    def _register_session(self, store: SessionStore, session_id: str = "sess-1") -> None:
+        store.register(
+            session_id=session_id,
+            owner_id=TEST_OWNER,
+            node="app-a",
+            protocol_version="2025-03-26",
+            capabilities={},
+            client_info={},
+        )
+
+    def test_touch_extends_expiry(self, session_store: SessionStore) -> None:
+        """Touch extends the expires_at timestamp."""
+        self._register_session(session_store)
+        before = session_store.lookup("sess-1")
+        assert before is not None
+        original_expires = before["expires_at"]
+        session_store.touch("sess-1")
+        after = session_store.lookup("sess-1")
+        assert after is not None
+        assert after["expires_at"] >= original_expires
+
+    def test_touch_nonexistent_is_noop(self, session_store: SessionStore) -> None:
+        """Touch on a nonexistent session does not raise."""
+        session_store.touch("does-not-exist")
+
+    def test_invalidate(self, session_store: SessionStore) -> None:
+        """Invalidated session is no longer returned by lookup."""
+        self._register_session(session_store)
+        assert session_store.lookup("sess-1") is not None
+        session_store.invalidate("sess-1")
+        assert session_store.lookup("sess-1") is None
+
+    def test_count_active(self, session_store: SessionStore) -> None:
+        """count_active returns the number of non-expired sessions for an owner."""
+        assert session_store.count_active(TEST_OWNER) == 0
+        self._register_session(session_store, "sess-1")
+        self._register_session(session_store, "sess-2")
+        assert session_store.count_active(TEST_OWNER) == 2
+        session_store.invalidate("sess-1")
+        assert session_store.count_active(TEST_OWNER) == 1
+
+    def test_count_active_ignores_other_owners(self, session_store: SessionStore) -> None:
+        """count_active only counts sessions for the specified owner."""
+        self._register_session(session_store, "sess-1")
+        session_store.register(
+            session_id="sess-other",
+            owner_id="other-owner",
+            node="app-a",
+            protocol_version="2025-03-26",
+            capabilities={},
+            client_info={},
+        )
+        assert session_store.count_active(TEST_OWNER) == 1
+        assert session_store.count_active("other-owner") == 1

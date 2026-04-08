@@ -101,6 +101,23 @@ class SessionStore:
             cur.execute(_load_sql("session_lookup"), (session_id,))
             return cur.fetchone()
 
+    def touch(self, session_id: str) -> None:
+        """Update last_seen and extend expires_at (sliding window)."""
+        with self._pool.connection() as conn, conn.transaction(), conn.cursor() as cur:
+            cur.execute(_load_sql("session_touch"), (self.ttl_seconds, session_id))
+
+    def invalidate(self, session_id: str) -> None:
+        """Mark a session as expired (immediate)."""
+        with self._pool.connection() as conn, conn.transaction(), conn.cursor() as cur:
+            cur.execute(_load_sql("session_invalidate"), (session_id,))
+
+    def count_active(self, owner_id: str) -> int:
+        """Count non-expired sessions for an owner."""
+        with self._pool.connection() as conn, conn.cursor() as cur:
+            cur.execute(_load_sql("session_count_active"), (owner_id,))
+            row = cur.fetchone()
+            return row["cnt"] if row else 0
+
     def close(self) -> None:
         """Close the connection pool."""
         self._pool.close()
