@@ -399,8 +399,10 @@ class SessionRegistryMiddleware:
 
         await self.app(scope, replay_receive, capturing_send)
 
-        # Re-init if FastMCP returned 400 and session is in registry (cross-node)
-        if captured_status == 400 and session is not None:
+        # Re-init if FastMCP rejected the session and it exists in registry (cross-node).
+        # SDK returns 400 (session manager level) or 404 (transport level) depending
+        # on the code path and SDK version — handle both.
+        if captured_status in (400, 404) and session is not None:
             logger.info(
                 "Session %s in registry but not in FastMCP — re-initializing",
                 session_id,
