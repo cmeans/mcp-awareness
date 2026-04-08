@@ -490,8 +490,8 @@ class SessionRegistryMiddleware:
                 return {"type": "http.request", "body": init_body}
             # Block until cancelled — SSE disconnect detection needs a live
             # receive, not a fake http.disconnect which aborts the stream.
-            await anyio.sleep_forever()
-            return {"type": "http.disconnect"}  # unreachable; satisfies type checker
+            while True:
+                await anyio.sleep(3600)
 
         async def init_send(message: Message) -> None:
             nonlocal init_status, init_headers
@@ -537,8 +537,8 @@ class SessionRegistryMiddleware:
                 replay_body_sent = True
                 return {"type": "http.request", "body": original_body}
             # Block until cancelled — see init_receive comment above.
-            await anyio.sleep_forever()
-            return {"type": "http.disconnect"}  # unreachable; satisfies type checker
+            while True:
+                await anyio.sleep(3600)
 
         async def replay_send(message: Message) -> None:
             if message["type"] == "http.response.start":
