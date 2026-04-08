@@ -922,3 +922,241 @@ class TestMiddlewareGracefulDegradation:
 
         # Passes through to FastMCP
         assert status == 200
+
+
+class TestCoverageEdgeCases:
+    """Edge-case tests targeting previously uncovered lines."""
+
+    def test_schedule_cleanup_skips_when_thread_alive(self, session_store: SessionStore) -> None:
+        """_schedule_cleanup is a no-op when cleanup thread is still running."""
+        import threading
+
+        # Force last_cleanup to 0 so debounce doesn't block
+        session_store._last_cleanup = 0.0
+        # Create a fake alive thread
+        event = threading.Event()
+        session_store._cleanup_thread = threading.Thread(target=event.wait, daemon=True)
+        session_store._cleanup_thread.start()
+        try:
+            old_time = session_store._last_cleanup
+            session_store._schedule_cleanup()
+            # Should not have updated _last_cleanup (thread still alive)
+            assert session_store._last_cleanup == old_time
+        finally:
+            event.set()
+            session_store._cleanup_thread.join(timeout=1)
+
+    def test_do_cleanup_logs_exception(self, session_store: SessionStore) -> None:
+        """_do_cleanup catches and logs exceptions."""
+        from unittest.mock import patch
+
+        with patch.object(session_store, "cleanup_expired", side_effect=Exception("boom")):
+            session_store._do_cleanup()  # Should not raise
+
+    @pytest.mark.anyio
+    async def test_initialize_with_malformed_body(self, session_store: SessionStore) -> None:
+        """Initialize works even with non-JSON body (metadata extraction fails gracefully)."""
+        inner = await _make_fastmcp_stub(session_id="sess-badjson")
+        mw = SessionRegistryMiddleware(inner, session_store, node_name="app-a")
+        scope = _mcp_post_scope()
+        from mcp_awareness.server import _owner_ctx
+
+        token = _owner_ctx.set("test-owner")
+        try:
+            status, _, _ = await _collect_response(mw, scope, b"not json at all")
+        finally:
+            _owner_ctx.reset(token)
+        assert status == 200
+        # Session registered but with empty metadata
+        session = session_store.lookup("sess-badjson")
+        assert session is not None
+        assert session["capabilities"] == {}
+        assert session["client_info"] == {}
+
+    @pytest.mark.anyio
+    async def test_subsequent_redirect_lookup_failure(self, session_store: SessionStore) -> None:
+        """When redirect lookup fails, session is treated as not found (pass through)."""
+        from unittest.mock import patch
+
+        inner = await _make_fastmcp_stub(status=400)
+        mw = SessionRegistryMiddleware(inner, session_store, node_name="app-a")
+        scope = _mcp_post_scope(session_id="sess-redir-fail")
+        from mcp_awareness.server import _owner_ctx
+
+        # Session not in registry, redirect lookup will throw
+        with patch.object(session_store, "redirect_lookup", side_effect=Exception("DB down")):
+            token = _owner_ctx.set("test-owner")
+            try:
+                status, _, _ = await _collect_response(mw, scope)
+            finally:
+                _owner_ctx.reset(token)
+        # Should pass through to FastMCP
+        assert status == 400
+
+    @pytest.mark.anyio
+    async def test_subsequent_redirect_target_lookup_failure(
+        self, session_store: SessionStore
+    ) -> None:
+        """When redirect target lookup fails, pass through to FastMCP."""
+        from unittest.mock import patch
+
+        session_store.add_redirect("old-redir-sess", "target-sess")
+        inner = await _make_fastmcp_stub(status=400)
+        mw = SessionRegistryMiddleware(inner, session_store, node_name="app-a")
+        scope = _mcp_post_scope(session_id="old-redir-sess")
+        from mcp_awareness.server import _owner_ctx
+
+        # Patch lookup: return None first (triggering redirect path), then throw on redirect target
+        call_count = 0
+
+        def failing_lookup(sid: str) -> dict | None:
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return None  # Initial lookup — not found
+            raise Exception("DB down on redirect target")
+
+        with patch.object(session_store, "lookup", side_effect=failing_lookup):
+            token = _owner_ctx.set("test-owner")
+            try:
+                status, _, _ = await _collect_response(mw, scope)
+            finally:
+                _owner_ctx.reset(token)
+        assert status == 400
+
+    @pytest.mark.anyio
+    async def test_reinit_no_session_id_in_init_response(self, session_store: SessionStore) -> None:
+        """Re-init fails if synthetic initialize response has no session_id header."""
+        session_store.register(
+            session_id="sess-no-header",
+            owner_id="test-owner",
+            node="app-a",
+            protocol_version="2025-03-26",
+            capabilities={},
+            client_info={},
+        )
+        call_count = 0
+
+        async def no_header_app(scope: Any, receive: Any, send: Any) -> None:
+            nonlocal call_count
+            call_count += 1
+            while True:
+                msg = await receive()
+                if msg.get("type") == "http.request" and not msg.get("more_body", False):
+                    break
+            if call_count == 1:
+                await send(
+                    {
+                        "type": "http.response.start",
+                        "status": 400,
+                        "headers": [(b"content-type", b"text/plain")],
+                    }
+                )
+                await send({"type": "http.response.body", "body": b"Bad Request"})
+            else:
+                # Init succeeds but NO mcp-session-id header
+                await send(
+                    {
+                        "type": "http.response.start",
+                        "status": 200,
+                        "headers": [(b"content-type", b"application/json")],
+                    }
+                )
+                await send(
+                    {
+                        "type": "http.response.body",
+                        "body": b'{"jsonrpc":"2.0","id":1,"result":{}}',
+                    }
+                )
+
+        mw = SessionRegistryMiddleware(no_header_app, session_store, node_name="app-a")
+        scope = _mcp_post_scope(session_id="sess-no-header")
+        from mcp_awareness.server import _owner_ctx
+
+        token = _owner_ctx.set("test-owner")
+        try:
+            status, _, _ = await _collect_response(mw, scope)
+        finally:
+            _owner_ctx.reset(token)
+        # Re-init failed — original 400 returned
+        assert status == 400
+
+    @pytest.mark.anyio
+    async def test_terminate_exception_during_cleanup(self, session_store: SessionStore) -> None:
+        """Terminate passes through even if registry cleanup fails."""
+        from unittest.mock import patch
+
+        session_store.register(
+            session_id="sess-term-fail",
+            owner_id="test-owner",
+            node="app-a",
+            protocol_version="2025-03-26",
+            capabilities={},
+            client_info={},
+        )
+        inner = await _make_fastmcp_stub()
+        mw = SessionRegistryMiddleware(inner, session_store, node_name="app-a")
+        scope = {
+            "type": "http",
+            "method": "DELETE",
+            "path": "/mcp",
+            "headers": [(b"mcp-session-id", b"sess-term-fail")],
+        }
+        from mcp_awareness.server import _owner_ctx
+
+        with patch.object(session_store, "invalidate", side_effect=Exception("DB down")):
+            token = _owner_ctx.set("test-owner")
+            try:
+                status, _, _ = await _collect_response(mw, scope)
+            finally:
+                _owner_ctx.reset(token)
+        assert status == 200  # Pass through succeeded
+
+    @pytest.mark.anyio
+    async def test_touch_exception_swallowed(self, session_store: SessionStore) -> None:
+        """Touch failure is logged but doesn't affect the response."""
+        from unittest.mock import patch
+
+        session_store.register(
+            session_id="sess-touch-fail",
+            owner_id="test-owner",
+            node="app-a",
+            protocol_version="2025-03-26",
+            capabilities={},
+            client_info={},
+        )
+        inner = await _make_fastmcp_stub(session_id="sess-touch-fail")
+        mw = SessionRegistryMiddleware(inner, session_store, node_name="app-a")
+        scope = _mcp_post_scope(session_id="sess-touch-fail")
+        from mcp_awareness.server import _owner_ctx
+
+        with patch.object(session_store, "touch", side_effect=Exception("DB down")):
+            token = _owner_ctx.set("test-owner")
+            try:
+                status, _, _ = await _collect_response(mw, scope)
+            finally:
+                _owner_ctx.reset(token)
+        assert status == 200
+
+    @pytest.mark.anyio
+    async def test_buffer_body_handles_disconnect(self, session_store: SessionStore) -> None:
+        """_buffer_body handles http.disconnect gracefully."""
+
+        async def disconnect_receive() -> dict:
+            return {"type": "http.disconnect"}
+
+        body, replay = await SessionRegistryMiddleware._buffer_body(disconnect_receive)
+        assert body == b""
+        # Replay after exhaustion returns disconnect
+        msg = await replay()
+        assert msg["type"] == "http.disconnect"
+        # Second call to replay — StopIteration path
+        msg2 = await replay()
+        assert msg2["type"] == "http.disconnect"
+
+    def test_extract_session_id_missing(self, session_store: SessionStore) -> None:
+        """_extract_session_id returns None when header is absent."""
+        result = SessionRegistryMiddleware._extract_session_id(
+            [(b"content-type", b"application/json")]
+        )
+        assert result is None
