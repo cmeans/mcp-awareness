@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 from typing import Any
 
@@ -33,11 +34,12 @@ def session_store(pg_dsn):
     """Fresh SessionStore for each test."""
     store = SessionStore(pg_dsn, ttl_seconds=300)
     yield store
-    # Clean up all sessions after each test
-    with store._pool.connection() as conn, conn.cursor() as cur:
+    # Clean up if pool is still open (some tests close it to test degradation)
+    with contextlib.suppress(Exception), store._pool.connection() as conn, conn.cursor() as cur:
         cur.execute("DELETE FROM session_redirects")
         cur.execute("DELETE FROM session_registry")
-    store.close()
+    with contextlib.suppress(Exception):
+        store.close()
 
 
 class TestSessionStoreSchema:
@@ -780,4 +782,69 @@ class TestMiddlewareSessionLimits:
             status, _, _ = await _collect_response(mw, scope, body)
         finally:
             _owner_ctx.reset(token)
+        assert status == 200
+
+
+class TestMiddlewareGracefulDegradation:
+    """Tests for graceful degradation when session DB is unreachable."""
+
+    @pytest.mark.anyio
+    async def test_initialize_works_when_store_fails(
+        self,
+        session_store: SessionStore,
+    ) -> None:
+        """Initialize passes through even if registry write fails."""
+        inner = await _make_fastmcp_stub(session_id="sess-degraded")
+        mw = SessionRegistryMiddleware(inner, session_store, node_name="app-a")
+
+        # Close the pool to simulate DB unreachable
+        session_store._pool.close()
+
+        scope = _mcp_post_scope()
+        body = json.dumps(
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "initialize",
+                "params": {
+                    "protocolVersion": "2025-03-26",
+                    "capabilities": {},
+                    "clientInfo": {},
+                },
+            }
+        ).encode()
+
+        from mcp_awareness.server import _owner_ctx
+
+        token = _owner_ctx.set("test-owner")
+        try:
+            status, _, _ = await _collect_response(mw, scope, body)
+        finally:
+            _owner_ctx.reset(token)
+
+        # FastMCP processed it, registry write failed silently
+        assert status == 200
+
+    @pytest.mark.anyio
+    async def test_subsequent_works_when_store_fails(
+        self,
+        session_store: SessionStore,
+    ) -> None:
+        """Subsequent requests pass through when registry lookup fails."""
+        inner = await _make_fastmcp_stub(session_id="sess-ok")
+        mw = SessionRegistryMiddleware(inner, session_store, node_name="app-a")
+
+        # Close the pool to simulate DB unreachable
+        session_store._pool.close()
+
+        scope = _mcp_post_scope(session_id="sess-any")
+        from mcp_awareness.server import _owner_ctx
+
+        token = _owner_ctx.set("test-owner")
+        try:
+            status, _, _ = await _collect_response(mw, scope)
+        finally:
+            _owner_ctx.reset(token)
+
+        # Passes through to FastMCP
         assert status == 200
