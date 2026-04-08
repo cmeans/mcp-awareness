@@ -107,6 +107,14 @@ EMBEDDING_MODEL = os.environ.get("AWARENESS_EMBEDDING_MODEL", "nomic-embed-text"
 OLLAMA_URL = os.environ.get("AWARENESS_OLLAMA_URL", "http://ollama:11434")
 EMBEDDING_DIMENSIONS = int(os.environ.get("AWARENESS_EMBEDDING_DIMENSIONS", "768"))
 
+# Session persistence — opt-in via AWARENESS_SESSION_DATABASE_URL
+SESSION_DATABASE_URL = os.environ.get("AWARENESS_SESSION_DATABASE_URL", "")
+SESSION_TTL = int(os.environ.get("AWARENESS_SESSION_TTL", "1800"))
+SESSION_POOL_MIN = int(os.environ.get("AWARENESS_SESSION_POOL_MIN", "1"))
+SESSION_POOL_MAX = int(os.environ.get("AWARENESS_SESSION_POOL_MAX", "5"))
+MAX_SESSIONS_PER_OWNER = int(os.environ.get("AWARENESS_MAX_SESSIONS_PER_OWNER", "10"))
+SESSION_NODE_NAME = os.environ.get("AWARENESS_SESSION_NODE_NAME", "")
+
 # ---------------------------------------------------------------------------
 # Owner context
 # ---------------------------------------------------------------------------
@@ -501,6 +509,34 @@ def _wrap_with_oauth_proxy(app: Any) -> Any:
     return app
 
 
+def _wrap_with_session_registry(app: Any) -> Any:
+    """Wrap an ASGI app with SessionRegistryMiddleware if configured."""
+    if not SESSION_DATABASE_URL:
+        return app
+
+    import socket
+
+    from mcp_awareness.session_registry import SessionRegistryMiddleware, SessionStore
+
+    node_name = SESSION_NODE_NAME or socket.gethostname()
+    session_store = SessionStore(
+        dsn=SESSION_DATABASE_URL,
+        ttl_seconds=SESSION_TTL,
+        min_pool=SESSION_POOL_MIN,
+        max_pool=SESSION_POOL_MAX,
+    )
+    logger.info(
+        "Session registry: enabled (node=%s, ttl=%ds, max_per_owner=%d)",
+        node_name, SESSION_TTL, MAX_SESSIONS_PER_OWNER,
+    )
+    return SessionRegistryMiddleware(
+        app,
+        session_store=session_store,
+        node_name=node_name,
+        max_sessions_per_owner=MAX_SESSIONS_PER_OWNER,
+    )
+
+
 def _run() -> None:
     if TRANSPORT == "streamable-http" and MOUNT_PATH:
         import uvicorn
@@ -512,6 +548,7 @@ def _run() -> None:
         )
 
         inner_app = mcp.streamable_http_app()
+        inner_app = _wrap_with_session_registry(inner_app)
         app: _ASGIApp = SecretPathMiddleware(inner_app, MOUNT_PATH, _health_response)
 
         if OAUTH_ISSUER:
@@ -543,6 +580,7 @@ def _run() -> None:
         from mcp_awareness.middleware import HealthMiddleware
 
         inner_app = mcp.streamable_http_app()
+        inner_app = _wrap_with_session_registry(inner_app)
         health_app: Any = HealthMiddleware(inner_app, _health_response)
 
         if OAUTH_ISSUER:
