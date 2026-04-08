@@ -95,7 +95,9 @@ class SessionStore:
                 if cur.fetchone():
                     return
                 cur.execute(
-                    psycopg.sql.SQL("CREATE DATABASE {}").format(psycopg.sql.Identifier(dbname))
+                    psycopg.sql.SQL(_load_sql("session_create_database").strip()).format(
+                        psycopg.sql.Identifier(dbname)
+                    )
                 )
                 logger.info("Created session database: %s", dbname)
         except Exception as exc:

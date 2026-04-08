@@ -300,7 +300,7 @@ if SESSION_DATABASE_URL:
 
 1. Create database on CT 200:
    ```sql
-   CREATE DATABASE awareness_sessions OWNER awareness;
+   CREATE DATABASE awareness_sessions OWNER awareness ENCODING 'UTF8' LC_COLLATE 'en_US.UTF-8' LC_CTYPE 'en_US.UTF-8' TEMPLATE template0;
    ```
 2. Add env vars to CT 210 and CT 211:
    ```bash
