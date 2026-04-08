@@ -478,3 +478,166 @@ class TestMiddlewareSubsequent:
                 assert mock_touch.call_count == 1  # debounced
             finally:
                 _owner_ctx.reset(token)
+
+
+class TestMiddlewareReinit:
+    """Tests for cross-node re-initialization."""
+
+    @pytest.mark.anyio
+    async def test_reinit_on_400_with_known_session(self, session_store: SessionStore) -> None:
+        """When FastMCP returns 400 for a known session, middleware re-initializes."""
+        session_store.register(
+            session_id="old-sess",
+            owner_id="test-owner",
+            node="app-a",
+            protocol_version="2025-03-26",
+            capabilities={"roots": {"listChanged": True}},
+            client_info={"name": "test-client", "version": "0.1"},
+        )
+
+        call_count = 0
+
+        async def reinit_app(scope: Any, receive: Any, send: Any) -> None:
+            nonlocal call_count
+            call_count += 1
+            while True:
+                msg = await receive()
+                if msg.get("type") == "http.request" and not msg.get("more_body", False):
+                    break
+
+            if call_count == 1:
+                # Original request — session not in local memory
+                await send(
+                    {
+                        "type": "http.response.start",
+                        "status": 400,
+                        "headers": [(b"content-type", b"text/plain")],
+                    }
+                )
+                await send(
+                    {
+                        "type": "http.response.body",
+                        "body": b"Bad Request: No valid session ID provided",
+                    }
+                )
+            elif call_count == 2:
+                # Synthetic initialize
+                await send(
+                    {
+                        "type": "http.response.start",
+                        "status": 200,
+                        "headers": [
+                            (b"content-type", b"application/json"),
+                            (b"mcp-session-id", b"reinit-new-sess"),
+                        ],
+                    }
+                )
+                await send(
+                    {
+                        "type": "http.response.body",
+                        "body": b'{"jsonrpc":"2.0","id":1,"result":{}}',
+                    }
+                )
+            else:
+                # Replayed original request
+                await send(
+                    {
+                        "type": "http.response.start",
+                        "status": 200,
+                        "headers": [
+                            (b"content-type", b"application/json"),
+                            (b"mcp-session-id", b"reinit-new-sess"),
+                        ],
+                    }
+                )
+                await send(
+                    {
+                        "type": "http.response.body",
+                        "body": b'{"jsonrpc":"2.0","id":2,"result":{"content":[]}}',
+                    }
+                )
+
+        mw = SessionRegistryMiddleware(reinit_app, session_store, node_name="app-b")
+        scope = _mcp_post_scope(session_id="old-sess")
+        body = json.dumps(
+            {
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "tools/call",
+                "params": {"name": "get_briefing"},
+            }
+        ).encode()
+
+        from mcp_awareness.server import _owner_ctx
+
+        token = _owner_ctx.set("test-owner")
+        try:
+            status, _resp_body, headers = await _collect_response(mw, scope, body)
+        finally:
+            _owner_ctx.reset(token)
+
+        assert status == 200
+        assert call_count == 3
+
+        # New session registered
+        new_session = session_store.lookup("reinit-new-sess")
+        assert new_session is not None
+        assert new_session["owner_id"] == "test-owner"
+        assert new_session["node"] == "app-b"
+
+        # Old session invalidated
+        assert session_store.lookup("old-sess") is None
+
+        # Redirect exists
+        assert session_store.redirect_lookup("old-sess") == "reinit-new-sess"
+
+        # Response carries new session_id
+        session_header = dict(headers).get(b"mcp-session-id", b"").decode()
+        assert session_header == "reinit-new-sess"
+
+    @pytest.mark.anyio
+    async def test_reinit_failure_returns_original_error(
+        self,
+        session_store: SessionStore,
+    ) -> None:
+        """If re-initialization itself fails, return the original 400."""
+        session_store.register(
+            session_id="failing-sess",
+            owner_id="test-owner",
+            node="app-a",
+            protocol_version="2025-03-26",
+            capabilities={},
+            client_info={},
+        )
+
+        async def always_400_app(scope: Any, receive: Any, send: Any) -> None:
+            while True:
+                msg = await receive()
+                if msg.get("type") == "http.request" and not msg.get("more_body", False):
+                    break
+            await send(
+                {
+                    "type": "http.response.start",
+                    "status": 400,
+                    "headers": [(b"content-type", b"text/plain")],
+                }
+            )
+            await send(
+                {
+                    "type": "http.response.body",
+                    "body": b"Bad Request: No valid session ID provided",
+                }
+            )
+
+        mw = SessionRegistryMiddleware(always_400_app, session_store, node_name="app-a")
+        scope = _mcp_post_scope(session_id="failing-sess")
+
+        from mcp_awareness.server import _owner_ctx
+
+        token = _owner_ctx.set("test-owner")
+        try:
+            status, _, _ = await _collect_response(mw, scope)
+        finally:
+            _owner_ctx.reset(token)
+
+        assert status == 400

@@ -314,10 +314,10 @@ class SessionRegistryMiddleware:
             await self._send_error(send, 403, "Forbidden: session owner mismatch")
             return
 
-        # Buffer body for potential re-init replay (Task 7 will use this)
-        _body, replay_receive = await self._buffer_body(receive)
+        # Buffer body for potential re-init replay
+        body, replay_receive = await self._buffer_body(receive)
 
-        # Pass through to FastMCP and capture response
+        # Pass through to FastMCP and capture response (don't send to client yet)
         captured_status = 0
         captured_response_parts: list[Message] = []
 
@@ -329,7 +329,18 @@ class SessionRegistryMiddleware:
 
         await self.app(scope, replay_receive, capturing_send)
 
-        # Send captured response to client
+        # Re-init if FastMCP returned 400 and session is in registry (cross-node)
+        if captured_status == 400 and session is not None:
+            logger.info(
+                "Session %s in registry but not in FastMCP — re-initializing",
+                session_id,
+            )
+            new_session_id = await self._reinitialize(scope, body, session, send)
+            if new_session_id:
+                return  # Re-init handled the response
+            logger.warning("Re-initialization failed for session %s", session_id)
+
+        # Send captured response to client (original or error)
         for part in captured_response_parts:
             await send(part)
 
@@ -337,6 +348,97 @@ class SessionRegistryMiddleware:
         if 200 <= captured_status < 300:
             self._debounced_touch(session_id)
             self.store._schedule_cleanup()
+
+    async def _reinitialize(
+        self,
+        original_scope: Scope,
+        original_body: bytes,
+        session: dict[str, Any],
+        client_send: Send,
+    ) -> str | None:
+        """Perform cross-node re-initialization.
+
+        Sends a synthetic initialize to FastMCP, registers the new session,
+        stores a redirect, invalidates the old session, and replays the
+        original request.
+
+        Returns the new session_id on success, None on failure.
+        """
+        old_session_id = session["session_id"]
+
+        # Step 1: Synthetic initialize
+        init_body = json.dumps(
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "initialize",
+                "params": {
+                    "protocolVersion": session.get("protocol_version", "2025-03-26"),
+                    "capabilities": session.get("capabilities", {}),
+                    "clientInfo": session.get("client_info", {}),
+                },
+            }
+        ).encode()
+
+        init_scope = dict(original_scope)
+        init_scope["headers"] = [
+            (k, v) for k, v in original_scope.get("headers", []) if k != b"mcp-session-id"
+        ]
+
+        init_status = 0
+        init_headers: list[tuple[bytes, bytes]] = []
+
+        async def init_receive() -> Message:
+            return {"type": "http.request", "body": init_body}
+
+        async def init_send(message: Message) -> None:
+            nonlocal init_status, init_headers
+            if message["type"] == "http.response.start":
+                init_status = message["status"]
+                init_headers = list(message.get("headers", []))
+
+        await self.app(init_scope, init_receive, init_send)
+
+        if init_status < 200 or init_status >= 300:
+            return None
+
+        new_session_id = self._extract_session_id(init_headers)
+        if not new_session_id:
+            return None
+
+        # Step 2: Register new, redirect old→new, invalidate old
+        owner_id = self._get_owner_id()
+        try:
+            self.store.register(
+                session_id=new_session_id,
+                owner_id=owner_id,
+                node=self.node_name,
+                protocol_version=session.get("protocol_version"),
+                capabilities=session.get("capabilities", {}),
+                client_info=session.get("client_info", {}),
+            )
+            self.store.add_redirect(old_session_id, new_session_id)
+            self.store.invalidate(old_session_id)
+            logger.info("Re-initialized session: %s → %s", old_session_id, new_session_id)
+        except Exception:
+            logger.error("Failed to persist re-init for %s", old_session_id, exc_info=True)
+
+        # Step 3: Replay original request with new session_id
+        replay_scope = self._rewrite_session_header(original_scope, new_session_id)
+
+        async def replay_receive() -> Message:
+            return {"type": "http.request", "body": original_body}
+
+        async def replay_send(message: Message) -> None:
+            if message["type"] == "http.response.start":
+                headers = [(k, v) for k, v in message.get("headers", []) if k != b"mcp-session-id"]
+                headers.append((b"mcp-session-id", new_session_id.encode()))
+                message = dict(message)
+                message["headers"] = headers
+            await client_send(message)
+
+        await self.app(replay_scope, replay_receive, replay_send)
+        return new_session_id
 
     async def _handle_terminate(
         self, scope: Scope, receive: Receive, send: Send, session_id: str | None
