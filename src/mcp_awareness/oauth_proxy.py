@@ -278,17 +278,30 @@ class OAuthProxyMiddleware:
         endpoints: dict[str, str | None],
         ban_duration: int = 3600,
         ip_headers: list[str] | None = None,
+        rate_limits: dict[str, int] | None = None,
+        rate_window: int = 60,
     ) -> None:
         self._app = app
         self._endpoints = endpoints
         self._ip_headers = ip_headers
         self._stats = ProxyStats()
+        limits = rate_limits or {}
         self._rate_limiters: dict[str, RateLimiter] = {
             "/authorize": RateLimiter(
-                max_requests=20, window_seconds=60, ban_duration=ban_duration
+                max_requests=limits.get("/authorize", 60),
+                window_seconds=rate_window,
+                ban_duration=ban_duration,
             ),
-            "/token": RateLimiter(max_requests=10, window_seconds=60, ban_duration=ban_duration),
-            "/register": RateLimiter(max_requests=5, window_seconds=60, ban_duration=ban_duration),
+            "/token": RateLimiter(
+                max_requests=limits.get("/token", 60),
+                window_seconds=rate_window,
+                ban_duration=ban_duration,
+            ),
+            "/register": RateLimiter(
+                max_requests=limits.get("/register", 30),
+                window_seconds=rate_window,
+                ban_duration=ban_duration,
+            ),
         }
         self._ip_header_miss_count = 0
         self._ip_header_warned = False

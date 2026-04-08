@@ -71,6 +71,7 @@ claude mcp add --transport http \
 | `AWARENESS_JWT_SECRET` | _(required for self-signed)_ | Signing secret for self-signed JWTs |
 | `AWARENESS_JWT_ALGORITHM` | `HS256` | JWT signing algorithm |
 | `AWARENESS_DEFAULT_OWNER` | _(system username)_ | Default owner_id for stdio and unauthenticated connections |
+| `AWARENESS_MAX_CONCURRENT_PER_OWNER` | `10` | Max concurrent requests per authenticated owner |
 
 ### OAuth provider
 

@@ -1512,6 +1512,10 @@ Add to the environment variables table:
 | `AWARENESS_OAUTH_PROXY` | `false` | Enable OAuth proxy workaround for Claude Desktop/Claude.ai |
 | `AWARENESS_OAUTH_PROXY_BAN_DURATION` | `3600` | Auto-ban duration (seconds) for bogus OAuth requests |
 | `AWARENESS_OAUTH_PROXY_IP_HEADERS` | `CF-Connecting-IP,X-Real-IP` | Trusted IP header priority chain |
+| `AWARENESS_OAUTH_PROXY_RATE_AUTHORIZE` | `60` | Max `/authorize` requests per window per IP |
+| `AWARENESS_OAUTH_PROXY_RATE_TOKEN` | `60` | Max `/token` requests per window per IP |
+| `AWARENESS_OAUTH_PROXY_RATE_REGISTER` | `30` | Max `/register` requests per window per IP |
+| `AWARENESS_OAUTH_PROXY_RATE_WINDOW` | `60` | Rate limit sliding window in seconds |
 ```
 
 - [ ] **Step 3: Update docker-compose.yaml**

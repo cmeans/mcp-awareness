@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Per-owner concurrency limit now configurable via `AWARENESS_MAX_CONCURRENT_PER_OWNER` (default raised from 3 to 10) — Claude.ai sends parallel MCP requests that exceeded the old limit, causing 429 errors surfaced as "authorization failed"
+- OAuth proxy rate limits now configurable via `AWARENESS_OAUTH_PROXY_RATE_{AUTHORIZE,TOKEN,REGISTER}` (defaults raised from 20/10/5 to 60/60/30 req/min) and `AWARENESS_OAUTH_PROXY_RATE_WINDOW` (sliding window, default 60s)
+
 ## [0.16.0] - 2026-04-08
 
 ### Added

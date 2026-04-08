@@ -214,6 +214,7 @@ The server is running on port 8420. Point any MCP client at `http://localhost:84
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `AWARENESS_AUTH_REQUIRED` | `false` | Set to `true` to require Bearer tokens on all requests |
+| `AWARENESS_MAX_CONCURRENT_PER_OWNER` | `10` | Max concurrent requests per authenticated owner |
 | `AWARENESS_JWT_SECRET` | _(required for self-signed)_ | JWT signing secret. Generate with `mcp-awareness-secret` |
 | `AWARENESS_JWT_ALGORITHM` | `HS256` | JWT signing algorithm |
 | `AWARENESS_DEFAULT_OWNER` | _(system username)_ | Default owner_id for unauthenticated/stdio connections |
@@ -230,6 +231,10 @@ The server is running on port 8420. Point any MCP client at `http://localhost:84
 | `AWARENESS_OAUTH_PROXY` | `false` | Enable OAuth proxy workaround for Claude Desktop/Claude.ai |
 | `AWARENESS_OAUTH_PROXY_BAN_DURATION` | `3600` | Auto-ban duration (seconds) for bogus OAuth requests |
 | `AWARENESS_OAUTH_PROXY_IP_HEADERS` | `CF-Connecting-IP,X-Real-IP` | Trusted IP header priority chain |
+| `AWARENESS_OAUTH_PROXY_RATE_AUTHORIZE` | `60` | Max `/authorize` requests per minute per IP |
+| `AWARENESS_OAUTH_PROXY_RATE_TOKEN` | `60` | Max `/token` requests per minute per IP |
+| `AWARENESS_OAUTH_PROXY_RATE_REGISTER` | `30` | Max `/register` requests per minute per IP |
+| `AWARENESS_OAUTH_PROXY_RATE_WINDOW` | `60` | Rate limit sliding window in seconds |
 | `AWARENESS_PUBLIC_URL` | _(empty)_ | Public base URL for this server (e.g., `https://mcpawareness.com`). Required when behind a reverse proxy or Cloudflare Tunnel so that `/.well-known/oauth-protected-resource` returns the correct `resource` URL. |
 
 See the [Auth Setup Guide](docs/auth-setup.md) for complete configuration instructions.
