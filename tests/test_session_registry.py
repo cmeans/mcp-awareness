@@ -1251,3 +1251,232 @@ class TestEnsureDatabase:
         with patch("psycopg.connect", side_effect=Exception("connection refused")):
             # Should log debug and not raise
             SessionStore._ensure_database("postgresql://user:pass@localhost/nonexistent_db")
+
+
+# ---------------------------------------------------------------------------
+# Integration tests — real FastMCP + SessionRegistryMiddleware
+# ---------------------------------------------------------------------------
+
+
+class TestIntegrationWithFastMCP:
+    """Integration tests using a real FastMCP ASGI app with session middleware.
+
+    These tests verify that the middleware works correctly with the real MCP SDK
+    session manager, not just ASGI stubs.
+    """
+
+    @pytest.mark.anyio
+    async def test_initialize_and_tool_call(self, session_store: SessionStore) -> None:
+        """Full flow: initialize → tools/list through real FastMCP + middleware."""
+        import httpx
+        from mcp.server.fastmcp import FastMCP
+        from mcp.server.streamable_http import TransportSecuritySettings
+
+        mcp = FastMCP(
+            "test-session",
+            json_response=True,
+            transport_security=TransportSecuritySettings(
+                enable_dns_rebinding_protection=False,
+            ),
+        )
+
+        @mcp.tool()
+        def ping() -> str:
+            """A simple test tool."""
+            return "pong"
+
+        app = mcp.streamable_http_app()
+        mw = SessionRegistryMiddleware(app, session_store, node_name="test-node")
+
+        from mcp_awareness.server import _owner_ctx
+
+        token = _owner_ctx.set("test-owner")
+        try:
+            async with mcp.session_manager.run():
+                transport = httpx.ASGITransport(app=mw)
+                async with httpx.AsyncClient(
+                    transport=transport, base_url="http://testserver"
+                ) as client:
+                    # Step 1: Initialize
+                    init_resp = await client.post(
+                        "/mcp",
+                        json={
+                            "jsonrpc": "2.0",
+                            "id": 1,
+                            "method": "initialize",
+                            "params": {
+                                "protocolVersion": "2025-03-26",
+                                "capabilities": {},
+                                "clientInfo": {"name": "test", "version": "0.1"},
+                            },
+                        },
+                        headers={"accept": "application/json, text/event-stream"},
+                    )
+                    assert init_resp.status_code == 200
+                    session_id = init_resp.headers.get("mcp-session-id")
+                    assert session_id is not None
+
+                    # Verify session registered in store
+                    session = session_store.lookup(session_id)
+                    assert session is not None
+                    assert session["owner_id"] == "test-owner"
+                    assert session["node"] == "test-node"
+
+                    # Step 2: Send initialized notification
+                    notif_resp = await client.post(
+                        "/mcp",
+                        json={
+                            "jsonrpc": "2.0",
+                            "method": "notifications/initialized",
+                        },
+                        headers={
+                            "mcp-session-id": session_id,
+                            "accept": "application/json, text/event-stream",
+                        },
+                    )
+                    assert notif_resp.status_code == 202
+
+                    # Step 3: tools/list
+                    list_resp = await client.post(
+                        "/mcp",
+                        json={
+                            "jsonrpc": "2.0",
+                            "id": 2,
+                            "method": "tools/list",
+                            "params": {},
+                        },
+                        headers={
+                            "mcp-session-id": session_id,
+                            "accept": "application/json, text/event-stream",
+                        },
+                    )
+                    assert list_resp.status_code == 200
+                    body = list_resp.json()
+                    tool_names = [t["name"] for t in body["result"]["tools"]]
+                    assert "ping" in tool_names
+
+                    # Step 4: Terminate
+                    del_resp = await client.request(
+                        "DELETE",
+                        "/mcp",
+                        headers={"mcp-session-id": session_id},
+                    )
+                    assert del_resp.status_code == 200
+
+                    # Verify session invalidated
+                    assert session_store.lookup(session_id) is None
+        finally:
+            _owner_ctx.reset(token)
+
+    @pytest.mark.anyio
+    async def test_cross_node_reinit(self, session_store: SessionStore) -> None:
+        """Simulate cross-node recovery: register session, start fresh FastMCP, verify re-init."""
+        import httpx
+        from mcp.server.fastmcp import FastMCP
+        from mcp.server.streamable_http import TransportSecuritySettings
+
+        no_security = TransportSecuritySettings(enable_dns_rebinding_protection=False)
+
+        mcp1 = FastMCP("test-node-a", json_response=True, transport_security=no_security)
+
+        @mcp1.tool()
+        def echo(msg: str) -> str:
+            """Echo tool."""
+            return msg
+
+        app1 = mcp1.streamable_http_app()
+        mw1 = SessionRegistryMiddleware(app1, session_store, node_name="node-a")
+
+        from mcp_awareness.server import _owner_ctx
+
+        token = _owner_ctx.set("test-owner")
+        try:
+            # Step 1: Initialize on node A
+            async with mcp1.session_manager.run():
+                transport1 = httpx.ASGITransport(app=mw1)
+                async with httpx.AsyncClient(
+                    transport=transport1, base_url="http://testserver"
+                ) as client1:
+                    init_resp = await client1.post(
+                        "/mcp",
+                        json={
+                            "jsonrpc": "2.0",
+                            "id": 1,
+                            "method": "initialize",
+                            "params": {
+                                "protocolVersion": "2025-03-26",
+                                "capabilities": {},
+                                "clientInfo": {"name": "test", "version": "0.1"},
+                            },
+                        },
+                        headers={"accept": "application/json, text/event-stream"},
+                    )
+                    assert init_resp.status_code == 200
+                    old_session_id = init_resp.headers.get("mcp-session-id")
+                    assert old_session_id
+
+                    # Send initialized notification
+                    await client1.post(
+                        "/mcp",
+                        json={
+                            "jsonrpc": "2.0",
+                            "method": "notifications/initialized",
+                        },
+                        headers={
+                            "mcp-session-id": old_session_id,
+                            "accept": "application/json, text/event-stream",
+                        },
+                    )
+
+            # Step 2: Create a NEW FastMCP app (simulates node restart / different node)
+            mcp2 = FastMCP("test-node-b", json_response=True, transport_security=no_security)
+
+            @mcp2.tool()
+            def echo2(msg: str) -> str:
+                """Echo tool."""
+                return msg
+
+            app2 = mcp2.streamable_http_app()
+            mw2 = SessionRegistryMiddleware(app2, session_store, node_name="node-b")
+
+            async with mcp2.session_manager.run():
+                transport2 = httpx.ASGITransport(app=mw2)
+                async with httpx.AsyncClient(
+                    transport=transport2, base_url="http://testserver"
+                ) as client2:
+                    # Step 3: Send request with OLD session ID to NEW node
+                    list_resp = await client2.post(
+                        "/mcp",
+                        json={
+                            "jsonrpc": "2.0",
+                            "id": 2,
+                            "method": "tools/list",
+                            "params": {},
+                        },
+                        headers={
+                            "mcp-session-id": old_session_id,
+                            "accept": "application/json, text/event-stream",
+                        },
+                    )
+                    assert list_resp.status_code == 200
+
+                    # Verify: new session_id in response
+                    new_session_id = list_resp.headers.get("mcp-session-id")
+                    assert new_session_id is not None
+                    assert new_session_id != old_session_id
+
+                    # Verify: redirect exists
+                    assert session_store.redirect_lookup(old_session_id) == new_session_id
+
+                    # Verify: old session invalidated, new registered
+                    assert session_store.lookup(old_session_id) is None
+                    new_session = session_store.lookup(new_session_id)
+                    assert new_session is not None
+                    assert new_session["node"] == "node-b"
+
+                    # Verify: tools/list returned real data
+                    body = list_resp.json()
+                    tool_names = [t["name"] for t in body["result"]["tools"]]
+                    assert "echo2" in tool_names
+        finally:
+            _owner_ctx.reset(token)
