@@ -14,7 +14,7 @@
 > **Your AI's memory shouldn't be locked to one app. It should follow you everywhere.**
 
 > [!NOTE]
-> Early-stage but actively deployed — 629 tests, 15 releases, in daily use across Claude.ai, Claude Code, and Claude Desktop. See [Current status](#current-status) for what's working and what's planned.
+> Early-stage but actively deployed — 699 tests, 15 releases, in daily use across Claude.ai, Claude Code, and Claude Desktop. See [Current status](#current-status) for what's working and what's planned.
 
 ## What this is
 
@@ -234,6 +234,17 @@ The server is running on port 8420. Point any MCP client at `http://localhost:84
 
 See the [Auth Setup Guide](docs/auth-setup.md) for complete configuration instructions.
 
+#### Session persistence (optional)
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `AWARENESS_SESSION_DATABASE_URL` | _(none)_ | Postgres DSN for session database. If unset, session registry is disabled and sessions are in-memory only. |
+| `AWARENESS_SESSION_TTL` | `1800` | Session expiry in seconds (30 min). Sliding window — extended on each request. |
+| `AWARENESS_SESSION_POOL_MIN` | `1` | Min connection pool size for the session database. |
+| `AWARENESS_SESSION_POOL_MAX` | `5` | Max connection pool size for the session database. |
+| `AWARENESS_MAX_SESSIONS_PER_OWNER` | `10` | Maximum active sessions per owner. Oldest session evicted when limit is reached. |
+| `AWARENESS_SESSION_NODE_NAME` | _(hostname)_ | Identifies this node in the registry. Used for cross-node recovery logging. |
+
 #### Docker Compose
 
 | Variable | Default | Description |
@@ -375,11 +386,12 @@ For single-user deployments, secret path + WAF is sufficient. For multi-user, en
 - List mode and since/until/created_after/created_before filters for lightweight queries
 - Storage abstraction: `Store` protocol — backends are swappable without changing server or collator logic
 - Alembic migration framework (version-tracked, raw SQL, auto-runs on Docker startup)
+- Postgres-backed session registry — sessions survive node restarts and rolling deploys, with cross-node re-initialization and redirect table for continuity. Feature-gated by `AWARENESS_SESSION_DATABASE_URL`
 - JWT authentication with per-user owner isolation, OAuth 2.1 resource server (provider-agnostic JWKS validation), and Postgres RLS defense-in-depth
 - Secret path auth + Cloudflare WAF for edge-level access control
 - Docker Compose with Postgres, optional Ollama, named Cloudflare Tunnel, or ephemeral quick tunnel
 - Request timing instrumentation and `/health` endpoint
-- 631 tests (all against real Postgres + Ollama in CI), strict type checking, CI pipeline with coverage, QA gate
+- 699 tests (all against real Postgres + Ollama in CI), strict type checking, CI pipeline with coverage, QA gate
 
 ### Not yet implemented
 - Layer 2 (baseline) detection — rolling averages and deviation calculation

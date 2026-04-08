@@ -266,6 +266,46 @@ Stores vector embeddings for semantic search. One embedding per entry per model.
 - Requires `AWARENESS_EMBEDDING_PROVIDER=ollama` to activate (optional)
 - **Dimension constraint**: The `VECTOR` column dimension is configured via `AWARENESS_EMBEDDING_DIMENSIONS` (default: 768, matching `nomic-embed-text`). The inline DDL uses this value at table creation time. The initial Alembic migration hardcodes 768 — existing deployments that need a different dimension require a new migration. The dimension must match the embedding model's output size.
 
+## Table: `session_registry`
+
+Stores active MCP sessions for cross-node persistence and recovery. Feature-gated by `AWARENESS_SESSION_DATABASE_URL`. When the session database is unreachable, the server degrades gracefully to in-memory session state.
+
+| Column | Type | Nullable | Description |
+|--------|------|----------|-------------|
+| `session_id` | TEXT | No | Primary key. MCP session identifier (uuid4 hex). |
+| `owner_id` | TEXT | No | Owner from JWT `sub` claim (or default owner for unauthenticated connections). |
+| `node` | TEXT | Yes | Node name that created the session (`AWARENESS_SESSION_NODE_NAME`, defaults to hostname). |
+| `protocol_version` | TEXT | Yes | MCP protocol version negotiated during `initialize`. |
+| `capabilities` | JSONB | Yes | Client capabilities from the `initialize` request. |
+| `client_info` | JSONB | Yes | Client info (name, version) from the `initialize` request. |
+| `created_at` | TIMESTAMPTZ | No | When the session was first registered. Default: `now()`. |
+| `last_seen` | TIMESTAMPTZ | No | Last request time. Debounced — updated at most once per 30 seconds. Default: `now()`. |
+| `expires_at` | TIMESTAMPTZ | No | Sliding expiry timestamp. Extended by `AWARENESS_SESSION_TTL` seconds on each touch. |
+
+### Lifecycle
+
+- Sessions are registered on MCP `initialize` and touched on every subsequent request.
+- Touch is debounced to avoid write amplification on high-frequency clients.
+- Expired sessions (`expires_at < now()`) are cleaned up by the background `_cleanup_expired` thread.
+- When a request arrives with an unknown session ID, the middleware checks `session_redirects` for a cross-node recovery mapping before re-initializing.
+
+## Table: `session_redirects`
+
+Short-lived redirect table used during rolling deploys and cross-node session recovery. When a node re-initializes a session originally created on another node, it records a mapping from the old session ID to the new one.
+
+| Column | Type | Nullable | Description |
+|--------|------|----------|-------------|
+| `old_session_id` | TEXT | No | Primary key. The session ID the client is presenting. |
+| `new_session_id` | TEXT | No | The replacement session ID assigned by the recovering node. |
+| `created_at` | TIMESTAMPTZ | No | When the redirect was created. Default: `now()`. |
+| `expires_at` | TIMESTAMPTZ | No | Grace period expiry (default: 5 minutes after creation). Expired redirects are auto-purged. |
+
+### Notes
+
+- Redirects are consumed by the ASGI middleware when a client presents a session ID not in `session_registry`.
+- The client is transparently re-initialized with the new session ID; the redirect is recorded for audit purposes.
+- Short expiry (5 min) limits storage overhead. Clients that reconnect after the grace period are re-initialized fresh.
+
 ## Conventions
 
 ### Entry relationships (`related_ids`)
