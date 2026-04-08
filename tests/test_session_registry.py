@@ -702,7 +702,6 @@ class TestMiddlewareReinit:
         mw = SessionRegistryMiddleware(reinit_app, session_store, node_name="app-a")
         scope = _mcp_post_scope(session_id="persist-fail-sess")
 
-
         from mcp_awareness.server import _owner_ctx
 
         # Make register fail after the synthetic init succeeds
