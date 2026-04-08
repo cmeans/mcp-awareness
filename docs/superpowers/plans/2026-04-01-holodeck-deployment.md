@@ -180,7 +180,7 @@ Expected: Active (running), no errors.
 ```bash
 sudo -u postgres psql << 'EOF'
 CREATE USER awareness WITH PASSWORD '<PASTE_PASSWORD_HERE>' CREATEDB;
-CREATE DATABASE awareness OWNER awareness ENCODING 'UTF8' LC_COLLATE 'C.UTF-8' LC_CTYPE 'C.UTF-8' TEMPLATE template0;
+CREATE DATABASE awareness OWNER awareness ENCODING 'UTF8' LC_COLLATE 'C' LC_CTYPE 'C' TEMPLATE template0;
 \c awareness
 CREATE EXTENSION IF NOT EXISTS vector;
 CREATE EXTENSION IF NOT EXISTS pg_stat_statements;

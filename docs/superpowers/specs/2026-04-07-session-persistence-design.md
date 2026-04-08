@@ -303,7 +303,7 @@ if SESSION_DATABASE_URL:
    If using per-database rules, add entries for `awareness_sessions` and `postgres`.
 2. Create database on CT 200 (or let `_ensure_database` auto-create on first startup):
    ```sql
-   CREATE DATABASE awareness_sessions OWNER awareness ENCODING 'UTF8' LC_COLLATE 'C.UTF-8' LC_CTYPE 'C.UTF-8' TEMPLATE template0;
+   CREATE DATABASE awareness_sessions OWNER awareness ENCODING 'UTF8' LC_COLLATE 'C' LC_CTYPE 'C' TEMPLATE template0;
    ```
 3. Add env vars to CT 210 and CT 211:
    ```bash
