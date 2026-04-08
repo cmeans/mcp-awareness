@@ -242,7 +242,7 @@ See the [Auth Setup Guide](docs/auth-setup.md) for complete configuration instru
 | `AWARENESS_SESSION_TTL` | `1800` | Session expiry in seconds (30 min). Sliding window — extended on each request. |
 | `AWARENESS_SESSION_POOL_MIN` | `1` | Min connection pool size for the session database. |
 | `AWARENESS_SESSION_POOL_MAX` | `5` | Max connection pool size for the session database. |
-| `AWARENESS_MAX_SESSIONS_PER_OWNER` | `10` | Maximum active sessions per owner. Oldest session evicted when limit is reached. |
+| `AWARENESS_MAX_SESSIONS_PER_OWNER` | `10` | Maximum active sessions per owner. New session requests are rejected with 429 when the limit is reached. |
 | `AWARENESS_SESSION_NODE_NAME` | _(hostname)_ | Identifies this node in the registry. Used for cross-node recovery logging. |
 
 #### Docker Compose

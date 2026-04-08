@@ -139,9 +139,9 @@ class SessionStore:
         """Purge expired sessions and redirects. Returns total rows deleted."""
         total = 0
         with self._pool.connection() as conn, conn.transaction(), conn.cursor() as cur:
-            cur.execute("DELETE FROM session_redirects WHERE expires_at <= NOW()")
+            cur.execute(_load_sql("session_cleanup_redirects"))
             total += cur.rowcount
-            cur.execute("DELETE FROM session_registry WHERE expires_at <= NOW()")
+            cur.execute(_load_sql("session_cleanup_sessions"))
             total += cur.rowcount
         return total
 
@@ -292,6 +292,7 @@ class SessionRegistryMiddleware:
                         owner_id,
                         self.node_name,
                     )
+                    self.store._schedule_cleanup()
                 except Exception:
                     logger.error("Failed to register session %s", new_session_id, exc_info=True)
 
@@ -299,18 +300,7 @@ class SessionRegistryMiddleware:
         self, scope: Scope, receive: Receive, send: Send, session_id: str
     ) -> None:
         """Handle subsequent request: lookup, validate owner, pass through or re-init."""
-        # Check redirect table first
-        redirect_target = None
-        try:
-            redirect_target = self.store.redirect_lookup(session_id)
-        except Exception:
-            logger.error("Redirect lookup failed for %s", session_id, exc_info=True)
-
-        if redirect_target:
-            session_id = redirect_target
-            scope = self._rewrite_session_header(scope, session_id)
-
-        # Lookup session in registry
+        # Lookup session in registry first
         session = None
         try:
             session = self.store.lookup(session_id)
@@ -318,6 +308,25 @@ class SessionRegistryMiddleware:
             logger.error("Session lookup failed for %s", session_id, exc_info=True)
             await self.app(scope, receive, send)
             return
+
+        # If not found, check redirect table
+        if session is None:
+            redirect_target = None
+            try:
+                redirect_target = self.store.redirect_lookup(session_id)
+            except Exception:
+                logger.error("Redirect lookup failed for %s", session_id, exc_info=True)
+
+            if redirect_target:
+                session_id = redirect_target
+                scope = self._rewrite_session_header(scope, session_id)
+                # Look up the target session
+                try:
+                    session = self.store.lookup(session_id)
+                except Exception:
+                    logger.error("Session lookup failed for %s", session_id, exc_info=True)
+                    await self.app(scope, receive, send)
+                    return
 
         if session is None:
             # Not in registry — pass through (FastMCP will return its own error)
@@ -473,6 +482,7 @@ class SessionRegistryMiddleware:
                 self.store.invalidate(session_id)
                 self.store.delete_redirects_to(session_id)
                 logger.info("Session terminated: %s", session_id)
+                self.store._schedule_cleanup()
             except Exception:
                 logger.error(
                     "Failed to clean up terminated session %s",
