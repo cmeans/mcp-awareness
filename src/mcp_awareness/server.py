@@ -527,7 +527,9 @@ def _wrap_with_session_registry(app: Any) -> Any:
     )
     logger.info(
         "Session registry: enabled (node=%s, ttl=%ds, max_per_owner=%d)",
-        node_name, SESSION_TTL, MAX_SESSIONS_PER_OWNER,
+        node_name,
+        SESSION_TTL,
+        MAX_SESSIONS_PER_OWNER,
     )
     return SessionRegistryMiddleware(
         app,

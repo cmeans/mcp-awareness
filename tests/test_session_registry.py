@@ -670,17 +670,34 @@ class TestMiddlewareReinit:
                     break
             if call_count == 1:
                 # Original request — 400
-                await send({"type": "http.response.start", "status": 400,
-                            "headers": [(b"content-type", b"text/plain")]})
-                await send({"type": "http.response.body",
-                            "body": b"Bad Request: No valid session ID provided"})
+                await send(
+                    {
+                        "type": "http.response.start",
+                        "status": 400,
+                        "headers": [(b"content-type", b"text/plain")],
+                    }
+                )
+                await send(
+                    {
+                        "type": "http.response.body",
+                        "body": b"Bad Request: No valid session ID provided",
+                    }
+                )
             else:
                 # Synthetic initialize succeeds
-                await send({"type": "http.response.start", "status": 200,
-                            "headers": [(b"content-type", b"application/json"),
-                                        (b"mcp-session-id", b"new-sess-persist-fail")]})
-                await send({"type": "http.response.body",
-                            "body": b'{"jsonrpc":"2.0","id":1,"result":{}}'})
+                await send(
+                    {
+                        "type": "http.response.start",
+                        "status": 200,
+                        "headers": [
+                            (b"content-type", b"application/json"),
+                            (b"mcp-session-id", b"new-sess-persist-fail"),
+                        ],
+                    }
+                )
+                await send(
+                    {"type": "http.response.body", "body": b'{"jsonrpc":"2.0","id":1,"result":{}}'}
+                )
 
         mw = SessionRegistryMiddleware(reinit_app, session_store, node_name="app-a")
         scope = _mcp_post_scope(session_id="persist-fail-sess")
