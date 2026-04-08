@@ -341,3 +341,140 @@ class TestMiddlewareInitialize:
         mw = SessionRegistryMiddleware(inner, session_store, node_name="app-a")
         await mw({"type": "lifespan"}, None, None)
         assert called
+
+
+class TestMiddlewareSubsequent:
+    """Tests for subsequent request handling."""
+
+    @pytest.mark.anyio
+    async def test_known_session_passes_through(self, session_store: SessionStore) -> None:
+        """Request with a known session_id passes through to FastMCP."""
+        session_store.register(
+            session_id="sess-known",
+            owner_id="test-owner",
+            node="app-a",
+            protocol_version="2025-03-26",
+            capabilities={},
+            client_info={},
+        )
+        inner = await _make_fastmcp_stub(session_id="sess-known")
+        mw = SessionRegistryMiddleware(inner, session_store, node_name="app-a")
+        scope = _mcp_post_scope(session_id="sess-known")
+        from mcp_awareness.server import _owner_ctx
+
+        token = _owner_ctx.set("test-owner")
+        try:
+            status, _, _ = await _collect_response(mw, scope)
+        finally:
+            _owner_ctx.reset(token)
+        assert status == 200
+
+    @pytest.mark.anyio
+    async def test_owner_mismatch_rejected(self, session_store: SessionStore) -> None:
+        """Request where JWT owner differs from session owner returns 403."""
+        session_store.register(
+            session_id="sess-owned",
+            owner_id="real-owner",
+            node="app-a",
+            protocol_version="2025-03-26",
+            capabilities={},
+            client_info={},
+        )
+        inner = await _make_fastmcp_stub()
+        mw = SessionRegistryMiddleware(inner, session_store, node_name="app-a")
+        scope = _mcp_post_scope(session_id="sess-owned")
+        from mcp_awareness.server import _owner_ctx
+
+        token = _owner_ctx.set("wrong-owner")
+        try:
+            status, _body, _ = await _collect_response(mw, scope)
+        finally:
+            _owner_ctx.reset(token)
+        assert status == 403
+
+    @pytest.mark.anyio
+    async def test_unknown_session_passes_through(self, session_store: SessionStore) -> None:
+        """Request with unknown session_id passes through to FastMCP."""
+        inner = await _make_fastmcp_stub(status=400)
+        mw = SessionRegistryMiddleware(inner, session_store, node_name="app-a")
+        scope = _mcp_post_scope(session_id="sess-unknown")
+        from mcp_awareness.server import _owner_ctx
+
+        token = _owner_ctx.set("test-owner")
+        try:
+            status, _, _ = await _collect_response(mw, scope)
+        finally:
+            _owner_ctx.reset(token)
+        assert status == 400
+
+    @pytest.mark.anyio
+    async def test_redirect_rewrites_session_id(self, session_store: SessionStore) -> None:
+        """Request with old session_id that has a redirect is transparently rewritten."""
+        session_store.register(
+            session_id="new-sess",
+            owner_id="test-owner",
+            node="app-a",
+            protocol_version="2025-03-26",
+            capabilities={},
+            client_info={},
+        )
+        session_store.add_redirect("old-sess", "new-sess")
+
+        received_session_id = None
+
+        async def checking_app(scope: Any, receive: Any, send: Any) -> None:
+            nonlocal received_session_id
+            hdrs = dict(scope.get("headers", []))
+            received_session_id = hdrs.get(b"mcp-session-id", b"").decode()
+            while True:
+                msg = await receive()
+                if msg.get("type") == "http.request" and not msg.get("more_body", False):
+                    break
+            await send(
+                {
+                    "type": "http.response.start",
+                    "status": 200,
+                    "headers": [(b"mcp-session-id", b"new-sess")],
+                }
+            )
+            await send({"type": "http.response.body", "body": b'{"ok":true}'})
+
+        mw = SessionRegistryMiddleware(checking_app, session_store, node_name="app-a")
+        scope = _mcp_post_scope(session_id="old-sess")
+        from mcp_awareness.server import _owner_ctx
+
+        token = _owner_ctx.set("test-owner")
+        try:
+            status, _, _ = await _collect_response(mw, scope)
+        finally:
+            _owner_ctx.reset(token)
+        assert status == 200
+        assert received_session_id == "new-sess"
+
+    @pytest.mark.anyio
+    async def test_touch_debounced(self, session_store: SessionStore) -> None:
+        """Touch only called when debounce interval has passed."""
+        session_store.register(
+            session_id="sess-debounce",
+            owner_id="test-owner",
+            node="app-a",
+            protocol_version="2025-03-26",
+            capabilities={},
+            client_info={},
+        )
+        inner = await _make_fastmcp_stub(session_id="sess-debounce")
+        mw = SessionRegistryMiddleware(inner, session_store, node_name="app-a")
+        scope = _mcp_post_scope(session_id="sess-debounce")
+        from unittest.mock import patch
+
+        from mcp_awareness.server import _owner_ctx
+
+        with patch.object(session_store, "touch") as mock_touch:
+            token = _owner_ctx.set("test-owner")
+            try:
+                await _collect_response(mw, scope)
+                assert mock_touch.call_count == 1
+                await _collect_response(mw, scope)
+                assert mock_touch.call_count == 1  # debounced
+            finally:
+                _owner_ctx.reset(token)

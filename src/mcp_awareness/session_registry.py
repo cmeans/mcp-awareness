@@ -276,14 +276,108 @@ class SessionRegistryMiddleware:
     async def _handle_subsequent(
         self, scope: Scope, receive: Receive, send: Send, session_id: str
     ) -> None:
-        """Placeholder — passes through for now."""
-        await self.app(scope, receive, send)
+        """Handle subsequent request: lookup, validate owner, pass through or re-init."""
+        # Check redirect table first
+        redirect_target = None
+        try:
+            redirect_target = self.store.redirect_lookup(session_id)
+        except Exception:
+            logger.error("Redirect lookup failed for %s", session_id, exc_info=True)
+
+        if redirect_target:
+            session_id = redirect_target
+            scope = self._rewrite_session_header(scope, session_id)
+
+        # Lookup session in registry
+        session = None
+        try:
+            session = self.store.lookup(session_id)
+        except Exception:
+            logger.error("Session lookup failed for %s", session_id, exc_info=True)
+            await self.app(scope, receive, send)
+            return
+
+        if session is None:
+            # Not in registry — pass through (FastMCP will return its own error)
+            await self.app(scope, receive, send)
+            return
+
+        # Validate owner
+        owner_id = self._get_owner_id()
+        if session["owner_id"] != owner_id:
+            logger.warning(
+                "Owner mismatch: session %s owned by %s, request from %s",
+                session_id,
+                session["owner_id"],
+                owner_id,
+            )
+            await self._send_error(send, 403, "Forbidden: session owner mismatch")
+            return
+
+        # Buffer body for potential re-init replay (Task 7 will use this)
+        _body, replay_receive = await self._buffer_body(receive)
+
+        # Pass through to FastMCP and capture response
+        captured_status = 0
+        captured_response_parts: list[Message] = []
+
+        async def capturing_send(message: Message) -> None:
+            nonlocal captured_status
+            if message["type"] == "http.response.start":
+                captured_status = message["status"]
+            captured_response_parts.append(message)
+
+        await self.app(scope, replay_receive, capturing_send)
+
+        # Send captured response to client
+        for part in captured_response_parts:
+            await send(part)
+
+        # Touch on success (debounced)
+        if 200 <= captured_status < 300:
+            self._debounced_touch(session_id)
+            self.store._schedule_cleanup()
 
     async def _handle_terminate(
         self, scope: Scope, receive: Receive, send: Send, session_id: str | None
     ) -> None:
         """Placeholder — passes through for now."""
         await self.app(scope, receive, send)
+
+    def _debounced_touch(self, session_id: str) -> None:
+        """Touch the session, debounced to once per 30 seconds."""
+        now = time.monotonic()
+        last = self._touch_debounce.get(session_id, 0.0)
+        if now - last < self._touch_debounce_seconds:
+            return
+        self._touch_debounce[session_id] = now
+        try:
+            self.store.touch(session_id)
+        except Exception:
+            logger.error("Touch failed for session %s", session_id, exc_info=True)
+
+    @staticmethod
+    def _rewrite_session_header(scope: Scope, new_session_id: str) -> Scope:
+        """Return a new scope with the mcp-session-id header rewritten."""
+        new_scope = dict(scope)
+        new_scope["headers"] = [
+            (k, v) for k, v in scope.get("headers", []) if k != b"mcp-session-id"
+        ]
+        new_scope["headers"].append((b"mcp-session-id", new_session_id.encode()))
+        return new_scope
+
+    @staticmethod
+    async def _send_error(send: Send, status: int, message: str) -> None:
+        """Send a JSON error response."""
+        body = json.dumps({"error": message}).encode()
+        await send(
+            {
+                "type": "http.response.start",
+                "status": status,
+                "headers": [(b"content-type", b"application/json")],
+            }
+        )
+        await send({"type": "http.response.body", "body": body})
 
     @staticmethod
     async def _buffer_body(receive: Receive) -> tuple[bytes, Receive]:
