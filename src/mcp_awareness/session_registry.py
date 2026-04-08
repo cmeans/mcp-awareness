@@ -453,6 +453,7 @@ class SessionRegistryMiddleware:
             logger.info("Re-initialized session: %s → %s", old_session_id, new_session_id)
         except Exception:
             logger.error("Failed to persist re-init for %s", old_session_id, exc_info=True)
+            return None  # Don't replay on an untracked session
 
         # Step 3: Replay original request with new session_id
         replay_scope = self._rewrite_session_header(original_scope, new_session_id)

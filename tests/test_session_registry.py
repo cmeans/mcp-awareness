@@ -644,6 +644,63 @@ class TestMiddlewareReinit:
 
         assert status == 400
 
+    @pytest.mark.anyio
+    async def test_reinit_persist_failure_returns_original_400(
+        self,
+        session_store: SessionStore,
+    ) -> None:
+        """If re-init succeeds but persist fails, return original 400 (not untracked replay)."""
+        session_store.register(
+            session_id="persist-fail-sess",
+            owner_id="test-owner",
+            node="app-a",
+            protocol_version="2025-03-26",
+            capabilities={},
+            client_info={},
+        )
+
+        call_count = 0
+
+        async def reinit_app(scope: Any, receive: Any, send: Any) -> None:
+            nonlocal call_count
+            call_count += 1
+            while True:
+                msg = await receive()
+                if msg.get("type") == "http.request" and not msg.get("more_body", False):
+                    break
+            if call_count == 1:
+                # Original request — 400
+                await send({"type": "http.response.start", "status": 400,
+                            "headers": [(b"content-type", b"text/plain")]})
+                await send({"type": "http.response.body",
+                            "body": b"Bad Request: No valid session ID provided"})
+            else:
+                # Synthetic initialize succeeds
+                await send({"type": "http.response.start", "status": 200,
+                            "headers": [(b"content-type", b"application/json"),
+                                        (b"mcp-session-id", b"new-sess-persist-fail")]})
+                await send({"type": "http.response.body",
+                            "body": b'{"jsonrpc":"2.0","id":1,"result":{}}'})
+
+        mw = SessionRegistryMiddleware(reinit_app, session_store, node_name="app-a")
+        scope = _mcp_post_scope(session_id="persist-fail-sess")
+
+        from unittest.mock import patch
+
+        from mcp_awareness.server import _owner_ctx
+
+        # Make register fail after the synthetic init succeeds
+        token = _owner_ctx.set("test-owner")
+        try:
+            with patch.object(session_store, "register", side_effect=Exception("DB down")):
+                status, _, _ = await _collect_response(mw, scope)
+        finally:
+            _owner_ctx.reset(token)
+
+        # Should get the original 400, NOT a replay on an untracked session
+        assert status == 400
+        assert call_count == 2  # original + synthetic init, no replay
+
 
 class TestMiddlewareTerminate:
     """Tests for DELETE /mcp (session termination)."""
