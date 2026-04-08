@@ -56,6 +56,7 @@ class SessionStore:
         self.dsn = dsn
         self.ttl_seconds = ttl_seconds
         self.redirect_grace_seconds = redirect_grace_seconds
+        self._ensure_database(dsn)
         self._pool: ConnectionPool[psycopg.Connection[dict[str, Any]]] = ConnectionPool(
             dsn,
             min_size=min_pool,
@@ -67,6 +68,45 @@ class SessionStore:
         self._cleanup_interval: float = 60.0
         self._cleanup_thread: threading.Thread | None = None
         self.ensure_schema()
+
+    @staticmethod
+    def _ensure_database(dsn: str) -> None:
+        """Create the session database if it doesn't exist.
+
+        Parses the target database name from the DSN, connects to the
+        ``postgres`` maintenance database on the same server, and issues
+        CREATE DATABASE.  Requires the connecting user to have CREATEDB
+        privilege.  Silently succeeds if the database already exists.
+        """
+        from psycopg import conninfo
+
+        params = conninfo.conninfo_to_dict(dsn)
+        dbname = str(params.get("dbname", ""))
+        if not dbname or dbname == "postgres":
+            return  # Nothing to create
+
+        # Connect to the 'postgres' database to issue CREATE DATABASE
+        admin_params: dict[str, Any] = {**params, "dbname": "postgres"}
+        admin_dsn = conninfo.make_conninfo(**admin_params)
+        try:
+            with psycopg.connect(admin_dsn, autocommit=True) as conn, conn.cursor() as cur:
+                # Check if database exists first (avoids noisy error logging)
+                cur.execute(
+                    "SELECT 1 FROM pg_database WHERE datname = %s", (dbname,)
+                )
+                if cur.fetchone():
+                    return
+                cur.execute(
+                    psycopg.sql.SQL("CREATE DATABASE {}").format(
+                        psycopg.sql.Identifier(dbname)
+                    )
+                )
+                logger.info("Created session database: %s", dbname)
+        except Exception as exc:
+            # Not fatal — database may already exist or user lacks CREATEDB.
+            # The pool connection below will fail with a clear error if the
+            # database truly doesn't exist.
+            logger.debug("Could not auto-create database %s: %s", dbname, exc)
 
     def ensure_schema(self) -> None:
         """Create tables if they don't exist (idempotent)."""

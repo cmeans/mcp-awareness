@@ -1186,3 +1186,58 @@ class TestWrapWithSessionRegistry:
         assert result.node_name == "test-node"
         assert result.max_sessions_per_owner == 5
         result.store.close()
+
+
+class TestEnsureDatabase:
+    """Tests for automatic session database creation."""
+
+    def test_creates_database_if_missing(self, pg_container: Any) -> None:
+        """_ensure_database creates the database when it doesn't exist."""
+        # Build a DSN pointing to a database that doesn't exist yet
+        base_url = pg_container.get_connection_url().replace(
+            "postgresql+psycopg2://", "postgresql://"
+        )
+        # Replace the database name with a unique test name
+        from psycopg import conninfo
+
+        params = conninfo.conninfo_to_dict(base_url)
+        test_db = "test_session_auto_create"
+        params["dbname"] = test_db
+        test_dsn = conninfo.make_conninfo(**params)
+
+        # Ensure it doesn't exist first
+        admin_params = {**params, "dbname": "postgres"}
+        admin_dsn = conninfo.make_conninfo(**admin_params)
+        import psycopg
+
+        with psycopg.connect(admin_dsn, autocommit=True) as conn, conn.cursor() as cur:
+            cur.execute("SELECT 1 FROM pg_database WHERE datname = %s", (test_db,))
+            if cur.fetchone():
+                cur.execute(
+                    psycopg.sql.SQL("DROP DATABASE {}").format(
+                        psycopg.sql.Identifier(test_db)
+                    )
+                )
+
+        try:
+            # _ensure_database should create it
+            SessionStore._ensure_database(test_dsn)
+
+            # Verify it exists
+            with psycopg.connect(admin_dsn, autocommit=True) as conn, conn.cursor() as cur:
+                cur.execute(
+                    "SELECT 1 FROM pg_database WHERE datname = %s", (test_db,)
+                )
+                assert cur.fetchone() is not None
+        finally:
+            # Clean up
+            with psycopg.connect(admin_dsn, autocommit=True) as conn, conn.cursor() as cur:
+                cur.execute(
+                    psycopg.sql.SQL("DROP DATABASE IF EXISTS {}").format(
+                        psycopg.sql.Identifier(test_db)
+                    )
+                )
+
+    def test_idempotent_when_exists(self, pg_dsn: str) -> None:
+        """_ensure_database is a no-op when the database already exists."""
+        SessionStore._ensure_database(pg_dsn)  # Should not raise
