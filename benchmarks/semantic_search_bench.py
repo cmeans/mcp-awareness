@@ -242,7 +242,9 @@ def create_bench_db(dsn: str, db_name: str) -> str:
             if not cur.fetchone():
                 cur.execute(
                     f'CREATE DATABASE "{db_name}"'
-                    " ENCODING 'UTF8' TEMPLATE template0"
+                    " ENCODING 'UTF8'"
+                    " LC_COLLATE 'C.UTF-8' LC_CTYPE 'C.UTF-8'"
+                    " TEMPLATE template0"
                 )
                 print(f"  Created database: {db_name}")
             else:
