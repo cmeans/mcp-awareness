@@ -1214,9 +1214,7 @@ class TestEnsureDatabase:
             cur.execute("SELECT 1 FROM pg_database WHERE datname = %s", (test_db,))
             if cur.fetchone():
                 cur.execute(
-                    psycopg.sql.SQL("DROP DATABASE {}").format(
-                        psycopg.sql.Identifier(test_db)
-                    )
+                    psycopg.sql.SQL("DROP DATABASE {}").format(psycopg.sql.Identifier(test_db))
                 )
 
         try:
@@ -1225,9 +1223,7 @@ class TestEnsureDatabase:
 
             # Verify it exists
             with psycopg.connect(admin_dsn, autocommit=True) as conn, conn.cursor() as cur:
-                cur.execute(
-                    "SELECT 1 FROM pg_database WHERE datname = %s", (test_db,)
-                )
+                cur.execute("SELECT 1 FROM pg_database WHERE datname = %s", (test_db,))
                 assert cur.fetchone() is not None
         finally:
             # Clean up

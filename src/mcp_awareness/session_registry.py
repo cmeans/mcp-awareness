@@ -91,15 +91,11 @@ class SessionStore:
         try:
             with psycopg.connect(admin_dsn, autocommit=True) as conn, conn.cursor() as cur:
                 # Check if database exists first (avoids noisy error logging)
-                cur.execute(
-                    "SELECT 1 FROM pg_database WHERE datname = %s", (dbname,)
-                )
+                cur.execute("SELECT 1 FROM pg_database WHERE datname = %s", (dbname,))
                 if cur.fetchone():
                     return
                 cur.execute(
-                    psycopg.sql.SQL("CREATE DATABASE {}").format(
-                        psycopg.sql.Identifier(dbname)
-                    )
+                    psycopg.sql.SQL("CREATE DATABASE {}").format(psycopg.sql.Identifier(dbname))
                 )
                 logger.info("Created session database: %s", dbname)
         except Exception as exc:
