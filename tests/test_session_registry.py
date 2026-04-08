@@ -1237,3 +1237,17 @@ class TestEnsureDatabase:
     def test_idempotent_when_exists(self, pg_dsn: str) -> None:
         """_ensure_database is a no-op when the database already exists."""
         SessionStore._ensure_database(pg_dsn)  # Should not raise
+
+    def test_skips_when_dbname_is_postgres(self) -> None:
+        """_ensure_database is a no-op when target database is 'postgres'."""
+        SessionStore._ensure_database("postgresql://user:pass@localhost/postgres")
+
+    def test_skips_when_dbname_empty(self) -> None:
+        """_ensure_database is a no-op when DSN has no database name."""
+        SessionStore._ensure_database("postgresql://user:pass@localhost/")
+
+    def test_handles_connection_failure(self) -> None:
+        """_ensure_database degrades gracefully when it can't connect."""
+        with patch("psycopg.connect", side_effect=Exception("connection refused")):
+            # Should log debug and not raise
+            SessionStore._ensure_database("postgresql://user:pass@localhost/nonexistent_db")
