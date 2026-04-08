@@ -103,11 +103,7 @@ class SessionStore:
                         f"session_create_database.sql must contain exactly 1 "
                         f"placeholder ({{{{}}}}), found {sql_text.count('{}')}"
                     )
-                cur.execute(
-                    psycopg.sql.SQL(sql_text).format(
-                        psycopg.sql.Identifier(dbname)
-                    )
-                )
+                cur.execute(psycopg.sql.SQL(sql_text).format(psycopg.sql.Identifier(dbname)))
                 logger.info("Created session database: %s", dbname)
         except Exception as exc:
             # Not fatal — database may already exist or user lacks CREATEDB.
