@@ -54,3 +54,44 @@ class TestSessionStoreSchema:
             )
             tables = [row["tablename"] for row in cur.fetchall()]
         assert tables == ["session_redirects", "session_registry"]
+
+
+class TestSessionStoreRegisterLookup:
+    """Tests for register and lookup."""
+
+    def test_register_and_lookup(self, session_store: SessionStore) -> None:
+        """Registered session is returned by lookup."""
+        session_store.register(
+            session_id="sess-1",
+            owner_id=TEST_OWNER,
+            node="app-a",
+            protocol_version="2025-03-26",
+            capabilities={"roots": {"listChanged": True}},
+            client_info={"name": "claude-desktop", "version": "1.0"},
+        )
+        result = session_store.lookup("sess-1")
+        assert result is not None
+        assert result["session_id"] == "sess-1"
+        assert result["owner_id"] == TEST_OWNER
+        assert result["node"] == "app-a"
+        assert result["protocol_version"] == "2025-03-26"
+        assert result["capabilities"] == {"roots": {"listChanged": True}}
+        assert result["client_info"] == {"name": "claude-desktop", "version": "1.0"}
+
+    def test_lookup_nonexistent(self, session_store: SessionStore) -> None:
+        """Lookup returns None for unknown session_id."""
+        assert session_store.lookup("does-not-exist") is None
+
+    def test_lookup_expired(self, session_store: SessionStore) -> None:
+        """Expired sessions are not returned by lookup."""
+        short_store = SessionStore(session_store.dsn, ttl_seconds=0)
+        short_store.register(
+            session_id="sess-expired",
+            owner_id=TEST_OWNER,
+            node="app-a",
+            protocol_version="2025-03-26",
+            capabilities={},
+            client_info={},
+        )
+        assert short_store.lookup("sess-expired") is None
+        short_store.close()

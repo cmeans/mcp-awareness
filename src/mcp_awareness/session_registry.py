@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import pathlib
 import threading
@@ -69,6 +70,36 @@ class SessionStore:
         """Create tables if they don't exist (idempotent)."""
         with self._pool.connection() as conn, conn.cursor() as cur:
             cur.execute(_load_sql("session_create_tables"))
+
+    def register(
+        self,
+        session_id: str,
+        owner_id: str,
+        node: str | None = None,
+        protocol_version: str | None = None,
+        capabilities: dict[str, Any] | None = None,
+        client_info: dict[str, Any] | None = None,
+    ) -> None:
+        """Register a new session in the registry."""
+        with self._pool.connection() as conn, conn.transaction(), conn.cursor() as cur:
+            cur.execute(
+                _load_sql("session_register"),
+                (
+                    session_id,
+                    owner_id,
+                    node,
+                    protocol_version,
+                    json.dumps(capabilities or {}),
+                    json.dumps(client_info or {}),
+                    self.ttl_seconds,
+                ),
+            )
+
+    def lookup(self, session_id: str) -> dict[str, Any] | None:
+        """Look up a session by ID. Returns None if not found or expired."""
+        with self._pool.connection() as conn, conn.cursor() as cur:
+            cur.execute(_load_sql("session_lookup"), (session_id,))
+            return cur.fetchone()
 
     def close(self) -> None:
         """Close the connection pool."""
