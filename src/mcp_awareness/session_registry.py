@@ -488,8 +488,11 @@ class SessionRegistryMiddleware:
             if not init_body_sent:
                 init_body_sent = True
                 return {"type": "http.request", "body": init_body}
-            # Block until cancelled — SSE disconnect detection needs a live
-            # receive, not a fake http.disconnect which aborts the stream.
+            # Block until the task group cancels us.  SSE disconnect detection
+            # calls receive() and aborts if it sees http.disconnect, so we must
+            # keep a live receive instead of returning a fake disconnect.  The
+            # enclosing task group in _reinitialize cancels this coroutine once
+            # the SSE response stream completes.
             while True:
                 await anyio.sleep(3600)
 
@@ -536,7 +539,7 @@ class SessionRegistryMiddleware:
             if not replay_body_sent:
                 replay_body_sent = True
                 return {"type": "http.request", "body": original_body}
-            # Block until cancelled — see init_receive comment above.
+            # Block until cancelled — see init_receive for explanation.
             while True:
                 await anyio.sleep(3600)
 
