@@ -177,7 +177,7 @@ Expected: Active (running), no errors.
 
 ```bash
 sudo -u postgres psql << 'EOF'
-CREATE USER awareness WITH PASSWORD '<PASTE_PASSWORD_HERE>';
+CREATE USER awareness WITH PASSWORD '<PASTE_PASSWORD_HERE>' CREATEDB;
 CREATE DATABASE awareness OWNER awareness;
 \c awareness
 CREATE EXTENSION IF NOT EXISTS vector;
