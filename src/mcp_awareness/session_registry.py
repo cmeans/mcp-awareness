@@ -223,6 +223,28 @@ class SessionRegistryMiddleware:
 
     async def _handle_initialize(self, scope: Scope, receive: Receive, send: Send) -> None:
         """Handle initialize: pass through, capture session_id, register."""
+        # Check session limit
+        owner_id = self._get_owner_id()
+        try:
+            count = self.store.count_active(owner_id)
+            if count >= self.max_sessions_per_owner:
+                logger.warning(
+                    "Owner %s at session limit (%d/%d)",
+                    owner_id,
+                    count,
+                    self.max_sessions_per_owner,
+                )
+                await self._send_error(
+                    send,
+                    429,
+                    f"Session limit reached ({count}/{self.max_sessions_per_owner}). "
+                    "Contact admin if this is unexpected.",
+                )
+                return
+        except Exception:
+            logger.error("Session limit check failed", exc_info=True)
+            # Graceful degradation: allow through
+
         body, replay_receive = await self._buffer_body(receive)
 
         # Parse JSON-RPC to extract initialize params
@@ -443,8 +465,20 @@ class SessionRegistryMiddleware:
     async def _handle_terminate(
         self, scope: Scope, receive: Receive, send: Send, session_id: str | None
     ) -> None:
-        """Placeholder — passes through for now."""
+        """Handle DELETE /mcp: pass through to FastMCP, then clean up registry."""
         await self.app(scope, receive, send)
+
+        if session_id:
+            try:
+                self.store.invalidate(session_id)
+                self.store.delete_redirects_to(session_id)
+                logger.info("Session terminated: %s", session_id)
+            except Exception:
+                logger.error(
+                    "Failed to clean up terminated session %s",
+                    session_id,
+                    exc_info=True,
+                )
 
     def _debounced_touch(self, session_id: str) -> None:
         """Touch the session, debounced to once per 30 seconds."""

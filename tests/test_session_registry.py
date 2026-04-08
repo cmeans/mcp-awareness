@@ -641,3 +641,143 @@ class TestMiddlewareReinit:
             _owner_ctx.reset(token)
 
         assert status == 400
+
+
+class TestMiddlewareTerminate:
+    """Tests for DELETE /mcp (session termination)."""
+
+    @pytest.mark.anyio
+    async def test_terminate_invalidates_session(self, session_store: SessionStore) -> None:
+        """DELETE /mcp invalidates the session in the registry."""
+        session_store.register(
+            session_id="sess-to-terminate",
+            owner_id="test-owner",
+            node="app-a",
+            protocol_version="2025-03-26",
+            capabilities={},
+            client_info={},
+        )
+        inner = await _make_fastmcp_stub()
+        mw = SessionRegistryMiddleware(inner, session_store, node_name="app-a")
+        scope = {
+            "type": "http",
+            "method": "DELETE",
+            "path": "/mcp",
+            "headers": [(b"mcp-session-id", b"sess-to-terminate")],
+        }
+        from mcp_awareness.server import _owner_ctx
+
+        token = _owner_ctx.set("test-owner")
+        try:
+            status, _, _ = await _collect_response(mw, scope)
+        finally:
+            _owner_ctx.reset(token)
+        assert status == 200
+        assert session_store.lookup("sess-to-terminate") is None
+
+    @pytest.mark.anyio
+    async def test_terminate_cleans_redirects(self, session_store: SessionStore) -> None:
+        """DELETE /mcp removes redirect mappings pointing to the terminated session."""
+        session_store.register(
+            session_id="sess-target",
+            owner_id="test-owner",
+            node="app-a",
+            protocol_version="2025-03-26",
+            capabilities={},
+            client_info={},
+        )
+        session_store.add_redirect("old-redirect", "sess-target")
+        inner = await _make_fastmcp_stub()
+        mw = SessionRegistryMiddleware(inner, session_store, node_name="app-a")
+        scope = {
+            "type": "http",
+            "method": "DELETE",
+            "path": "/mcp",
+            "headers": [(b"mcp-session-id", b"sess-target")],
+        }
+        from mcp_awareness.server import _owner_ctx
+
+        token = _owner_ctx.set("test-owner")
+        try:
+            await _collect_response(mw, scope)
+        finally:
+            _owner_ctx.reset(token)
+        assert session_store.redirect_lookup("old-redirect") is None
+
+
+class TestMiddlewareSessionLimits:
+    """Tests for per-owner session limits."""
+
+    @pytest.mark.anyio
+    async def test_session_limit_rejects_with_429(self, session_store: SessionStore) -> None:
+        """Exceeding session limit returns 429."""
+        for i in range(2):
+            session_store.register(
+                session_id=f"sess-{i}",
+                owner_id="test-owner",
+                node="app-a",
+                protocol_version="2025-03-26",
+                capabilities={},
+                client_info={},
+            )
+        inner = await _make_fastmcp_stub(session_id="sess-new")
+        mw = SessionRegistryMiddleware(
+            inner,
+            session_store,
+            node_name="app-a",
+            max_sessions_per_owner=2,
+        )
+        scope = _mcp_post_scope()
+        body = json.dumps(
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "initialize",
+                "params": {"protocolVersion": "2025-03-26", "capabilities": {}, "clientInfo": {}},
+            }
+        ).encode()
+        from mcp_awareness.server import _owner_ctx
+
+        token = _owner_ctx.set("test-owner")
+        try:
+            status, resp_body, _ = await _collect_response(mw, scope, body)
+        finally:
+            _owner_ctx.reset(token)
+        assert status == 429
+        assert b"limit" in resp_body.lower()
+
+    @pytest.mark.anyio
+    async def test_session_limit_allows_under_limit(self, session_store: SessionStore) -> None:
+        """New sessions are allowed when under the limit."""
+        session_store.register(
+            session_id="sess-existing",
+            owner_id="test-owner",
+            node="app-a",
+            protocol_version="2025-03-26",
+            capabilities={},
+            client_info={},
+        )
+        inner = await _make_fastmcp_stub(session_id="sess-new")
+        mw = SessionRegistryMiddleware(
+            inner,
+            session_store,
+            node_name="app-a",
+            max_sessions_per_owner=5,
+        )
+        scope = _mcp_post_scope()
+        body = json.dumps(
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "initialize",
+                "params": {"protocolVersion": "2025-03-26", "capabilities": {}, "clientInfo": {}},
+            }
+        ).encode()
+        from mcp_awareness.server import _owner_ctx
+
+        token = _owner_ctx.set("test-owner")
+        try:
+            status, _, _ = await _collect_response(mw, scope, body)
+        finally:
+            _owner_ctx.reset(token)
+        assert status == 200
