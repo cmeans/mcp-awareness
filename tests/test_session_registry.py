@@ -154,3 +154,58 @@ class TestSessionStoreTouchInvalidateCount:
         )
         assert session_store.count_active(TEST_OWNER) == 1
         assert session_store.count_active("other-owner") == 1
+
+
+class TestSessionStoreRedirects:
+    """Tests for redirect table and cleanup."""
+
+    def test_add_and_lookup_redirect(self, session_store: SessionStore) -> None:
+        """Redirect mapping is returned by redirect_lookup."""
+        session_store.add_redirect("old-sess", "new-sess")
+        result = session_store.redirect_lookup("old-sess")
+        assert result == "new-sess"
+
+    def test_redirect_lookup_nonexistent(self, session_store: SessionStore) -> None:
+        """redirect_lookup returns None for unknown old_session_id."""
+        assert session_store.redirect_lookup("unknown") is None
+
+    def test_redirect_upsert(self, session_store: SessionStore) -> None:
+        """Adding a redirect for the same old_session_id updates the target."""
+        session_store.add_redirect("old-sess", "new-sess-1")
+        session_store.add_redirect("old-sess", "new-sess-2")
+        assert session_store.redirect_lookup("old-sess") == "new-sess-2"
+
+    def test_cleanup_expired_sessions(self, session_store: SessionStore) -> None:
+        """cleanup_expired removes expired sessions and redirects."""
+        store = SessionStore(session_store.dsn, ttl_seconds=0, redirect_grace_seconds=0)
+        store.register(
+            session_id="sess-expired",
+            owner_id="test-owner",
+            node="app-a",
+            protocol_version="2025-03-26",
+            capabilities={},
+            client_info={},
+        )
+        store.add_redirect("old-redirect", "new-redirect")
+
+        count = store.cleanup_expired()
+        assert count >= 2
+
+        with store._pool.connection() as conn, conn.cursor() as cur:
+            cur.execute(
+                "SELECT COUNT(*) AS cnt FROM session_registry WHERE session_id = 'sess-expired'"
+            )
+            assert cur.fetchone()["cnt"] == 0
+            cur.execute(
+                "SELECT COUNT(*) AS cnt FROM session_redirects"
+                " WHERE old_session_id = 'old-redirect'"
+            )
+            assert cur.fetchone()["cnt"] == 0
+        store.close()
+
+    def test_cleanup_debounced(self, session_store: SessionStore) -> None:
+        """_schedule_cleanup is debounced — second call within interval is a no-op."""
+        session_store._schedule_cleanup()
+        first_cleanup_time = session_store._last_cleanup
+        session_store._schedule_cleanup()
+        assert session_store._last_cleanup == first_cleanup_time

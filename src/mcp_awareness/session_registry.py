@@ -22,6 +22,7 @@ import json
 import logging
 import pathlib
 import threading
+import time
 from typing import Any
 
 import psycopg
@@ -117,6 +118,59 @@ class SessionStore:
             cur.execute(_load_sql("session_count_active"), (owner_id,))
             row = cur.fetchone()
             return row["cnt"] if row else 0
+
+    def add_redirect(self, old_session_id: str, new_session_id: str) -> None:
+        """Store a redirect mapping from old to new session_id."""
+        with self._pool.connection() as conn, conn.transaction(), conn.cursor() as cur:
+            cur.execute(
+                _load_sql("session_add_redirect"),
+                (old_session_id, new_session_id, self.redirect_grace_seconds),
+            )
+
+    def redirect_lookup(self, session_id: str) -> str | None:
+        """Look up a redirect for an old session_id. Returns new_session_id or None."""
+        with self._pool.connection() as conn, conn.cursor() as cur:
+            cur.execute(_load_sql("session_redirect_lookup"), (session_id,))
+            row = cur.fetchone()
+            return row["new_session_id"] if row else None
+
+    def cleanup_expired(self) -> int:
+        """Purge expired sessions and redirects. Returns total rows deleted."""
+        total = 0
+        with self._pool.connection() as conn, conn.transaction(), conn.cursor() as cur:
+            cur.execute("DELETE FROM session_redirects WHERE expires_at <= NOW()")
+            total += cur.rowcount
+            cur.execute("DELETE FROM session_registry WHERE expires_at <= NOW()")
+            total += cur.rowcount
+        return total
+
+    def delete_redirects_to(self, session_id: str) -> None:
+        """Delete all redirect mappings pointing to the given session_id."""
+        with self._pool.connection() as conn, conn.transaction(), conn.cursor() as cur:
+            cur.execute(
+                "DELETE FROM session_redirects WHERE new_session_id = %s",
+                (session_id,),
+            )
+
+    def _schedule_cleanup(self) -> None:
+        """Schedule cleanup on a background thread (debounced)."""
+        now = time.monotonic()
+        if now - self._last_cleanup < self._cleanup_interval:
+            return
+        if self._cleanup_thread is not None and self._cleanup_thread.is_alive():
+            return
+        self._last_cleanup = now
+        self._cleanup_thread = threading.Thread(
+            target=self._do_cleanup, name="session-cleanup", daemon=True
+        )
+        self._cleanup_thread.start()
+
+    def _do_cleanup(self) -> None:
+        """Run cleanup in a background thread."""
+        try:
+            self.cleanup_expired()
+        except Exception as exc:
+            logger.error("Session cleanup failed: %s: %s", type(exc).__name__, exc)
 
     def close(self) -> None:
         """Close the connection pool."""
