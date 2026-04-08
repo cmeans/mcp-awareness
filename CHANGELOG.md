@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Session persistence** — Postgres-backed session registry survives node restarts and rolling deploys. ASGI middleware transparently re-initializes MCP sessions on cross-node recovery with redirect table for session continuity. Feature-gated by `AWARENESS_SESSION_DATABASE_URL` ([#161](https://github.com/cmeans/mcp-awareness/issues/161))
+- Per-owner session limits (configurable via `AWARENESS_MAX_SESSIONS_PER_OWNER`, default 10)
+- Session touch debounce (sliding-window TTL, updates at most once per 30 seconds)
+- Graceful degradation when session database is unreachable
+
 ## [0.15.0] - 2026-04-07
 
 ### Added
