@@ -21,6 +21,7 @@ from __future__ import annotations
 import contextlib
 import json
 from typing import Any
+from unittest.mock import patch
 
 import pytest
 
@@ -467,7 +468,6 @@ class TestMiddlewareSubsequent:
         inner = await _make_fastmcp_stub(session_id="sess-debounce")
         mw = SessionRegistryMiddleware(inner, session_store, node_name="app-a")
         scope = _mcp_post_scope(session_id="sess-debounce")
-        from unittest.mock import patch
 
         from mcp_awareness.server import _owner_ctx
 
@@ -702,7 +702,6 @@ class TestMiddlewareReinit:
         mw = SessionRegistryMiddleware(reinit_app, session_store, node_name="app-a")
         scope = _mcp_post_scope(session_id="persist-fail-sess")
 
-        from unittest.mock import patch
 
         from mcp_awareness.server import _owner_ctx
 
@@ -948,7 +947,6 @@ class TestCoverageEdgeCases:
 
     def test_do_cleanup_logs_exception(self, session_store: SessionStore) -> None:
         """_do_cleanup catches and logs exceptions."""
-        from unittest.mock import patch
 
         with patch.object(session_store, "cleanup_expired", side_effect=Exception("boom")):
             session_store._do_cleanup()  # Should not raise
@@ -976,7 +974,6 @@ class TestCoverageEdgeCases:
     @pytest.mark.anyio
     async def test_subsequent_redirect_lookup_failure(self, session_store: SessionStore) -> None:
         """When redirect lookup fails, session is treated as not found (pass through)."""
-        from unittest.mock import patch
 
         inner = await _make_fastmcp_stub(status=400)
         mw = SessionRegistryMiddleware(inner, session_store, node_name="app-a")
@@ -998,7 +995,6 @@ class TestCoverageEdgeCases:
         self, session_store: SessionStore
     ) -> None:
         """When redirect target lookup fails, pass through to FastMCP."""
-        from unittest.mock import patch
 
         session_store.add_redirect("old-redir-sess", "target-sess")
         inner = await _make_fastmcp_stub(status=400)
@@ -1084,7 +1080,6 @@ class TestCoverageEdgeCases:
     @pytest.mark.anyio
     async def test_terminate_exception_during_cleanup(self, session_store: SessionStore) -> None:
         """Terminate passes through even if registry cleanup fails."""
-        from unittest.mock import patch
 
         session_store.register(
             session_id="sess-term-fail",
@@ -1115,7 +1110,6 @@ class TestCoverageEdgeCases:
     @pytest.mark.anyio
     async def test_touch_exception_swallowed(self, session_store: SessionStore) -> None:
         """Touch failure is logged but doesn't affect the response."""
-        from unittest.mock import patch
 
         session_store.register(
             session_id="sess-touch-fail",
@@ -1160,3 +1154,36 @@ class TestCoverageEdgeCases:
             [(b"content-type", b"application/json")]
         )
         assert result is None
+
+
+class TestWrapWithSessionRegistry:
+    """Tests for _wrap_with_session_registry in server.py."""
+
+    def test_noop_when_no_url(self) -> None:
+        """Returns app unchanged when SESSION_DATABASE_URL is empty."""
+        from mcp_awareness import server as srv
+
+        sentinel = object()
+        with patch.object(srv, "SESSION_DATABASE_URL", ""):
+            result = srv._wrap_with_session_registry(sentinel)
+        assert result is sentinel
+
+    def test_wraps_app_when_url_set(self, pg_dsn: str) -> None:
+        """Returns SessionRegistryMiddleware when DATABASE_URL is set."""
+        from mcp_awareness import server as srv
+
+        sentinel = object()
+        with (
+            patch.object(srv, "SESSION_DATABASE_URL", pg_dsn),
+            patch.object(srv, "SESSION_TTL", 300),
+            patch.object(srv, "SESSION_POOL_MIN", 1),
+            patch.object(srv, "SESSION_POOL_MAX", 2),
+            patch.object(srv, "MAX_SESSIONS_PER_OWNER", 5),
+            patch.object(srv, "SESSION_NODE_NAME", "test-node"),
+        ):
+            result = srv._wrap_with_session_registry(sentinel)
+        assert isinstance(result, SessionRegistryMiddleware)
+        assert result.app is sentinel
+        assert result.node_name == "test-node"
+        assert result.max_sessions_per_owner == 5
+        result.store.close()
