@@ -1260,6 +1260,23 @@ class TestEnsureDatabase:
             SessionStore._ensure_database("postgresql://user:pass@localhost/nonexistent_db")
 
 
+class TestCreateDatabaseSqlIntegrity:
+    """Guard against {} in SQL comments breaking psycopg.sql.SQL().format()."""
+
+    def test_session_create_database_has_exactly_one_placeholder(self) -> None:
+        """session_create_database.sql must have exactly one {} placeholder."""
+        from mcp_awareness.session_registry import _load_sql
+
+        sql_text = _load_sql("session_create_database")
+        count = sql_text.count("{}")
+        braces = "{}"
+        assert count == 1, (
+            f"session_create_database.sql has {count} occurrences of {braces}, "
+            f"but psycopg.sql.SQL().format() treats ALL of them as placeholders "
+            f"(including those in comments). Must be exactly 1."
+        )
+
+
 # ---------------------------------------------------------------------------
 # Integration tests — real FastMCP + SessionRegistryMiddleware
 # ---------------------------------------------------------------------------
