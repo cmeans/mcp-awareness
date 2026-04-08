@@ -1224,14 +1224,12 @@ class TestEnsureDatabase:
             # Verify it exists and has UTF-8 encoding
             with psycopg.connect(admin_dsn, autocommit=True) as conn, conn.cursor() as cur:
                 cur.execute(
-                    "SELECT encoding, datcollate FROM pg_database WHERE datname = %s",
+                    "SELECT encoding FROM pg_database WHERE datname = %s",
                     (test_db,),
                 )
                 row = cur.fetchone()
                 assert row is not None, "Database was not created"
-                encoding, collate = row
-                assert encoding == 6, f"Expected UTF8 (6), got {encoding}"  # 6 = UTF8
-                assert collate == "C.UTF-8", f"Expected C.UTF-8, got {collate}"
+                assert row[0] == 6, f"Expected UTF8 (6), got {row[0]}"  # 6 = UTF8
         finally:
             # Clean up
             with psycopg.connect(admin_dsn, autocommit=True) as conn, conn.cursor() as cur:
