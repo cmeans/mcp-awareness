@@ -93,6 +93,9 @@ PUBLIC_URL = os.environ.get("AWARENESS_PUBLIC_URL", "")
 # See docs/superpowers/specs/2026-04-02-oauth-proxy-workaround-design.md
 OAUTH_PROXY = os.environ.get("AWARENESS_OAUTH_PROXY", "false").lower() == "true"
 OAUTH_PROXY_BAN_DURATION = int(os.environ.get("AWARENESS_OAUTH_PROXY_BAN_DURATION", "3600"))
+OAUTH_PROXY_RATE_AUTHORIZE = int(os.environ.get("AWARENESS_OAUTH_PROXY_RATE_AUTHORIZE", "60"))
+OAUTH_PROXY_RATE_TOKEN = int(os.environ.get("AWARENESS_OAUTH_PROXY_RATE_TOKEN", "60"))
+OAUTH_PROXY_RATE_REGISTER = int(os.environ.get("AWARENESS_OAUTH_PROXY_RATE_REGISTER", "30"))
 OAUTH_PROXY_IP_HEADERS = [
     h.strip()
     for h in os.environ.get("AWARENESS_OAUTH_PROXY_IP_HEADERS", "CF-Connecting-IP,X-Real-IP").split(
@@ -501,6 +504,11 @@ def _wrap_with_oauth_proxy(app: Any) -> Any:
             endpoints=endpoints,
             ban_duration=OAUTH_PROXY_BAN_DURATION,
             ip_headers=OAUTH_PROXY_IP_HEADERS,
+            rate_limits={
+                "/authorize": OAUTH_PROXY_RATE_AUTHORIZE,
+                "/token": OAUTH_PROXY_RATE_TOKEN,
+                "/register": OAUTH_PROXY_RATE_REGISTER,
+            },
         )
         logger.info("OAuth proxy: enabled — intercepting /authorize, /token, /register")
         return _oauth_proxy
