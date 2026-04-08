@@ -93,6 +93,7 @@ PUBLIC_URL = os.environ.get("AWARENESS_PUBLIC_URL", "")
 # See docs/superpowers/specs/2026-04-02-oauth-proxy-workaround-design.md
 OAUTH_PROXY = os.environ.get("AWARENESS_OAUTH_PROXY", "false").lower() == "true"
 OAUTH_PROXY_BAN_DURATION = int(os.environ.get("AWARENESS_OAUTH_PROXY_BAN_DURATION", "3600"))
+MAX_CONCURRENT_PER_OWNER = int(os.environ.get("AWARENESS_MAX_CONCURRENT_PER_OWNER", "10"))
 OAUTH_PROXY_RATE_AUTHORIZE = int(os.environ.get("AWARENESS_OAUTH_PROXY_RATE_AUTHORIZE", "60"))
 OAUTH_PROXY_RATE_TOKEN = int(os.environ.get("AWARENESS_OAUTH_PROXY_RATE_TOKEN", "60"))
 OAUTH_PROXY_RATE_REGISTER = int(os.environ.get("AWARENESS_OAUTH_PROXY_RATE_REGISTER", "30"))
@@ -482,6 +483,7 @@ def _wrap_with_auth(app: Any) -> Any:
         oauth_validator=oauth_validator,
         auto_provision=OAUTH_AUTO_PROVISION,
         resource_metadata_url=_build_resource_metadata_url(),
+        max_concurrent_per_owner=MAX_CONCURRENT_PER_OWNER,
     )
 
 
