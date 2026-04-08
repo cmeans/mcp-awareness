@@ -28,6 +28,7 @@ from typing import Any
 import psycopg
 from psycopg.rows import dict_row
 from psycopg_pool import ConnectionPool
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 logger = logging.getLogger(__name__)
 
@@ -175,3 +176,152 @@ class SessionStore:
     def close(self) -> None:
         """Close the connection pool."""
         self._pool.close()
+
+
+class SessionRegistryMiddleware:
+    """ASGI middleware for MCP session persistence."""
+
+    def __init__(
+        self,
+        app: ASGIApp,
+        session_store: SessionStore,
+        node_name: str = "unknown",
+        max_sessions_per_owner: int = 10,
+        mcp_path: str = "/mcp",
+    ) -> None:
+        self.app = app
+        self.store = session_store
+        self.node_name = node_name
+        self.max_sessions_per_owner = max_sessions_per_owner
+        self.mcp_path = mcp_path
+        self._touch_debounce: dict[str, float] = {}
+        self._touch_debounce_seconds = 30.0
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        path = scope.get("path", "")
+        method = scope.get("method", "")
+
+        if path != self.mcp_path or method not in ("POST", "DELETE"):
+            await self.app(scope, receive, send)
+            return
+
+        headers = dict(scope.get("headers", []))
+        session_id = headers.get(b"mcp-session-id", b"").decode() or None
+
+        if method == "POST" and session_id is None:
+            await self._handle_initialize(scope, receive, send)
+        elif method == "POST" and session_id is not None:
+            await self._handle_subsequent(scope, receive, send, session_id)
+        elif method == "DELETE":
+            await self._handle_terminate(scope, receive, send, session_id)
+        else:
+            await self.app(scope, receive, send)
+
+    async def _handle_initialize(self, scope: Scope, receive: Receive, send: Send) -> None:
+        """Handle initialize: pass through, capture session_id, register."""
+        body, replay_receive = await self._buffer_body(receive)
+
+        # Parse JSON-RPC to extract initialize params
+        capabilities: dict[str, Any] = {}
+        client_info: dict[str, Any] = {}
+        protocol_version: str = ""
+        try:
+            rpc = json.loads(body)
+            params = rpc.get("params", {})
+            capabilities = params.get("capabilities", {})
+            client_info = params.get("clientInfo", {})
+            protocol_version = params.get("protocolVersion", "")
+        except (ValueError, AttributeError):
+            pass
+
+        # Capture response headers
+        captured_status = 0
+        captured_headers: list[tuple[bytes, bytes]] = []
+
+        async def capturing_send(message: Message) -> None:
+            nonlocal captured_status, captured_headers
+            if message["type"] == "http.response.start":
+                captured_status = message["status"]
+                captured_headers = list(message.get("headers", []))
+            await send(message)
+
+        await self.app(scope, replay_receive, capturing_send)
+
+        if 200 <= captured_status < 300:
+            new_session_id = self._extract_session_id(captured_headers)
+            if new_session_id:
+                owner_id = self._get_owner_id()
+                try:
+                    self.store.register(
+                        session_id=new_session_id,
+                        owner_id=owner_id,
+                        node=self.node_name,
+                        protocol_version=protocol_version,
+                        capabilities=capabilities,
+                        client_info=client_info,
+                    )
+                    logger.info(
+                        "Session registered: %s (owner=%s, node=%s)",
+                        new_session_id,
+                        owner_id,
+                        self.node_name,
+                    )
+                except Exception:
+                    logger.error("Failed to register session %s", new_session_id, exc_info=True)
+
+    async def _handle_subsequent(
+        self, scope: Scope, receive: Receive, send: Send, session_id: str
+    ) -> None:
+        """Placeholder — passes through for now."""
+        await self.app(scope, receive, send)
+
+    async def _handle_terminate(
+        self, scope: Scope, receive: Receive, send: Send, session_id: str | None
+    ) -> None:
+        """Placeholder — passes through for now."""
+        await self.app(scope, receive, send)
+
+    @staticmethod
+    async def _buffer_body(receive: Receive) -> tuple[bytes, Receive]:
+        """Buffer the full request body and return (body_bytes, replay_receive)."""
+        chunks: list[Message] = []
+        body_parts: list[bytes] = []
+        while True:
+            message = await receive()
+            chunks.append(message)
+            if message.get("type") == "http.request":
+                body_parts.append(message.get("body", b""))
+                if not message.get("more_body", False):
+                    break
+            elif message.get("type") == "http.disconnect":
+                break
+
+        body = b"".join(body_parts)
+        chunk_iter = iter(chunks)
+
+        async def replay_receive() -> Message:
+            try:
+                return next(chunk_iter)
+            except StopIteration:
+                return {"type": "http.disconnect"}
+
+        return body, replay_receive
+
+    @staticmethod
+    def _extract_session_id(headers: list[tuple[bytes, bytes]]) -> str | None:
+        """Extract mcp-session-id from response headers."""
+        for key, value in headers:
+            if key == b"mcp-session-id":
+                return value.decode()
+        return None
+
+    @staticmethod
+    def _get_owner_id() -> str:
+        """Get owner_id from contextvars (set by AuthMiddleware)."""
+        from .server import _owner_id
+
+        return _owner_id()

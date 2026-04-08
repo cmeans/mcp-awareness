@@ -18,9 +18,12 @@
 
 from __future__ import annotations
 
+import json
+from typing import Any
+
 import pytest
 
-from mcp_awareness.session_registry import SessionStore
+from mcp_awareness.session_registry import SessionRegistryMiddleware, SessionStore
 
 TEST_OWNER = "test-owner"
 
@@ -209,3 +212,132 @@ class TestSessionStoreRedirects:
         first_cleanup_time = session_store._last_cleanup
         session_store._schedule_cleanup()
         assert session_store._last_cleanup == first_cleanup_time
+
+
+# ---------------------------------------------------------------------------
+# Middleware helpers
+# ---------------------------------------------------------------------------
+
+
+async def _make_fastmcp_stub(
+    session_id: str = "new-sess-abc",
+    status: int = 200,
+    response_body: bytes = b'{"jsonrpc":"2.0","id":1,"result":{}}',
+) -> Any:
+    """Return an ASGI app that mimics FastMCP's initialize response."""
+
+    async def app(scope: dict[str, Any], receive: Any, send: Any) -> None:
+        while True:
+            msg = await receive()
+            if msg.get("type") == "http.request" and not msg.get("more_body", False):
+                break
+        headers: list[tuple[bytes, bytes]] = [(b"content-type", b"application/json")]
+        if session_id:
+            headers.append((b"mcp-session-id", session_id.encode()))
+        await send({"type": "http.response.start", "status": status, "headers": headers})
+        await send({"type": "http.response.body", "body": response_body})
+
+    return app
+
+
+async def _collect_response(
+    app: Any, scope: dict[str, Any], body: bytes = b""
+) -> tuple[int, bytes, list[tuple[bytes, bytes]]]:
+    """Send a request through an ASGI app, return (status, body, headers)."""
+    captured_status = 0
+    captured_body = b""
+    captured_headers: list[tuple[bytes, bytes]] = []
+
+    async def receive() -> dict[str, Any]:
+        return {"type": "http.request", "body": body}
+
+    async def send(message: dict[str, Any]) -> None:
+        nonlocal captured_status, captured_body, captured_headers
+        if message["type"] == "http.response.start":
+            captured_status = message["status"]
+            captured_headers = list(message.get("headers", []))
+        elif message["type"] == "http.response.body":
+            captured_body += message.get("body", b"")
+
+    await app(scope, receive, send)
+    return captured_status, captured_body, captured_headers
+
+
+def _mcp_post_scope(
+    path: str = "/mcp",
+    session_id: str | None = None,
+) -> dict[str, Any]:
+    """Build an ASGI scope for a POST /mcp request."""
+    headers: list[tuple[bytes, bytes]] = [(b"content-type", b"application/json")]
+    if session_id:
+        headers.append((b"mcp-session-id", session_id.encode()))
+    return {"type": "http", "method": "POST", "path": path, "headers": headers}
+
+
+# ---------------------------------------------------------------------------
+# TestMiddlewareInitialize
+# ---------------------------------------------------------------------------
+
+
+class TestMiddlewareInitialize:
+    """Tests for initialize (new session) capture."""
+
+    @pytest.mark.anyio
+    async def test_initialize_registers_session(self, session_store: SessionStore) -> None:
+        """POST /mcp without session_id registers the new session."""
+        inner = await _make_fastmcp_stub(session_id="new-sess-123")
+        mw = SessionRegistryMiddleware(inner, session_store, node_name="app-a")
+
+        scope = _mcp_post_scope()
+        body = json.dumps(
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "initialize",
+                "params": {
+                    "protocolVersion": "2025-03-26",
+                    "capabilities": {"roots": {"listChanged": True}},
+                    "clientInfo": {"name": "test-client", "version": "0.1"},
+                },
+            }
+        ).encode()
+
+        from mcp_awareness.server import _owner_ctx
+
+        token = _owner_ctx.set("test-owner")
+        try:
+            status, _resp_body, _headers = await _collect_response(mw, scope, body)
+        finally:
+            _owner_ctx.reset(token)
+
+        assert status == 200
+        session = session_store.lookup("new-sess-123")
+        assert session is not None
+        assert session["owner_id"] == "test-owner"
+        assert session["node"] == "app-a"
+        assert session["protocol_version"] == "2025-03-26"
+        assert session["capabilities"] == {"roots": {"listChanged": True}}
+        assert session["client_info"] == {"name": "test-client", "version": "0.1"}
+
+    @pytest.mark.anyio
+    async def test_non_mcp_path_passes_through(self, session_store: SessionStore) -> None:
+        """Requests to paths other than /mcp pass through unmodified."""
+        inner = await _make_fastmcp_stub()
+        mw = SessionRegistryMiddleware(inner, session_store, node_name="app-a")
+        scope = _mcp_post_scope(path="/health")
+        status, _, _ = await _collect_response(mw, scope)
+        assert status == 200
+        assert session_store.count_active("test-owner") == 0
+
+    @pytest.mark.anyio
+    async def test_non_http_passes_through(self, session_store: SessionStore) -> None:
+        """Non-HTTP scopes (websocket, lifespan) pass through."""
+        called = False
+
+        async def inner(scope: Any, receive: Any, send: Any) -> None:
+            nonlocal called
+            called = True
+
+        mw = SessionRegistryMiddleware(inner, session_store, node_name="app-a")
+        await mw({"type": "lifespan"}, None, None)
+        assert called
