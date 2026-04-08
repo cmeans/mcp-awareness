@@ -243,7 +243,7 @@ def create_bench_db(dsn: str, db_name: str) -> str:
                 cur.execute(
                     f'CREATE DATABASE "{db_name}"'
                     " ENCODING 'UTF8'"
-                    " LC_COLLATE 'en_US.UTF-8' LC_CTYPE 'en_US.UTF-8'"
+                    " LC_COLLATE 'C.UTF-8' LC_CTYPE 'C.UTF-8'"
                     " TEMPLATE template0"
                 )
                 print(f"  Created database: {db_name}")

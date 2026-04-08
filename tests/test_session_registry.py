@@ -1228,10 +1228,10 @@ class TestEnsureDatabase:
                     (test_db,),
                 )
                 row = cur.fetchone()
-                assert row is not None
+                assert row is not None, "Database was not created"
                 encoding, collate = row
-                assert encoding == 6  # 6 = UTF8
-                assert "UTF-8" in collate
+                assert encoding == 6, f"Expected UTF8 (6), got {encoding}"  # 6 = UTF8
+                assert collate == "C.UTF-8", f"Expected C.UTF-8, got {collate}"
         finally:
             # Clean up
             with psycopg.connect(admin_dsn, autocommit=True) as conn, conn.cursor() as cur:
