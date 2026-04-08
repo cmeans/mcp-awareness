@@ -103,9 +103,9 @@ hot_deploy() {
         if wait_healthy "$ip"; then
             enable_node "$name"
         else
-            echo "  ALERT: ${name} failed health check — leaving drained!"
-            echo "  Manual intervention required."
-            # Continue to next node — don't leave the whole service down
+            echo "  ABORT: ${name} failed health check — leaving drained!"
+            echo "  Manual intervention required. Remaining nodes untouched."
+            exit 1
         fi
     done
 
