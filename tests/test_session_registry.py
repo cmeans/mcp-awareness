@@ -1221,7 +1221,7 @@ class TestEnsureDatabase:
             # _ensure_database should create it
             SessionStore._ensure_database(test_dsn)
 
-            # Verify it exists and has UTF-8 encoding with C.UTF-8 locale
+            # Verify it exists and has UTF-8 encoding with C locale
             with psycopg.connect(admin_dsn, autocommit=True) as conn, conn.cursor() as cur:
                 cur.execute(
                     "SELECT encoding, datcollate FROM pg_database WHERE datname = %s",
@@ -1231,7 +1231,7 @@ class TestEnsureDatabase:
                 assert row is not None, "Database was not created"
                 encoding, collate = row
                 assert encoding == 6, f"Expected UTF8 (6), got {encoding}"  # 6 = UTF8
-                assert collate == "C.UTF-8", f"Expected C.UTF-8, got {collate}"
+                assert collate == "C", f"Expected C, got {collate}"
         finally:
             # Clean up
             with psycopg.connect(admin_dsn, autocommit=True) as conn, conn.cursor() as cur:

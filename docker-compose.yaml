@@ -69,7 +69,7 @@ services:
       POSTGRES_DB: awareness
       POSTGRES_USER: awareness
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-awareness-dev}
-      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --lc-collate=C.UTF-8 --lc-ctype=C.UTF-8"
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --lc-collate=C --lc-ctype=C"
     volumes:
       - ${AWARENESS_PG_DATA:-~/awareness-pg}:/var/lib/postgresql/data
     # Uncomment to access Postgres directly (e.g., for debugging)

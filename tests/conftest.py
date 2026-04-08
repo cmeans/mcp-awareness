@@ -44,10 +44,7 @@ os.environ.setdefault("TESTCONTAINERS_RYUK_DISABLED", "true")
 @pytest.fixture(scope="session")
 def pg_container():
     """Start a Postgres container once for the entire test session."""
-    with PostgresContainer("pgvector/pgvector:pg17").with_env(
-        "POSTGRES_INITDB_ARGS",
-        "--encoding=UTF8 --lc-collate=C.UTF-8 --lc-ctype=C.UTF-8",
-    ) as pg:
+    with PostgresContainer("pgvector/pgvector:pg17") as pg:
         yield pg
 
 
