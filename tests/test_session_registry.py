@@ -243,6 +243,56 @@ async def _make_fastmcp_stub(
     return app
 
 
+async def _make_sse_fastmcp_stub(
+    session_id: str = "new-sess-abc",
+    status: int = 200,
+    sse_data: str = '{"jsonrpc":"2.0","id":1,"result":{}}',
+) -> Any:
+    """Return an ASGI app that mimics MCP SDK 1.27.0 SSE initialize response.
+
+    Like EventSourceResponse, this calls receive() to detect client disconnect.
+    If receive returns http.disconnect immediately (the old bug), this would
+    abort before sending http.response.start — reproducing the 500 error.
+    """
+    import anyio
+
+    async def app(scope: dict[str, Any], receive: Any, send: Any) -> None:
+        # Read request body
+        while True:
+            msg = await receive()
+            if msg.get("type") == "http.request" and not msg.get("more_body", False):
+                break
+        headers: list[tuple[bytes, bytes]] = [(b"content-type", b"text/event-stream")]
+        if session_id:
+            headers.append((b"mcp-session-id", session_id.encode()))
+
+        # Mimic EventSourceResponse task group: stream + disconnect listener
+        async with anyio.create_task_group() as tg:
+            response_sent = anyio.Event()
+
+            async def stream_response() -> None:
+                await send({"type": "http.response.start", "status": status, "headers": headers})
+                body = f"event: message\ndata: {sse_data}\n\n".encode()
+                await send({"type": "http.response.body", "body": body, "more_body": False})
+                response_sent.set()
+
+            async def listen_for_disconnect() -> None:
+                # This is the critical path — if receive() returns http.disconnect
+                # before stream_response sends headers, the task group cancels
+                # and we get "ASGI callable returned without starting response"
+                msg = await receive()
+                if msg.get("type") == "http.disconnect":
+                    tg.cancel_scope.cancel()
+
+            tg.start_soon(stream_response)
+            tg.start_soon(listen_for_disconnect)
+            # Wait for response to complete before exiting task group
+            await response_sent.wait()
+            tg.cancel_scope.cancel()
+
+    return app
+
+
 async def _collect_response(
     app: Any, scope: dict[str, Any], body: bytes = b""
 ) -> tuple[int, bytes, list[tuple[bytes, bytes]]]:
@@ -323,6 +373,47 @@ class TestMiddlewareInitialize:
         assert session["client_info"] == {"name": "test-client", "version": "0.1"}
 
     @pytest.mark.anyio
+    async def test_initialize_sse_response_streams_through(
+        self, session_store: SessionStore
+    ) -> None:
+        """SSE initialize (MCP SDK >=1.27.0) streams through and registers session."""
+        inner = await _make_sse_fastmcp_stub(session_id="sse-sess-001")
+        mw = SessionRegistryMiddleware(inner, session_store, node_name="app-a")
+
+        scope = _mcp_post_scope()
+        body = json.dumps(
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "initialize",
+                "params": {
+                    "protocolVersion": "2025-03-26",
+                    "capabilities": {},
+                    "clientInfo": {"name": "test-sse", "version": "0.1"},
+                },
+            }
+        ).encode()
+
+        from mcp_awareness.server import _owner_ctx
+
+        token = _owner_ctx.set("test-owner")
+        try:
+            status, resp_body, headers = await _collect_response(mw, scope, body)
+        finally:
+            _owner_ctx.reset(token)
+
+        assert status == 200
+        # Verify SSE content-type was preserved
+        content_types = [v for k, v in headers if k == b"content-type"]
+        assert any(b"text/event-stream" in ct for ct in content_types)
+        # Verify SSE body was streamed
+        assert b"event: message" in resp_body
+        # Verify session was registered
+        session = session_store.lookup("sse-sess-001")
+        assert session is not None
+        assert session["owner_id"] == "test-owner"
+
+    @pytest.mark.anyio
     async def test_non_mcp_path_passes_through(self, session_store: SessionStore) -> None:
         """Requests to paths other than /mcp pass through unmodified."""
         inner = await _make_fastmcp_stub()
@@ -371,6 +462,32 @@ class TestMiddlewareSubsequent:
         finally:
             _owner_ctx.reset(token)
         assert status == 200
+
+    @pytest.mark.anyio
+    async def test_known_session_sse_streams_through(self, session_store: SessionStore) -> None:
+        """SSE response for a known session streams through without buffering."""
+        session_store.register(
+            session_id="sess-sse",
+            owner_id="test-owner",
+            node="app-a",
+            protocol_version="2025-03-26",
+            capabilities={},
+            client_info={},
+        )
+        inner = await _make_sse_fastmcp_stub(session_id="sess-sse")
+        mw = SessionRegistryMiddleware(inner, session_store, node_name="app-a")
+        scope = _mcp_post_scope(session_id="sess-sse")
+        from mcp_awareness.server import _owner_ctx
+
+        token = _owner_ctx.set("test-owner")
+        try:
+            status, resp_body, headers = await _collect_response(mw, scope)
+        finally:
+            _owner_ctx.reset(token)
+        assert status == 200
+        content_types = [v for k, v in headers if k == b"content-type"]
+        assert any(b"text/event-stream" in ct for ct in content_types)
+        assert b"event: message" in resp_body
 
     @pytest.mark.anyio
     async def test_owner_mismatch_rejected(self, session_store: SessionStore) -> None:
@@ -596,6 +713,89 @@ class TestMiddlewareReinit:
         # Response carries new session_id
         session_header = dict(headers).get(b"mcp-session-id", b"").decode()
         assert session_header == "reinit-new-sess"
+
+    @pytest.mark.anyio
+    async def test_reinit_on_400_with_sse_responses(self, session_store: SessionStore) -> None:
+        """Re-init works when the inner app returns SSE responses (MCP SDK >=1.27.0)."""
+        import anyio
+
+        session_store.register(
+            session_id="old-sse-sess",
+            owner_id="test-owner",
+            node="app-a",
+            protocol_version="2025-03-26",
+            capabilities={},
+            client_info={"name": "test-client", "version": "0.1"},
+        )
+
+        call_count = 0
+
+        async def reinit_sse_app(scope: Any, receive: Any, send: Any) -> None:
+            nonlocal call_count
+            call_count += 1
+            while True:
+                msg = await receive()
+                if msg.get("type") == "http.request" and not msg.get("more_body", False):
+                    break
+
+            if call_count == 1:
+                # Original request — session not in local memory, return 400
+                await send(
+                    {
+                        "type": "http.response.start",
+                        "status": 400,
+                        "headers": [(b"content-type", b"text/plain")],
+                    }
+                )
+                await send({"type": "http.response.body", "body": b"Bad Request"})
+            else:
+                # Synthetic init + replay — SSE responses that call receive()
+                headers: list[tuple[bytes, bytes]] = [
+                    (b"content-type", b"text/event-stream"),
+                    (b"mcp-session-id", b"reinit-sse-new"),
+                ]
+                async with anyio.create_task_group() as tg:
+                    done = anyio.Event()
+
+                    async def stream() -> None:
+                        await send(
+                            {"type": "http.response.start", "status": 200, "headers": headers}
+                        )
+                        await send(
+                            {
+                                "type": "http.response.body",
+                                "body": b'event: message\ndata: {"ok":true}\n\n',
+                                "more_body": False,
+                            }
+                        )
+                        done.set()
+
+                    async def listen() -> None:
+                        msg = await receive()
+                        if msg.get("type") == "http.disconnect":
+                            tg.cancel_scope.cancel()
+
+                    tg.start_soon(stream)
+                    tg.start_soon(listen)
+                    await done.wait()
+                    tg.cancel_scope.cancel()
+
+        mw = SessionRegistryMiddleware(reinit_sse_app, session_store, node_name="app-b")
+        scope = _mcp_post_scope(session_id="old-sse-sess")
+        body = b'{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"get_briefing"}}'
+
+        from mcp_awareness.server import _owner_ctx
+
+        token = _owner_ctx.set("test-owner")
+        try:
+            status, _resp_body, _headers = await _collect_response(mw, scope, body)
+        finally:
+            _owner_ctx.reset(token)
+
+        assert status == 200
+        assert call_count == 3
+        new_session = session_store.lookup("reinit-sse-new")
+        assert new_session is not None
 
     @pytest.mark.anyio
     async def test_reinit_failure_returns_original_error(
@@ -1140,10 +1340,35 @@ class TestCoverageEdgeCases:
 
         body, replay = await SessionRegistryMiddleware._buffer_body(disconnect_receive)
         assert body == b""
-        # Replay after exhaustion returns disconnect
+        # Replay returns the disconnect message
         msg = await replay()
         assert msg["type"] == "http.disconnect"
-        # Second call to replay — StopIteration path
+        # After exhaustion, forwards to original receive (also disconnect here)
+        msg2 = await replay()
+        assert msg2["type"] == "http.disconnect"
+
+    @pytest.mark.anyio
+    async def test_buffer_body_forwards_to_original_receive_after_replay(
+        self, session_store: SessionStore
+    ) -> None:
+        """After buffered chunks are replayed, subsequent calls forward to the original receive."""
+        call_count = 0
+
+        async def original_receive() -> dict:
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return {"type": "http.request", "body": b"hello", "more_body": False}
+            # Simulate a real long-lived connection (SSE disconnect detection)
+            return {"type": "http.disconnect"}
+
+        body, replay = await SessionRegistryMiddleware._buffer_body(original_receive)
+        assert body == b"hello"
+        # First call replays the buffered chunk
+        msg1 = await replay()
+        assert msg1["type"] == "http.request"
+        assert msg1["body"] == b"hello"
+        # Second call forwards to original receive (which returns disconnect)
         msg2 = await replay()
         assert msg2["type"] == "http.disconnect"
 

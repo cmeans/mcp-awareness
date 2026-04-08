@@ -25,6 +25,7 @@ import threading
 import time
 from typing import Any
 
+import anyio
 import psycopg
 from psycopg.rows import dict_row
 from psycopg_pool import ConnectionPool
@@ -391,18 +392,30 @@ class SessionRegistryMiddleware:
         # Buffer body for potential re-init replay
         body, replay_receive = await self._buffer_body(receive)
 
-        # Buffer response to inspect status before sending to client.
-        # This adds latency equal to response size — acceptable for JSON-RPC
-        # responses but would be problematic for SSE streams. POST /mcp
-        # responses are always JSON-RPC, so this is safe.
+        # Intercept http.response.start to inspect status. For 2xx (success)
+        # responses — which may be SSE streams in MCP SDK >=1.27.0 — forward
+        # all messages immediately. For 400/404 (session not found) buffer the
+        # response so we can attempt cross-node re-init without the client
+        # seeing the error. Error responses are always small JSON, not SSE.
         captured_status = 0
-        captured_response_parts: list[Message] = []
+        buffered_parts: list[Message] = []
+        streaming = False  # True once we've committed to forwarding to client
 
         async def capturing_send(message: Message) -> None:
-            nonlocal captured_status
+            nonlocal captured_status, streaming
             if message["type"] == "http.response.start":
                 captured_status = message["status"]
-            captured_response_parts.append(message)
+                if 200 <= captured_status < 300:
+                    # Success — stream through immediately (may be SSE)
+                    streaming = True
+                    await send(message)
+                else:
+                    # Error — buffer for potential re-init interception
+                    buffered_parts.append(message)
+            elif streaming:
+                await send(message)
+            else:
+                buffered_parts.append(message)
 
         await self.app(scope, replay_receive, capturing_send)
 
@@ -419,9 +432,10 @@ class SessionRegistryMiddleware:
                 return  # Re-init handled the response
             logger.warning("Re-initialization failed for session %s", session_id)
 
-        # Send captured response to client (original or error)
-        for part in captured_response_parts:
-            await send(part)
+        # Send buffered error response to client (only if not already streaming)
+        if not streaming:
+            for part in buffered_parts:
+                await send(part)
 
         # Touch on success (debounced)
         if 200 <= captured_status < 300:
@@ -467,8 +481,20 @@ class SessionRegistryMiddleware:
         init_status = 0
         init_headers: list[tuple[bytes, bytes]] = []
 
+        init_body_sent = False
+
         async def init_receive() -> Message:
-            return {"type": "http.request", "body": init_body}
+            nonlocal init_body_sent
+            if not init_body_sent:
+                init_body_sent = True
+                return {"type": "http.request", "body": init_body}
+            # Block until the task group cancels us.  SSE disconnect detection
+            # calls receive() and aborts if it sees http.disconnect, so we must
+            # keep a live receive instead of returning a fake disconnect.  The
+            # enclosing task group in _reinitialize cancels this coroutine once
+            # the SSE response stream completes.
+            while True:
+                await anyio.sleep(3600)
 
         async def init_send(message: Message) -> None:
             nonlocal init_status, init_headers
@@ -506,8 +532,16 @@ class SessionRegistryMiddleware:
         # Step 3: Replay original request with new session_id
         replay_scope = self._rewrite_session_header(original_scope, new_session_id)
 
+        replay_body_sent = False
+
         async def replay_receive() -> Message:
-            return {"type": "http.request", "body": original_body}
+            nonlocal replay_body_sent
+            if not replay_body_sent:
+                replay_body_sent = True
+                return {"type": "http.request", "body": original_body}
+            # Block until cancelled — see init_receive for explanation.
+            while True:
+                await anyio.sleep(3600)
 
         async def replay_send(message: Message) -> None:
             if message["type"] == "http.response.start":
@@ -576,7 +610,14 @@ class SessionRegistryMiddleware:
 
     @staticmethod
     async def _buffer_body(receive: Receive) -> tuple[bytes, Receive]:
-        """Buffer the full request body and return (body_bytes, replay_receive)."""
+        """Buffer the full request body and return (body_bytes, replay_receive).
+
+        After buffered chunks are replayed, subsequent calls forward to the
+        original ``receive``.  This is critical for SSE responses (MCP SDK
+        >=1.27.0) where ``EventSourceResponse`` calls ``receive()`` to detect
+        client disconnect — returning a synthetic ``http.disconnect`` would
+        abort the SSE stream before sending any response.
+        """
         chunks: list[Message] = []
         body_parts: list[bytes] = []
         while True:
@@ -596,7 +637,9 @@ class SessionRegistryMiddleware:
             try:
                 return next(chunk_iter)
             except StopIteration:
-                return {"type": "http.disconnect"}
+                # Forward to the real receive so SSE disconnect detection
+                # works — do NOT return a synthetic http.disconnect.
+                return await receive()
 
         return body, replay_receive
 
