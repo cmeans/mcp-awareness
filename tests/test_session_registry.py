@@ -715,6 +715,89 @@ class TestMiddlewareReinit:
         assert session_header == "reinit-new-sess"
 
     @pytest.mark.anyio
+    async def test_reinit_on_400_with_sse_responses(self, session_store: SessionStore) -> None:
+        """Re-init works when the inner app returns SSE responses (MCP SDK >=1.27.0)."""
+        import anyio
+
+        session_store.register(
+            session_id="old-sse-sess",
+            owner_id="test-owner",
+            node="app-a",
+            protocol_version="2025-03-26",
+            capabilities={},
+            client_info={"name": "test-client", "version": "0.1"},
+        )
+
+        call_count = 0
+
+        async def reinit_sse_app(scope: Any, receive: Any, send: Any) -> None:
+            nonlocal call_count
+            call_count += 1
+            while True:
+                msg = await receive()
+                if msg.get("type") == "http.request" and not msg.get("more_body", False):
+                    break
+
+            if call_count == 1:
+                # Original request — session not in local memory, return 400
+                await send(
+                    {
+                        "type": "http.response.start",
+                        "status": 400,
+                        "headers": [(b"content-type", b"text/plain")],
+                    }
+                )
+                await send({"type": "http.response.body", "body": b"Bad Request"})
+            else:
+                # Synthetic init + replay — SSE responses that call receive()
+                headers: list[tuple[bytes, bytes]] = [
+                    (b"content-type", b"text/event-stream"),
+                    (b"mcp-session-id", b"reinit-sse-new"),
+                ]
+                async with anyio.create_task_group() as tg:
+                    done = anyio.Event()
+
+                    async def stream() -> None:
+                        await send(
+                            {"type": "http.response.start", "status": 200, "headers": headers}
+                        )
+                        await send(
+                            {
+                                "type": "http.response.body",
+                                "body": b'event: message\ndata: {"ok":true}\n\n',
+                                "more_body": False,
+                            }
+                        )
+                        done.set()
+
+                    async def listen() -> None:
+                        msg = await receive()
+                        if msg.get("type") == "http.disconnect":
+                            tg.cancel_scope.cancel()
+
+                    tg.start_soon(stream)
+                    tg.start_soon(listen)
+                    await done.wait()
+                    tg.cancel_scope.cancel()
+
+        mw = SessionRegistryMiddleware(reinit_sse_app, session_store, node_name="app-b")
+        scope = _mcp_post_scope(session_id="old-sse-sess")
+        body = b'{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"get_briefing"}}'
+
+        from mcp_awareness.server import _owner_ctx
+
+        token = _owner_ctx.set("test-owner")
+        try:
+            status, _resp_body, _headers = await _collect_response(mw, scope, body)
+        finally:
+            _owner_ctx.reset(token)
+
+        assert status == 200
+        assert call_count == 3
+        new_session = session_store.lookup("reinit-sse-new")
+        assert new_session is not None
+
+    @pytest.mark.anyio
     async def test_reinit_failure_returns_original_error(
         self,
         session_store: SessionStore,

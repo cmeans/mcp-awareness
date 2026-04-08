@@ -14,7 +14,7 @@
 > **Your AI's memory shouldn't be locked to one app. It should follow you everywhere.**
 
 > [!NOTE]
-> Early-stage but actively deployed — 724 tests, 15 releases, in daily use across Claude.ai, Claude Code, and Claude Desktop. See [Current status](#current-status) for what's working and what's planned.
+> Early-stage but actively deployed — 725 tests, 15 releases, in daily use across Claude.ai, Claude Code, and Claude Desktop. See [Current status](#current-status) for what's working and what's planned.
 
 ## What this is
 
@@ -396,7 +396,7 @@ For single-user deployments, secret path + WAF is sufficient. For multi-user, en
 - Secret path auth + Cloudflare WAF for edge-level access control
 - Docker Compose with Postgres, optional Ollama, named Cloudflare Tunnel, or ephemeral quick tunnel
 - Request timing instrumentation and `/health` endpoint
-- 724 tests (all against real Postgres + Ollama in CI), strict type checking, CI pipeline with coverage, QA gate
+- 725 tests (all against real Postgres + Ollama in CI), strict type checking, CI pipeline with coverage, QA gate
 
 ### Not yet implemented
 - Layer 2 (baseline) detection — rolling averages and deviation calculation
