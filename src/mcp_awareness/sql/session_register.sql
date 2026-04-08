@@ -1,3 +1,9 @@
+/* name: session_register */
+/* mode: literal */
+/* Insert a new session into session_registry.
+   Params: session_id, owner_id, node, protocol_version, capabilities (jsonb),
+           client_info (jsonb), ttl_seconds
+*/
 INSERT INTO session_registry
     (session_id, owner_id, node, protocol_version, capabilities, client_info, created_at, last_seen, expires_at)
 VALUES

@@ -149,7 +149,7 @@ class SessionStore:
         """Delete all redirect mappings pointing to the given session_id."""
         with self._pool.connection() as conn, conn.transaction(), conn.cursor() as cur:
             cur.execute(
-                "DELETE FROM session_redirects WHERE new_session_id = %s",
+                _load_sql("session_delete_redirects_to"),
                 (session_id,),
             )
 
@@ -348,7 +348,10 @@ class SessionRegistryMiddleware:
         # Buffer body for potential re-init replay
         body, replay_receive = await self._buffer_body(receive)
 
-        # Pass through to FastMCP and capture response (don't send to client yet)
+        # Buffer response to inspect status before sending to client.
+        # This adds latency equal to response size — acceptable for JSON-RPC
+        # responses but would be problematic for SSE streams. POST /mcp
+        # responses are always JSON-RPC, so this is safe.
         captured_status = 0
         captured_response_parts: list[Message] = []
 

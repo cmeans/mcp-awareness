@@ -276,8 +276,8 @@ Stores active MCP sessions for cross-node persistence and recovery. Feature-gate
 | `owner_id` | TEXT | No | Owner from JWT `sub` claim (or default owner for unauthenticated connections). |
 | `node` | TEXT | Yes | Node name that created the session (`AWARENESS_SESSION_NODE_NAME`, defaults to hostname). |
 | `protocol_version` | TEXT | Yes | MCP protocol version negotiated during `initialize`. |
-| `capabilities` | JSONB | Yes | Client capabilities from the `initialize` request. |
-| `client_info` | JSONB | Yes | Client info (name, version) from the `initialize` request. |
+| `capabilities` | JSONB | No | Client capabilities from the `initialize` request. Default: `{}`. |
+| `client_info` | JSONB | No | Client info (name, version) from the `initialize` request. Default: `{}`. |
 | `created_at` | TIMESTAMPTZ | No | When the session was first registered. Default: `now()`. |
 | `last_seen` | TIMESTAMPTZ | No | Last request time. Debounced — updated at most once per 30 seconds. Default: `now()`. |
 | `expires_at` | TIMESTAMPTZ | No | Sliding expiry timestamp. Extended by `AWARENESS_SESSION_TTL` seconds on each touch. |

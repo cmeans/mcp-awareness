@@ -1,3 +1,9 @@
+/* name: session_create_tables */
+/* mode: literal */
+/* Create session_registry and session_redirects tables with indexes.
+   Runs on startup if AWARENESS_SESSION_DATABASE_URL is set.
+   Uses IF NOT EXISTS — safe to run repeatedly (idempotent).
+*/
 CREATE TABLE IF NOT EXISTS session_registry (
     session_id       TEXT PRIMARY KEY,
     owner_id         TEXT NOT NULL,
