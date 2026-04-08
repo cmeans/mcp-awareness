@@ -298,16 +298,19 @@ if SESSION_DATABASE_URL:
 
 ## Deployment (holodeck)
 
-1. Create database on CT 200:
+1. Verify pg_hba.conf on CT 200 allows `awareness` user to access `all` databases
+   (needed for both `awareness_sessions` and `postgres` for auto-create).
+   If using per-database rules, add entries for `awareness_sessions` and `postgres`.
+2. Create database on CT 200 (or let `_ensure_database` auto-create on first startup):
    ```sql
-   CREATE DATABASE awareness_sessions OWNER awareness;
+   CREATE DATABASE awareness_sessions OWNER awareness ENCODING 'UTF8' LC_COLLATE 'C' LC_CTYPE 'C' TEMPLATE template0;
    ```
-2. Add env vars to CT 210 and CT 211:
+3. Add env vars to CT 210 and CT 211:
    ```bash
    AWARENESS_SESSION_DATABASE_URL=postgresql://awareness:<pw>@192.168.200.100:5432/awareness_sessions
    AWARENESS_SESSION_NODE_NAME=app-a  # or app-b
    ```
-3. Hot deploy — middleware auto-creates schema on first startup
+4. Hot deploy — middleware auto-creates schema on first startup
 
 ## Testing
 

@@ -85,6 +85,7 @@ services:
       POSTGRES_DB: awareness
       POSTGRES_USER: awareness
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-awareness-oauth}
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --lc-collate=C --lc-ctype=C"
     volumes:
       - ${AWARENESS_OAUTH_PG_DATA:-~/awareness-oauth-pg}:/var/lib/postgresql/data
     command:

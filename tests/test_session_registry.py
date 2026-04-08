@@ -1221,10 +1221,17 @@ class TestEnsureDatabase:
             # _ensure_database should create it
             SessionStore._ensure_database(test_dsn)
 
-            # Verify it exists
+            # Verify it exists and has UTF-8 encoding with C locale
             with psycopg.connect(admin_dsn, autocommit=True) as conn, conn.cursor() as cur:
-                cur.execute("SELECT 1 FROM pg_database WHERE datname = %s", (test_db,))
-                assert cur.fetchone() is not None
+                cur.execute(
+                    "SELECT encoding, datcollate FROM pg_database WHERE datname = %s",
+                    (test_db,),
+                )
+                row = cur.fetchone()
+                assert row is not None, "Database was not created"
+                encoding, collate = row
+                assert encoding == 6, f"Expected UTF8 (6), got {encoding}"  # 6 = UTF8
+                assert collate == "C", f"Expected C, got {collate}"
         finally:
             # Clean up
             with psycopg.connect(admin_dsn, autocommit=True) as conn, conn.cursor() as cur:
@@ -1251,6 +1258,58 @@ class TestEnsureDatabase:
         with patch("psycopg.connect", side_effect=Exception("connection refused")):
             # Should log debug and not raise
             SessionStore._ensure_database("postgresql://user:pass@localhost/nonexistent_db")
+
+
+class TestCreateDatabaseSqlIntegrity:
+    """Guard against {} in SQL comments breaking psycopg.sql.SQL().format()."""
+
+    def test_session_create_database_has_exactly_one_placeholder(self) -> None:
+        """session_create_database.sql must have exactly one {} placeholder."""
+        from mcp_awareness.session_registry import _load_sql
+
+        sql_text = _load_sql("session_create_database")
+        count = sql_text.count("{}")
+        braces = "{}"
+        assert count == 1, (
+            f"session_create_database.sql has {count} occurrences of {braces}, "
+            f"but psycopg.sql.SQL().format() treats ALL of them as placeholders "
+            f"(including those in comments). Must be exactly 1."
+        )
+
+    def test_ensure_database_rejects_multiple_placeholders(self, pg_container: Any) -> None:
+        """_ensure_database fails safely when SQL has multiple {} placeholders."""
+        from mcp_awareness.session_registry import _sql_cache
+
+        base_url = pg_container.get_connection_url().replace(
+            "postgresql+psycopg2://", "postgresql://"
+        )
+        from psycopg import conninfo
+
+        params = conninfo.conninfo_to_dict(base_url)
+        params["dbname"] = "should_not_exist"
+        test_dsn = conninfo.make_conninfo(**params)
+
+        original = _sql_cache.get("session_create_database")
+        try:
+            _sql_cache["session_create_database"] = "-- {} comment\nCREATE DATABASE {}"
+            # ValueError is caught by the except block — DB should not be created
+            SessionStore._ensure_database(test_dsn)
+
+            import psycopg
+
+            admin_params = {**params, "dbname": "postgres"}
+            admin_dsn = conninfo.make_conninfo(**admin_params)
+            with psycopg.connect(admin_dsn, autocommit=True) as conn, conn.cursor() as cur:
+                cur.execute(
+                    "SELECT 1 FROM pg_database WHERE datname = %s",
+                    ("should_not_exist",),
+                )
+                assert cur.fetchone() is None, "DB should not have been created"
+        finally:
+            if original is not None:
+                _sql_cache["session_create_database"] = original
+            else:
+                _sql_cache.pop("session_create_database", None)
 
 
 # ---------------------------------------------------------------------------

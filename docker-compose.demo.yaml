@@ -34,6 +34,7 @@ services:
       POSTGRES_DB: awareness
       POSTGRES_USER: awareness
       POSTGRES_PASSWORD: mcp-awareness-demo
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --lc-collate=C --lc-ctype=C"
     volumes:
       - awareness-pg:/var/lib/postgresql/data
     # Uncomment to access Postgres directly (e.g., for debugging)

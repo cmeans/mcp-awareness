@@ -93,7 +93,7 @@ Synology NAS "Seska" (192.168.200.52)
 - Shared preload libraries: `pg_stat_statements`
 
 ### Security
-- `pg_hba.conf`: scram-sha-256 for `192.168.200.0/24`
+- `pg_hba.conf`: scram-sha-256 for `192.168.200.0/24`, `all` databases (awareness user needs access to `awareness`, `awareness_sessions`, and `postgres` for auto-create)
 - Dedicated `awareness` database and user
 - Strong password (generated, stored in KeePass)
 

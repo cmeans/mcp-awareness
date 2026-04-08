@@ -94,9 +94,16 @@ class SessionStore:
                 cur.execute("SELECT 1 FROM pg_database WHERE datname = %s", (dbname,))
                 if cur.fetchone():
                     return
-                cur.execute(
-                    psycopg.sql.SQL("CREATE DATABASE {}").format(psycopg.sql.Identifier(dbname))
-                )
+                sql_text = _load_sql("session_create_database").strip()
+                # Guard: psycopg.sql.SQL().format() treats ALL {} as
+                # placeholders, including those in SQL comments. Fail
+                # loudly rather than silently swallowing an IndexError.
+                if sql_text.count("{}") != 1:
+                    raise ValueError(
+                        f"session_create_database.sql must contain exactly 1 "
+                        f"placeholder ({{{{}}}}), found {sql_text.count('{}')}"
+                    )
+                cur.execute(psycopg.sql.SQL(sql_text).format(psycopg.sql.Identifier(dbname)))
                 logger.info("Created session database: %s", dbname)
         except Exception as exc:
             # Not fatal — database may already exist or user lacks CREATEDB.

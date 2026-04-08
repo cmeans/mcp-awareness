@@ -240,7 +240,12 @@ def create_bench_db(dsn: str, db_name: str) -> str:
         with conn.cursor() as cur:
             cur.execute(f"SELECT 1 FROM pg_database WHERE datname = %s", (db_name,))
             if not cur.fetchone():
-                cur.execute(f'CREATE DATABASE "{db_name}"')
+                cur.execute(
+                    f'CREATE DATABASE "{db_name}"'
+                    " ENCODING 'UTF8'"
+                    " LC_COLLATE 'C' LC_CTYPE 'C'"
+                    " TEMPLATE template0"
+                )
                 print(f"  Created database: {db_name}")
             else:
                 print(f"  Database exists: {db_name}")
