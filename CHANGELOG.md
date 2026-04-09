@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - `_LazyStore` thread safety — added double-checked locking to prevent duplicate `PostgresStore`/connection pool creation under concurrent access from embedding workers, cleanup thread, or parallel requests ([#164](https://github.com/cmeans/mcp-awareness/issues/164))
 - SQL template injection hardening — replaced `str.format()` with `psycopg.sql.SQL` composition across all 13 dynamic query sites in `postgres_store.py`, enforced via `psql.Composable` types that mypy validates at the call boundary ([#165](https://github.com/cmeans/mcp-awareness/issues/165))
+- `get_unread(since=...)` param ordering bug — `since` value was passed as `owner_id` and vice versa due to SQL placeholder position mismatch (pre-existing, discovered during #165 coverage work)
 
 ## [0.16.1] - 2026-04-09
 

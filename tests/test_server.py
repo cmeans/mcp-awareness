@@ -2339,6 +2339,112 @@ class TestReadActionTracking:
         assert "action" in types
 
     @pytest.mark.anyio
+    async def test_get_reads_with_since_and_platform(self) -> None:
+        """Exercise the since and platform filter branches in get_reads."""
+        s = _store()
+        entry = s.add(
+            TEST_OWNER,
+            Entry(
+                id=make_id(),
+                type=EntryType.NOTE,
+                source="test",
+                tags=[],
+                created=now_utc(),
+                expires=None,
+                data={"description": "read filter test"},
+            ),
+        )
+        s.log_read(TEST_OWNER, [entry.id], tool_used="test", platform="claude-code")
+        reads = json.loads(
+            await server_mod.get_reads(since="2020-01-01T00:00:00Z", platform="claude-code")
+        )["entries"]
+        assert len(reads) >= 1
+        assert reads[0]["platform"] == "claude-code"
+
+    @pytest.mark.anyio
+    async def test_get_actions_with_since(self) -> None:
+        """Exercise the since filter branch in get_actions."""
+        s = _store()
+        entry = s.add(
+            TEST_OWNER,
+            Entry(
+                id=make_id(),
+                type=EntryType.NOTE,
+                source="test",
+                tags=[],
+                created=now_utc(),
+                expires=None,
+                data={"description": "action filter test"},
+            ),
+        )
+        await server_mod.acted_on(entry_id=entry.id, action="filtered action")
+        actions = json.loads(await server_mod.get_actions(since="2020-01-01T00:00:00Z"))["entries"]
+        assert len(actions) >= 1
+
+    @pytest.mark.anyio
+    async def test_get_unread_with_since(self) -> None:
+        """Exercise the since filter branch in get_unread."""
+        s = _store()
+        s.add(
+            TEST_OWNER,
+            Entry(
+                id=make_id(),
+                type=EntryType.NOTE,
+                source="test",
+                tags=[],
+                created=now_utc(),
+                expires=None,
+                data={"description": "unread since test"},
+            ),
+        )
+        result = json.loads(await server_mod.get_unread(since="2020-01-01T00:00:00Z"))
+        assert isinstance(result["entries"], list)
+
+    @pytest.mark.anyio
+    async def test_get_activity_with_since_and_platform(self) -> None:
+        """Exercise the since and platform filter branches in get_activity."""
+        s = _store()
+        entry = s.add(
+            TEST_OWNER,
+            Entry(
+                id=make_id(),
+                type=EntryType.NOTE,
+                source="test",
+                tags=[],
+                created=now_utc(),
+                expires=None,
+                data={"description": "activity filter test"},
+            ),
+        )
+        s.log_read(TEST_OWNER, [entry.id], tool_used="test", platform="claude-code")
+        await server_mod.acted_on(entry_id=entry.id, action="filtered", platform="claude-code")
+        activity = json.loads(
+            await server_mod.get_activity(since="2020-01-01T00:00:00Z", platform="claude-code")
+        )["entries"]
+        assert len(activity) >= 1
+
+    @pytest.mark.anyio
+    async def test_query_entries_default_where(self) -> None:
+        """Exercise _query_entries with no where clause (default WHERE)."""
+        s = _store()
+        assert isinstance(s, PostgresStore)
+        s.add(
+            TEST_OWNER,
+            Entry(
+                id=make_id(),
+                type=EntryType.NOTE,
+                source="test",
+                tags=[],
+                created=now_utc(),
+                expires=None,
+                data={"description": "default where test"},
+            ),
+        )
+        # Call with no where — exercises the DEFAULT_WHERE branch
+        results = s._query_entries(TEST_OWNER)
+        assert len(results) >= 1
+
+    @pytest.mark.anyio
     async def test_list_mode_includes_read_counts(self) -> None:
         """List mode enriches entries with read_count and last_read."""
         from mcp_awareness.schema import Entry, EntryType, make_id, now_utc
