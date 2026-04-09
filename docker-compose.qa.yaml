@@ -71,7 +71,7 @@ services:
       start_period: 10s
 
   ollama-qa:
-    image: ollama/ollama:latest
+    image: ollama/ollama:0.19.0
     container_name: awareness-ollama-qa
     restart: unless-stopped
     entrypoint: ["/bin/sh", "-c"]
