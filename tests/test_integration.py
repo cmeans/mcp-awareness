@@ -216,3 +216,149 @@ class TestMcpEndpoint:
         )
         # MCP streamable-http should return 200 with an SSE or JSON response
         assert r.status_code == 200
+
+
+def _start_stateless_server(pg_dsn: str, port: int) -> str:
+    """Start a server in stateless HTTP mode. Returns base URL."""
+    os.environ["AWARENESS_DATABASE_URL"] = pg_dsn
+    os.environ["AWARENESS_TRANSPORT"] = "streamable-http"
+    os.environ["AWARENESS_HOST"] = "127.0.0.1"
+    os.environ["AWARENESS_PORT"] = str(port)
+    os.environ["AWARENESS_MOUNT_PATH"] = ""
+    os.environ["AWARENESS_STATELESS_HTTP"] = "true"
+    os.environ.pop("AWARENESS_EMBEDDING_PROVIDER", None)
+    os.environ.pop("AWARENESS_SESSION_DATABASE_URL", None)
+
+    import mcp_awareness.server as server_mod
+
+    server_mod._LazyStore._instance = None
+    importlib.reload(server_mod)
+
+    t = threading.Thread(target=server_mod.main, daemon=True)
+    t.start()
+
+    base = f"http://127.0.0.1:{port}"
+    _wait_for_health(base, timeout=10.0)
+    return base
+
+
+def _cleanup_stateless_env() -> None:
+    """Remove stateless env var and reload to avoid leaking into other tests."""
+    os.environ.pop("AWARENESS_STATELESS_HTTP", None)
+    import mcp_awareness.server as server_mod
+
+    importlib.reload(server_mod)
+
+
+class TestStatelessHTTPIntegration:
+    """Integration tests for stateless HTTP mode."""
+
+    @pytest.fixture(autouse=True)
+    def _cleanup_after(self) -> None:  # type: ignore[return]
+        yield
+        _cleanup_stateless_env()
+
+    def test_tool_call_without_session(self, pg_dsn: str) -> None:
+        """Tool calls work in stateless mode without initialize handshake."""
+        port = _free_port()
+        base = _start_stateless_server(pg_dsn, port)
+
+        # Call tools/list directly — no initialize, no session ID
+        r = httpx.post(
+            f"{base}/mcp",
+            json={
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/list",
+                "params": {},
+            },
+            headers={
+                "Content-Type": "application/json",
+                "Accept": "application/json, text/event-stream",
+            },
+            timeout=5.0,
+        )
+        assert r.status_code == 200
+        # No session ID in response headers
+        assert "mcp-session-id" not in r.headers
+
+    def test_no_session_id_in_responses(self, pg_dsn: str) -> None:
+        """Stateless mode never returns Mcp-Session-Id header."""
+        port = _free_port()
+        base = _start_stateless_server(pg_dsn, port)
+
+        # Even an initialize request should not return a session ID
+        r = httpx.post(
+            f"{base}/mcp",
+            json={
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "initialize",
+                "params": {
+                    "protocolVersion": "2025-03-26",
+                    "capabilities": {},
+                    "clientInfo": {"name": "test", "version": "0.1.0"},
+                },
+            },
+            headers={
+                "Content-Type": "application/json",
+                "Accept": "application/json, text/event-stream",
+            },
+            timeout=5.0,
+        )
+        assert r.status_code == 200
+        assert "mcp-session-id" not in r.headers
+
+    def test_no_409_after_restart(self, pg_dsn: str) -> None:
+        """In stateless mode, a stale session ID doesn't cause 409."""
+        port = _free_port()
+        base = _start_stateless_server(pg_dsn, port)
+
+        # Send a request with a fake stale session ID
+        r = httpx.post(
+            f"{base}/mcp",
+            json={
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/list",
+                "params": {},
+            },
+            headers={
+                "Content-Type": "application/json",
+                "Accept": "application/json, text/event-stream",
+                "Mcp-Session-Id": "stale-session-id-from-previous-life",
+            },
+            timeout=5.0,
+        )
+        # Should NOT be 409 — stateless mode ignores session IDs
+        assert r.status_code != 409
+
+    def test_concurrent_stateless_requests(self, pg_dsn: str) -> None:
+        """Multiple concurrent requests each get independent transports."""
+        import concurrent.futures
+
+        port = _free_port()
+        base = _start_stateless_server(pg_dsn, port)
+
+        def _make_request(request_id: int) -> int:
+            r = httpx.post(
+                f"{base}/mcp",
+                json={
+                    "jsonrpc": "2.0",
+                    "id": request_id,
+                    "method": "tools/list",
+                    "params": {},
+                },
+                headers={
+                    "Content-Type": "application/json",
+                    "Accept": "application/json, text/event-stream",
+                },
+                timeout=10.0,
+            )
+            return r.status_code
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=5) as pool:
+            futures = [pool.submit(_make_request, i) for i in range(5)]
+            results = [f.result() for f in concurrent.futures.as_completed(futures)]
+
+        assert all(status == 200 for status in results), f"Statuses: {results}"

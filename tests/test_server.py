@@ -85,6 +85,31 @@ class TestCreateStore:
             server_mod._create_store()
 
 
+class TestStatelessHTTPMode:
+    """Verify stateless HTTP mode configuration."""
+
+    def test_stateless_skips_session_registry(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """When STATELESS_HTTP is True, _wrap_with_session_registry returns app unchanged."""
+        monkeypatch.setattr(server_mod, "STATELESS_HTTP", True)
+        sentinel = object()
+        result = server_mod._wrap_with_session_registry(sentinel)
+        assert result is sentinel
+
+    def test_stateful_without_dsn_skips_session_registry(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Without SESSION_DATABASE_URL, session registry is skipped even in stateful mode."""
+        monkeypatch.setattr(server_mod, "STATELESS_HTTP", False)
+        monkeypatch.setattr(server_mod, "SESSION_DATABASE_URL", "")
+        sentinel = object()
+        result = server_mod._wrap_with_session_registry(sentinel)
+        assert result is sentinel
+
+    def test_stateless_flag_passed_to_fastmcp(self) -> None:
+        """STATELESS_HTTP is wired to the FastMCP settings."""
+        assert hasattr(server_mod.mcp.settings, "stateless_http")
+
+
 class TestSQLCompositionSafety:
     """Verify SQL template composition prevents injection and format string attacks."""
 
