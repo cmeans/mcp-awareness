@@ -1014,10 +1014,12 @@ class PostgresStore:
     ) -> list[Entry]:
         """Get entries with zero reads (optionally since a timestamp). Cleanup candidates."""
         since_clause = psql.SQL("")
-        params: list[Any] = [owner_id]
+        # since_clause appears before owner_id in SQL, so since param must come first
+        params: list[Any] = []
         if since:
             since_clause = psql.SQL("AND r.timestamp >= %s")
             params.append(since)
+        params.append(owner_id)
         limit_clause = psql.SQL("")
         if limit is not None:
             limit_clause = psql.SQL(" LIMIT %s")
