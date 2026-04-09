@@ -37,6 +37,7 @@ from pathlib import Path
 from typing import Any
 
 import psycopg
+from psycopg import sql as psql
 from psycopg.rows import dict_row
 from psycopg_pool import ConnectionPool
 
@@ -86,11 +87,9 @@ class PostgresStore:
         self._create_tables()
 
     def _create_tables(self) -> None:
-        from psycopg import sql
-
-        ddl = sql.SQL(_load_sql("create_tables")).format(
-            default_owner=sql.Literal(_DEFAULT_OWNER),
-            embedding_dimensions=sql.SQL(str(self._embedding_dimensions)),
+        ddl = psql.SQL(_load_sql("create_tables")).format(
+            default_owner=psql.Literal(_DEFAULT_OWNER),
+            embedding_dimensions=psql.SQL(str(self._embedding_dimensions)),
         )
         with self._pool.connection() as conn, conn.cursor() as cur:
             cur.execute(ddl)
@@ -190,21 +189,28 @@ class PostgresStore:
         except Exception as exc:
             logger.error("Cleanup failed: %s: %s", type(exc).__name__, exc)
 
+    _DEFAULT_WHERE: psql.SQL = psql.SQL("1=1")
+    _DEFAULT_ORDER: psql.SQL = psql.SQL("COALESCE(updated, created) DESC")
+
     def _query_entries(
         self,
         owner_id: str,
-        where: str = "1=1",
+        where: psql.Composable | None = None,
         params: tuple[Any, ...] = (),
-        order_by: str = "COALESCE(updated, created) DESC",
+        order_by: psql.Composable | None = None,
         limit: int | None = None,
         offset: int | None = None,
     ) -> list[Entry]:
-        limit_clause = ""
+        if where is None:
+            where = self._DEFAULT_WHERE
+        if order_by is None:
+            order_by = self._DEFAULT_ORDER
+        limit_clause: psql.Composable = psql.SQL("")
         if limit is not None:
-            limit_clause += " LIMIT %s"
+            limit_clause += psql.SQL(" LIMIT %s")
         if offset is not None:
-            limit_clause += " OFFSET %s"
-        sql = _load_sql("query_entries").format(
+            limit_clause += psql.SQL(" OFFSET %s")
+        query = psql.SQL(_load_sql("query_entries")).format(
             where=where, order_by=order_by, limit_clause=limit_clause
         )
         query_params: list[Any] = [owner_id, *params]
@@ -214,7 +220,7 @@ class PostgresStore:
             query_params.append(offset)
         with self._pool.connection() as conn, conn.transaction(), conn.cursor() as cur:
             self._set_rls_context(cur, owner_id)
-            cur.execute(sql, tuple(query_params))
+            cur.execute(query, tuple(query_params))
             return [self._row_to_entry(r) for r in cur.fetchall()]
 
     # ------------------------------------------------------------------
@@ -354,23 +360,22 @@ class PostgresStore:
         limit: int | None = None,
         offset: int | None = None,
     ) -> list[Entry]:
-        clauses: list[str] = []
+        clauses: list[psql.SQL] = []
         params: list[Any] = []
         if entry_type is not None:
-            clauses.append("type = %s")
+            clauses.append(psql.SQL("type = %s"))
             params.append(entry_type.value)
         if source is not None:
-            clauses.append("source = %s")
+            clauses.append(psql.SQL("source = %s"))
             params.append(source)
         if tags:
-            # AND logic: entry must contain ALL given tags
             for t in tags:
-                clauses.append("tags @> %s::jsonb")
+                clauses.append(psql.SQL("tags @> %s::jsonb"))
                 params.append(json.dumps([t]))
         if since is not None:
-            clauses.append("COALESCE(updated, created) >= %s")
+            clauses.append(psql.SQL("COALESCE(updated, created) >= %s"))
             params.append(since)
-        where = " AND ".join(clauses) if clauses else "1=1"
+        where = psql.SQL(" AND ").join(clauses) if clauses else psql.SQL("1=1")
         return self._query_entries(owner_id, where, tuple(params), limit=limit, offset=offset)
 
     def get_sources(self, owner_id: str) -> list[str]:
@@ -401,38 +406,41 @@ class PostgresStore:
         limit: int | None = None,
         offset: int | None = None,
     ) -> list[Entry]:
-        clauses = [
-            "type = %s",
-            "NOT (data @> '{\"resolved\": true}'::jsonb)",
-            "(expires IS NULL OR expires > NOW())",
+        clauses: list[psql.SQL] = [
+            psql.SQL("type = %s"),
+            psql.SQL("NOT (data @> '{\"resolved\": true}'::jsonb)"),
+            psql.SQL("(expires IS NULL OR expires > NOW())"),
         ]
         params: list[Any] = [EntryType.ALERT.value]
         if source:
-            clauses.append("source = %s")
+            clauses.append(psql.SQL("source = %s"))
             params.append(source)
         if since is not None:
-            clauses.append("COALESCE(updated, created) >= %s")
+            clauses.append(psql.SQL("COALESCE(updated, created) >= %s"))
             params.append(since)
-        where = " AND ".join(clauses)
+        where = psql.SQL(" AND ").join(clauses)
         return self._query_entries(owner_id, where, tuple(params), limit=limit, offset=offset)
 
     def get_active_suppressions(self, owner_id: str, source: str | None = None) -> list[Entry]:
-        clauses = ["type = %s", "(expires IS NULL OR expires > NOW())"]
+        clauses: list[psql.SQL] = [
+            psql.SQL("type = %s"),
+            psql.SQL("(expires IS NULL OR expires > NOW())"),
+        ]
         params: list[Any] = [EntryType.SUPPRESSION.value]
         if source:
-            clauses.append("(source = %s OR source = '')")
+            clauses.append(psql.SQL("(source = %s OR source = '')"))
             params.append(source)
-        where = " AND ".join(clauses)
+        where = psql.SQL(" AND ").join(clauses)
         return self._query_entries(owner_id, where, tuple(params))
 
     def get_patterns(self, owner_id: str, source: str | None = None) -> list[Entry]:
         if source:
             return self._query_entries(
                 owner_id,
-                "type = %s AND source = %s",
+                psql.SQL("type = %s AND source = %s"),
                 (EntryType.PATTERN.value, source),
             )
-        return self._query_entries(owner_id, "type = %s", (EntryType.PATTERN.value,))
+        return self._query_entries(owner_id, psql.SQL("type = %s"), (EntryType.PATTERN.value,))
 
     def get_all_statuses(self, owner_id: str) -> dict[str, Entry]:
         with self._pool.connection() as conn, conn.transaction(), conn.cursor() as cur:
@@ -506,7 +514,7 @@ class PostgresStore:
     ) -> list[Entry]:
         """Get knowledge entries (patterns, context, preferences, notes)."""
         if entry_type is not None:
-            clauses = ["type = %s"]
+            clauses: list[psql.Composable] = [psql.SQL("type = %s")]
             params: list[Any] = [entry_type.value]
         else:
             types = [
@@ -515,33 +523,32 @@ class PostgresStore:
                 EntryType.PREFERENCE.value,
                 EntryType.NOTE.value,
             ]
-            placeholders = ",".join("%s" for _ in types)
-            clauses = [f"type IN ({placeholders})"]
+            placeholders = psql.SQL(",").join(psql.SQL("%s") for _ in types)
+            clauses = [psql.SQL("type IN ({})").format(placeholders)]
             params = list(types)
         if source is not None:
-            clauses.append("source = %s")
+            clauses.append(psql.SQL("source = %s"))
             params.append(source)
         if tags:
-            # AND logic: entry must contain ALL given tags
             for t in tags:
-                clauses.append("tags @> %s::jsonb")
+                clauses.append(psql.SQL("tags @> %s::jsonb"))
                 params.append(json.dumps([t]))
         if since is not None:
-            clauses.append("COALESCE(updated, created) >= %s")
+            clauses.append(psql.SQL("COALESCE(updated, created) >= %s"))
             params.append(since)
         if until is not None:
-            clauses.append("COALESCE(updated, created) <= %s")
+            clauses.append(psql.SQL("COALESCE(updated, created) <= %s"))
             params.append(until)
         if learned_from is not None:
-            clauses.append("data->>'learned_from' = %s")
+            clauses.append(psql.SQL("data->>'learned_from' = %s"))
             params.append(learned_from)
         if created_after is not None:
-            clauses.append("created >= %s")
+            clauses.append(psql.SQL("created >= %s"))
             params.append(created_after)
         if created_before is not None:
-            clauses.append("created <= %s")
+            clauses.append(psql.SQL("created <= %s"))
             params.append(created_before)
-        where = " AND ".join(clauses)
+        where = psql.SQL(" AND ").join(clauses)
         # Push LIMIT/OFFSET to SQL unless include_history="only" (post-filter changes count)
         sql_limit = limit if include_history != "only" else None
         sql_offset = offset if include_history != "only" else None
@@ -561,15 +568,17 @@ class PostgresStore:
 
     def get_entry_by_id(self, owner_id: str, entry_id: str) -> Entry | None:
         """Get a single entry by ID (active only)."""
-        results = self._query_entries(owner_id, "id = %s", (entry_id,))
+        results = self._query_entries(owner_id, psql.SQL("id = %s"), (entry_id,))
         return results[0] if results else None
 
     def get_entries_by_ids(self, owner_id: str, entry_ids: list[str]) -> list[Entry]:
         """Get multiple entries by ID in a single query (active only)."""
         if not entry_ids:
             return []
-        placeholders = ", ".join(["%s"] * len(entry_ids))
-        return self._query_entries(owner_id, f"id IN ({placeholders})", tuple(entry_ids))
+        placeholders = psql.SQL(", ").join(psql.SQL("%s") for _ in entry_ids)
+        return self._query_entries(
+            owner_id, psql.SQL("id IN ({})").format(placeholders), tuple(entry_ids)
+        )
 
     def update_entry(self, owner_id: str, entry_id: str, updates: dict[str, Any]) -> Entry | None:
         """Update an entry in place, appending previous values to changelog."""
@@ -652,10 +661,10 @@ class PostgresStore:
                 return (entry, True)
 
             # Existing entry — fetch within the same connection
-            query_sql = _load_sql("query_entries").format(
-                where="source = %s AND logical_key = %s",
-                order_by="COALESCE(updated, created) DESC",
-                limit_clause="",
+            query_sql = psql.SQL(_load_sql("query_entries")).format(
+                where=psql.SQL("source = %s AND logical_key = %s"),
+                order_by=psql.SQL("COALESCE(updated, created) DESC"),
+                limit_clause=psql.SQL(""),
             )
             cur.execute(query_sql, (owner_id, source, logical_key))
             rows = cur.fetchall()
@@ -753,13 +762,13 @@ class PostgresStore:
         now = datetime.now(timezone.utc)
         trash_expires = now + timedelta(days=TRASH_RETENTION_DAYS)
         # AND: entry must contain every tag — use @> for each
-        tag_clauses = " AND ".join("tags @> %s::jsonb" for _ in tags)
+        tag_clauses = psql.SQL(" AND ").join(psql.SQL("tags @> %s::jsonb") for _ in tags)
         params: list[Any] = [now, trash_expires, owner_id]
         params.extend(json.dumps([t]) for t in tags)
         with self._pool.connection() as conn, conn.transaction(), conn.cursor() as cur:
             self._set_rls_context(cur, owner_id)
             cur.execute(
-                _load_sql("soft_delete_by_tags").format(tag_clauses=tag_clauses),
+                psql.SQL(_load_sql("soft_delete_by_tags")).format(tag_clauses=tag_clauses),
                 tuple(params),
             )
             affected = cur.rowcount
@@ -774,16 +783,20 @@ class PostgresStore:
         """Soft-delete all entries for a source, optionally filtered by type."""
         now = datetime.now(timezone.utc)
         trash_expires = now + timedelta(days=TRASH_RETENTION_DAYS)
-        clauses = ["owner_id = %s", "source = %s", "deleted IS NULL"]
+        clauses: list[psql.SQL] = [
+            psql.SQL("owner_id = %s"),
+            psql.SQL("source = %s"),
+            psql.SQL("deleted IS NULL"),
+        ]
         params: list[Any] = [owner_id, source]
         if entry_type is not None:
-            clauses.append("type = %s")
+            clauses.append(psql.SQL("type = %s"))
             params.append(entry_type.value)
-        where = " AND ".join(clauses)
+        where = psql.SQL(" AND ").join(clauses)
         with self._pool.connection() as conn, conn.transaction(), conn.cursor() as cur:
             self._set_rls_context(cur, owner_id)
             cur.execute(
-                _load_sql("soft_delete_by_source").format(where=where),
+                psql.SQL(_load_sql("soft_delete_by_source")).format(where=where),
                 (now, trash_expires, *params),
             )
             affected = cur.rowcount
@@ -797,23 +810,23 @@ class PostgresStore:
         offset: int | None = None,
     ) -> list[Entry]:
         """Get all soft-deleted entries (the trash)."""
-        clauses = ["owner_id = %s", "deleted IS NOT NULL"]
+        clauses: list[psql.SQL] = [psql.SQL("owner_id = %s"), psql.SQL("deleted IS NOT NULL")]
         params: list[Any] = [owner_id]
         if since is not None:
-            clauses.append("deleted >= %s")
+            clauses.append(psql.SQL("deleted >= %s"))
             params.append(since)
-        where = " AND ".join(clauses)
-        limit_clause = ""
+        where = psql.SQL(" AND ").join(clauses)
+        limit_clause: psql.Composable = psql.SQL("")
         if limit is not None:
-            limit_clause += " LIMIT %s"
+            limit_clause += psql.SQL(" LIMIT %s")
             params.append(limit)
         if offset is not None:
-            limit_clause += " OFFSET %s"
+            limit_clause += psql.SQL(" OFFSET %s")
             params.append(offset)
-        sql = _load_sql("get_deleted").format(where=where, limit_clause=limit_clause)
+        query = psql.SQL(_load_sql("get_deleted")).format(where=where, limit_clause=limit_clause)
         with self._pool.connection() as conn, conn.transaction(), conn.cursor() as cur:
             self._set_rls_context(cur, owner_id)
-            cur.execute(sql, tuple(params))
+            cur.execute(query, tuple(params))
             return [self._row_to_entry(r) for r in cur.fetchall()]
 
     def restore_by_id(self, owner_id: str, entry_id: str) -> bool:
@@ -837,13 +850,13 @@ class PostgresStore:
         """
         if not tags:
             return 0
-        tag_clauses = " AND ".join("tags @> %s::jsonb" for _ in tags)
+        tag_clauses = psql.SQL(" AND ").join(psql.SQL("tags @> %s::jsonb") for _ in tags)
         params: list[Any] = [owner_id]
         params.extend(json.dumps([t]) for t in tags)
         with self._pool.connection() as conn, conn.transaction(), conn.cursor() as cur:
             self._set_rls_context(cur, owner_id)
             cur.execute(
-                _load_sql("restore_by_tags").format(tag_clauses=tag_clauses),
+                psql.SQL(_load_sql("restore_by_tags")).format(tag_clauses=tag_clauses),
                 tuple(params),
             )
             affected = cur.rowcount
@@ -916,26 +929,26 @@ class PostgresStore:
         limit: int | None = None,
     ) -> list[dict[str, Any]]:
         """Get read history, optionally filtered."""
-        clauses: list[str] = ["owner_id = %s"]
+        clauses: list[psql.SQL] = [psql.SQL("owner_id = %s")]
         params: list[Any] = [owner_id]
         if entry_id:
-            clauses.append("entry_id = %s")
+            clauses.append(psql.SQL("entry_id = %s"))
             params.append(entry_id)
         if since:
-            clauses.append("timestamp >= %s")
+            clauses.append(psql.SQL("timestamp >= %s"))
             params.append(since)
         if platform:
-            clauses.append("platform = %s")
+            clauses.append(psql.SQL("platform = %s"))
             params.append(platform)
-        where = " AND ".join(clauses) if clauses else "1=1"
-        limit_clause = ""
+        where = psql.SQL(" AND ").join(clauses) if clauses else psql.SQL("1=1")
+        limit_clause = psql.SQL("")
         if limit:
-            limit_clause = " LIMIT %s"
+            limit_clause = psql.SQL(" LIMIT %s")
             params.append(int(limit))
-        sql = _load_sql("get_reads").format(where=where, limit_clause=limit_clause)
+        query = psql.SQL(_load_sql("get_reads")).format(where=where, limit_clause=limit_clause)
         with self._pool.connection() as conn, conn.transaction(), conn.cursor() as cur:
             self._set_rls_context(cur, owner_id)
-            cur.execute(sql, tuple(params))
+            cur.execute(query, tuple(params))
             rows = cur.fetchall()
         return [
             {
@@ -958,30 +971,30 @@ class PostgresStore:
         limit: int | None = None,
     ) -> list[dict[str, Any]]:
         """Get action history, optionally filtered."""
-        clauses: list[str] = ["owner_id = %s"]
+        clauses: list[psql.SQL] = [psql.SQL("owner_id = %s")]
         params: list[Any] = [owner_id]
         if entry_id:
-            clauses.append("entry_id = %s")
+            clauses.append(psql.SQL("entry_id = %s"))
             params.append(entry_id)
         if since:
-            clauses.append("timestamp >= %s")
+            clauses.append(psql.SQL("timestamp >= %s"))
             params.append(since)
         if platform:
-            clauses.append("platform = %s")
+            clauses.append(psql.SQL("platform = %s"))
             params.append(platform)
         if tags:
             for t in tags:
-                clauses.append("tags @> %s::jsonb")
+                clauses.append(psql.SQL("tags @> %s::jsonb"))
                 params.append(json.dumps([t]))
-        where = " AND ".join(clauses) if clauses else "1=1"
-        limit_clause = ""
+        where = psql.SQL(" AND ").join(clauses) if clauses else psql.SQL("1=1")
+        limit_clause = psql.SQL("")
         if limit:
-            limit_clause = " LIMIT %s"
+            limit_clause = psql.SQL(" LIMIT %s")
             params.append(int(limit))
-        sql = _load_sql("get_actions").format(where=where, limit_clause=limit_clause)
+        query = psql.SQL(_load_sql("get_actions")).format(where=where, limit_clause=limit_clause)
         with self._pool.connection() as conn, conn.transaction(), conn.cursor() as cur:
             self._set_rls_context(cur, owner_id)
-            cur.execute(sql, tuple(params))
+            cur.execute(query, tuple(params))
             rows = cur.fetchall()
         return [
             {
@@ -1000,19 +1013,23 @@ class PostgresStore:
         self, owner_id: str, since: datetime | None = None, limit: int | None = None
     ) -> list[Entry]:
         """Get entries with zero reads (optionally since a timestamp). Cleanup candidates."""
-        since_clause = ""
-        params: list[Any] = [owner_id]
+        since_clause = psql.SQL("")
+        # since_clause appears before owner_id in SQL, so since param must come first
+        params: list[Any] = []
         if since:
-            since_clause = "AND r.timestamp >= %s"
+            since_clause = psql.SQL("AND r.timestamp >= %s")
             params.append(since)
-        limit_clause = ""
+        params.append(owner_id)
+        limit_clause = psql.SQL("")
         if limit is not None:
-            limit_clause = " LIMIT %s"
+            limit_clause = psql.SQL(" LIMIT %s")
             params.append(limit)
-        sql = _load_sql("get_unread").format(since_clause=since_clause, limit_clause=limit_clause)
+        query = psql.SQL(_load_sql("get_unread")).format(
+            since_clause=since_clause, limit_clause=limit_clause
+        )
         with self._pool.connection() as conn, conn.transaction(), conn.cursor() as cur:
             self._set_rls_context(cur, owner_id)
-            cur.execute(sql, params)
+            cur.execute(query, params)
             return [self._row_to_entry(r) for r in cur.fetchall()]
 
     def get_activity(
@@ -1023,33 +1040,33 @@ class PostgresStore:
         limit: int | None = None,
     ) -> list[dict[str, Any]]:
         """Get combined read + action activity feed, chronologically."""
-        clauses_r: list[str] = ["owner_id = %s"]
-        clauses_a: list[str] = ["owner_id = %s"]
+        clauses_r: list[psql.SQL] = [psql.SQL("owner_id = %s")]
+        clauses_a: list[psql.SQL] = [psql.SQL("owner_id = %s")]
         params_r: list[Any] = [owner_id]
         params_a: list[Any] = [owner_id]
         if since:
-            clauses_r.append("timestamp >= %s")
-            clauses_a.append("timestamp >= %s")
+            clauses_r.append(psql.SQL("timestamp >= %s"))
+            clauses_a.append(psql.SQL("timestamp >= %s"))
             params_r.append(since)
             params_a.append(since)
         if platform:
-            clauses_r.append("platform = %s")
-            clauses_a.append("platform = %s")
+            clauses_r.append(psql.SQL("platform = %s"))
+            clauses_a.append(psql.SQL("platform = %s"))
             params_r.append(platform)
             params_a.append(platform)
-        where_r = " AND ".join(clauses_r) if clauses_r else "1=1"
-        where_a = " AND ".join(clauses_a) if clauses_a else "1=1"
-        limit_clause = ""
+        where_r = psql.SQL(" AND ").join(clauses_r) if clauses_r else psql.SQL("1=1")
+        where_a = psql.SQL(" AND ").join(clauses_a) if clauses_a else psql.SQL("1=1")
+        limit_clause = psql.SQL("")
         all_params = params_r + params_a
         if limit:
-            limit_clause = "LIMIT %s"
+            limit_clause = psql.SQL("LIMIT %s")
             all_params.append(int(limit))
-        sql = _load_sql("get_activity").format(
+        query = psql.SQL(_load_sql("get_activity")).format(
             where_r=where_r, where_a=where_a, limit_clause=limit_clause
         )
         with self._pool.connection() as conn, conn.transaction(), conn.cursor() as cur:
             self._set_rls_context(cur, owner_id)
-            cur.execute(sql, tuple(all_params))
+            cur.execute(query, tuple(all_params))
             rows = cur.fetchall()
         return [
             {
@@ -1068,11 +1085,11 @@ class PostgresStore:
         """Get read_count and last_read for a list of entry IDs. For list mode enrichment."""
         if not entry_ids:
             return {}
-        placeholders = ",".join("%s" for _ in entry_ids)
-        sql = _load_sql("get_read_counts").format(placeholders=placeholders)
+        placeholders = psql.SQL(",").join(psql.SQL("%s") for _ in entry_ids)
+        query = psql.SQL(_load_sql("get_read_counts")).format(placeholders=placeholders)
         with self._pool.connection() as conn, conn.transaction(), conn.cursor() as cur:
             self._set_rls_context(cur, owner_id)
-            cur.execute(sql, (owner_id, *entry_ids))
+            cur.execute(query, (owner_id, *entry_ids))
             rows = cur.fetchall()
         result: dict[str, dict[str, Any]] = {}
         for r in rows:
@@ -1095,19 +1112,19 @@ class PostgresStore:
         limit: int | None = None,
     ) -> list[Entry]:
         """Get intention entries, optionally filtered by state, source, or tags."""
-        clauses = ["type = %s"]
+        clauses: list[psql.SQL] = [psql.SQL("type = %s")]
         params: list[Any] = [EntryType.INTENTION.value]
         if state:
-            clauses.append("data->>'state' = %s")
+            clauses.append(psql.SQL("data->>'state' = %s"))
             params.append(state)
         if source:
-            clauses.append("source = %s")
+            clauses.append(psql.SQL("source = %s"))
             params.append(source)
         if tags:
             for t in tags:
-                clauses.append("tags @> %s::jsonb")
+                clauses.append(psql.SQL("tags @> %s::jsonb"))
                 params.append(json.dumps([t]))
-        where = " AND ".join(clauses)
+        where = psql.SQL(" AND ").join(clauses)
         return self._query_entries(owner_id, where, tuple(params), limit=limit)
 
     def update_intention_state(
@@ -1148,9 +1165,11 @@ class PostgresStore:
         now = now_utc()
         return self._query_entries(
             owner_id,
-            "type = %s AND data->>'state' = %s"
-            " AND data->>'deliver_at' IS NOT NULL"
-            " AND (data->>'deliver_at')::timestamptz <= %s",
+            psql.SQL(
+                "type = %s AND data->>'state' = %s"
+                " AND data->>'deliver_at' IS NOT NULL"
+                " AND (data->>'deliver_at')::timestamptz <= %s"
+            ),
             (EntryType.INTENTION.value, "pending", now),
         )
 
@@ -1241,32 +1260,32 @@ class PostgresStore:
         Similarity is 1 - cosine_distance (higher = more similar).
         """
         vector_literal = "[" + ",".join(str(v) for v in embedding) + "]"
-        clauses = ["e.owner_id = %s", "e.deleted IS NULL"]
+        clauses: list[psql.SQL] = [psql.SQL("e.owner_id = %s"), psql.SQL("e.deleted IS NULL")]
         params: list[Any] = [model, vector_literal, owner_id]
         if entry_type is not None:
-            clauses.append("e.type = %s")
+            clauses.append(psql.SQL("e.type = %s"))
             params.append(entry_type.value)
         if source is not None:
-            clauses.append("e.source = %s")
+            clauses.append(psql.SQL("e.source = %s"))
             params.append(source)
         if tags:
             for t in tags:
-                clauses.append("e.tags @> %s::jsonb")
+                clauses.append(psql.SQL("e.tags @> %s::jsonb"))
                 params.append(json.dumps([t]))
         if since is not None:
-            clauses.append("COALESCE(e.updated, e.created) >= %s")
+            clauses.append(psql.SQL("COALESCE(e.updated, e.created) >= %s"))
             params.append(since)
         if until is not None:
-            clauses.append("COALESCE(e.updated, e.created) <= %s")
+            clauses.append(psql.SQL("COALESCE(e.updated, e.created) <= %s"))
             params.append(until)
-        where = " AND ".join(clauses)
+        where = psql.SQL(" AND ").join(clauses)
         params.append(limit)
-        sql = _load_sql("semantic_search").format(where=where)
+        query = psql.SQL(_load_sql("semantic_search")).format(where=where)
         # query_vector (similarity), model, ...filters, query_vector (ORDER BY), limit
         ordered_params = [vector_literal, model, *params[2:-1], vector_literal, limit]
         with self._pool.connection() as conn, conn.transaction(), conn.cursor() as cur:
             self._set_rls_context(cur, owner_id)
-            cur.execute(sql, tuple(ordered_params))
+            cur.execute(query, tuple(ordered_params))
             rows = cur.fetchall()
         return [(self._row_to_entry(r), float(r["similarity"])) for r in rows]
 
@@ -1274,7 +1293,7 @@ class PostgresStore:
         """Find active entries whose data.related_ids contains the given entry_id."""
         return self._query_entries(
             owner_id,
-            "data->'related_ids' @> %s::jsonb",
+            psql.SQL("data->'related_ids' @> %s::jsonb"),
             (json.dumps([entry_id]),),
         )
 
