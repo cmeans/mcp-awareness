@@ -1,0 +1,100 @@
+# QA testing stack — isolated database, Ollama embeddings, builds from local source
+# Usage:
+#   docker compose -f docker-compose.qa.yaml up -d --build
+#   docker compose -f docker-compose.qa.yaml down -v   # tear down + delete data
+#
+# MCP endpoint: http://localhost:8421/mcp
+# Health check:  curl -s http://localhost:8421/health | python3 -m json.tool
+#
+# Test via Claude Code:
+#   claude -p "<prompt>" \
+#     --mcp-config /tmp/mcp-awareness-qa/mcp-qa.json \
+#     --allowedTools "mcp__awareness-qa__*" \
+#     --output-format text
+name: mcp-awareness-qa
+
+services:
+  mcp-awareness-qa:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: mcp-awareness-qa
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8421:8420"
+    environment:
+      AWARENESS_DATABASE_URL: postgresql://awareness:awareness-qa@postgres-qa:5432/awareness_qa
+      AWARENESS_TRANSPORT: streamable-http
+      AWARENESS_HOST: "0.0.0.0"
+      AWARENESS_PORT: "8420"
+      AWARENESS_EMBEDDING_PROVIDER: ollama
+      AWARENESS_EMBEDDING_MODEL: nomic-embed-text
+      AWARENESS_OLLAMA_URL: http://ollama-qa:11434
+    depends_on:
+      postgres-qa:
+        condition: service_healthy
+      ollama-qa:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 128M
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; s = socket.create_connection(('localhost', 8420), timeout=2); s.close()"]
+      interval: 10s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  postgres-qa:
+    image: pgvector/pgvector:pg17
+    container_name: awareness-postgres-qa
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: awareness_qa
+      POSTGRES_USER: awareness
+      POSTGRES_PASSWORD: awareness-qa
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --lc-collate=C --lc-ctype=C"
+    volumes:
+      - awareness-qa-pg:/var/lib/postgresql/data
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U awareness"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  ollama-qa:
+    image: ollama/ollama:latest
+    container_name: awareness-ollama-qa
+    restart: unless-stopped
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        ollama serve &
+        until ollama list > /dev/null 2>&1; do sleep 1; done
+        ollama pull nomic-embed-text
+        wait
+    volumes:
+      - awareness-qa-ollama:/root/.ollama
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 2G
+    healthcheck:
+      test: ["CMD-SHELL", "ollama list | grep -q nomic-embed-text"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+
+volumes:
+  awareness-qa-pg:
+  awareness-qa-ollama:
