@@ -22,12 +22,15 @@ import json
 import os
 import threading
 
+import psycopg
 import pytest
 from mcp.server.fastmcp.exceptions import ToolError
+from psycopg import sql as psql
 
 from mcp_awareness import server as server_mod
 from mcp_awareness.embeddings import OllamaEmbedding
 from mcp_awareness.postgres_store import PostgresStore
+from mcp_awareness.schema import Entry, EntryType, make_id, now_utc
 from mcp_awareness.store import Store
 
 
@@ -80,6 +83,102 @@ class TestCreateStore:
         monkeypatch.delenv("AWARENESS_DATABASE_URL", raising=False)
         with pytest.raises(ValueError, match="AWARENESS_DATABASE_URL is required"):
             server_mod._create_store()
+
+
+class TestSQLCompositionSafety:
+    """Verify SQL template composition prevents injection and format string attacks."""
+
+    @staticmethod
+    def _note(
+        tags: list[str] | None = None,
+        source: str = "test",
+        data: dict | None = None,
+    ) -> Entry:
+        return Entry(
+            id=make_id(),
+            type=EntryType.NOTE,
+            source=source,
+            tags=tags or ["test"],
+            created=now_utc(),
+            expires=None,
+            data=data or {"description": "test note"},
+        )
+
+    def test_format_string_in_entry_data_not_interpreted(self, store: Store) -> None:
+        """Entry data containing {where}, {0}, etc. must not be interpreted as format args.
+
+        Before the fix, str.format() on SQL templates would blow up or substitute
+        if entry data contained Python format placeholders.
+        """
+        malicious_descriptions = [
+            "{where}",
+            "{order_by}",
+            "{0}",
+            "{__class__.__init__.__globals__}",
+            "test {limit_clause} injection",
+            "{{double braces}}",
+        ]
+        for desc in malicious_descriptions:
+            entry = self._note(data={"description": desc})
+            result = store.add(TEST_OWNER, entry)
+            entries = store.get_knowledge(TEST_OWNER, tags=["test"])
+            found = [e for e in entries if e.id == result.id]
+            assert found, f"Entry with description {desc!r} not retrievable"
+            assert found[0].data["description"] == desc
+
+    def test_query_entries_rejects_raw_string_where(self, store: Store) -> None:
+        """Passing a raw string to _query_entries fails — psycopg.sql.SQL.format()
+        treats it as a Literal (quoted value), not a SQL fragment, so the query
+        produces a SQL error rather than executing the string as SQL.
+        """
+        assert isinstance(store, PostgresStore)
+        with pytest.raises(psycopg.errors.InvalidTextRepresentation):
+            store._query_entries(TEST_OWNER, "type = %s", ("note",))  # type: ignore[arg-type]
+
+    def test_query_entries_accepts_composable(self, store: Store) -> None:
+        """psql.SQL-wrapped WHERE clauses work correctly."""
+        assert isinstance(store, PostgresStore)
+        results = store._query_entries(TEST_OWNER, psql.SQL("type = %s"), ("note",))
+        assert isinstance(results, list)
+
+    def test_composed_where_with_multiple_clauses(self, store: Store) -> None:
+        """Composed multi-clause WHERE executes without SQL syntax errors."""
+        assert isinstance(store, PostgresStore)
+        where = psql.SQL(" AND ").join(
+            [
+                psql.SQL("type = %s"),
+                psql.SQL("source = %s"),
+                psql.SQL("tags @> %s::jsonb"),
+            ]
+        )
+        results = store._query_entries(
+            TEST_OWNER, where, ("note", "test-source", json.dumps(["tag1"]))
+        )
+        assert isinstance(results, list)
+
+    def test_sql_injection_in_tag_values_parameterized(self, store: Store) -> None:
+        """Tag values with SQL injection attempts are safely parameterized."""
+        malicious_tag = "'; DROP TABLE entries; --"
+        store.add(TEST_OWNER, self._note(tags=[malicious_tag]))
+        entries = store.get_entries(TEST_OWNER, tags=[malicious_tag])
+        assert len(entries) == 1
+        assert malicious_tag in entries[0].tags
+
+    def test_sql_injection_in_source_parameterized(self, store: Store) -> None:
+        """Source values with SQL injection attempts are safely parameterized."""
+        malicious_source = "test' OR '1'='1"
+        store.add(TEST_OWNER, self._note(source=malicious_source))
+        entries = store.get_entries(TEST_OWNER, source=malicious_source)
+        assert len(entries) == 1
+        assert entries[0].source == malicious_source
+
+    def test_format_string_in_source_survives_query(self, store: Store) -> None:
+        """Source containing format placeholders doesn't break SQL composition."""
+        tricky_source = "{where} AND 1=1"
+        store.add(TEST_OWNER, self._note(source=tricky_source))
+        entries = store.get_entries(TEST_OWNER, source=tricky_source)
+        assert len(entries) == 1
+        assert entries[0].source == tricky_source
 
 
 class TestLazyStoreThreadSafety:
@@ -3435,3 +3534,87 @@ class TestDateValidation:
         assert isinstance(parsed, dict)
         assert "entries" in parsed
         assert isinstance(parsed["entries"], list)
+
+
+# ---------------------------------------------------------------------------
+# MCP tool-level SQL injection tests
+# ---------------------------------------------------------------------------
+
+
+class TestToolLevelInjectionSafety:
+    """End-to-end tests proving SQL injection via MCP tool parameters is safe."""
+
+    @pytest.mark.anyio
+    async def test_remember_with_injection_in_source(self) -> None:
+        """SQL injection in source parameter is safely parameterized."""
+        malicious = "'; DROP TABLE entries; --"
+        result = await server_mod.remember(
+            source=malicious,
+            tags=["injection-test"],
+            description="testing source injection",
+        )
+        parsed = json.loads(result)
+        assert parsed["status"] == "ok"
+        # Verify we can retrieve it back
+        knowledge = json.loads(await server_mod.get_knowledge(source=malicious))
+        assert len(knowledge["entries"]) == 1
+        assert knowledge["entries"][0]["source"] == malicious
+
+    @pytest.mark.anyio
+    async def test_remember_with_injection_in_description(self) -> None:
+        """SQL injection in description is stored verbatim, not executed."""
+        malicious = "'; DELETE FROM entries WHERE '1'='1"
+        result = await server_mod.remember(
+            source="test",
+            tags=["injection-test"],
+            description=malicious,
+        )
+        parsed = json.loads(result)
+        assert parsed["status"] == "ok"
+        knowledge = json.loads(await server_mod.get_knowledge(tags=["injection-test"]))
+        found = [e for e in knowledge["entries"] if e["data"]["description"] == malicious]
+        assert len(found) == 1
+
+    @pytest.mark.anyio
+    async def test_get_knowledge_with_injection_in_tags(self) -> None:
+        """SQL injection in tag filter parameter is safely parameterized."""
+        malicious_tag = "test' OR '1'='1' --"
+        # Create a normal entry
+        await server_mod.remember(source="test", tags=["safe-tag"], description="normal entry")
+        # Query with malicious tag — should return nothing, not all entries
+        result = json.loads(await server_mod.get_knowledge(tags=[malicious_tag]))
+        assert len(result["entries"]) == 0
+
+    @pytest.mark.anyio
+    async def test_remember_with_format_placeholders_in_fields(self) -> None:
+        """Python format strings in entry fields don't break SQL composition."""
+        result = await server_mod.remember(
+            source="{where}",
+            tags=["{order_by}", "{0}"],
+            description="{limit_clause} {__class__}",
+        )
+        parsed = json.loads(result)
+        assert parsed["status"] == "ok"
+        entry_id = parsed["id"]
+        knowledge = json.loads(await server_mod.get_knowledge(source="{where}"))
+        found = [e for e in knowledge["entries"] if e["id"] == entry_id]
+        assert len(found) == 1
+        assert found[0]["source"] == "{where}"
+        assert "{order_by}" in found[0]["tags"]
+
+    @pytest.mark.anyio
+    async def test_get_actions_with_injection_in_platform(self) -> None:
+        """SQL injection in platform filter is safely parameterized."""
+        malicious_platform = "'; DROP TABLE actions; --"
+        result = json.loads(await server_mod.get_actions(platform=malicious_platform, limit=5))
+        # Should return empty, not error or execute injection
+        assert isinstance(result["entries"], list)
+
+    @pytest.mark.anyio
+    async def test_delete_entry_with_injection_in_tags(self) -> None:
+        """SQL injection in tag-based delete is safely parameterized."""
+        malicious_tag = "'; DROP TABLE entries; --"
+        result = json.loads(await server_mod.delete_entry(tags=[malicious_tag], confirm=True))
+        # Should succeed with 0 deleted, not execute injection
+        assert result["status"] == "ok"
+        assert result["trashed"] == 0
