@@ -1111,3 +1111,17 @@ class TestMcpRequestLogger:
             await mw(scope, receive, send)
 
         assert any("MCP GET /mcp session=short-id" in r.message for r in caplog.records)
+
+    @pytest.mark.anyio
+    async def test_skips_non_http_scope(self) -> None:
+        """Non-HTTP scopes (e.g., websocket, lifespan) pass through without logging."""
+        called = False
+
+        async def inner(scope: Any, receive: Any, send: Any) -> None:
+            nonlocal called
+            called = True
+
+        mw = McpRequestLogger(inner)
+        scope: dict[str, Any] = {"type": "lifespan"}
+        await mw(scope, lambda: {}, lambda m: None)  # type: ignore[arg-type, return-value]
+        assert called
