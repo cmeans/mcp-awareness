@@ -113,7 +113,13 @@ EMBEDDING_MODEL = os.environ.get("AWARENESS_EMBEDDING_MODEL", "nomic-embed-text"
 OLLAMA_URL = os.environ.get("AWARENESS_OLLAMA_URL", "http://ollama:11434")
 EMBEDDING_DIMENSIONS = int(os.environ.get("AWARENESS_EMBEDDING_DIMENSIONS", "768"))
 
-# Session persistence — opt-in via AWARENESS_SESSION_DATABASE_URL
+# Stateless HTTP — no MCP session tracking, fresh transport per request.
+# Eliminates session drop/409 issues. Recommended for production since
+# awareness tools are all request/response (no server-initiated push).
+STATELESS_HTTP = os.environ.get("AWARENESS_STATELESS_HTTP", "").lower() in ("1", "true")
+
+# Session persistence — opt-in via AWARENESS_SESSION_DATABASE_URL.
+# Ignored when AWARENESS_STATELESS_HTTP is enabled (no sessions to persist).
 SESSION_DATABASE_URL = os.environ.get("AWARENESS_SESSION_DATABASE_URL", "")
 SESSION_TTL = int(os.environ.get("AWARENESS_SESSION_TTL", "1800"))
 SESSION_POOL_MIN = int(os.environ.get("AWARENESS_SESSION_POOL_MIN", "1"))
@@ -332,6 +338,7 @@ mcp = FastMCP(
             theme="dark",
         ),
     ],
+    stateless_http=STATELESS_HTTP,
 )
 
 # ---------------------------------------------------------------------------
@@ -529,7 +536,13 @@ def _wrap_with_oauth_proxy(app: Any) -> Any:
 
 
 def _wrap_with_session_registry(app: Any) -> Any:
-    """Wrap an ASGI app with SessionRegistryMiddleware if configured."""
+    """Wrap an ASGI app with SessionRegistryMiddleware if configured.
+
+    Skipped in stateless mode — no sessions to persist.
+    """
+    if STATELESS_HTTP:
+        logger.info("Session registry: disabled (stateless HTTP mode)")
+        return app
     if not SESSION_DATABASE_URL:
         return app
 
@@ -559,6 +572,8 @@ def _wrap_with_session_registry(app: Any) -> Any:
 
 
 def _run() -> None:
+    if STATELESS_HTTP:
+        logger.info("Transport mode: stateless HTTP (no session tracking)")
     if TRANSPORT == "streamable-http" and MOUNT_PATH:
         import uvicorn
         from starlette.types import ASGIApp as _ASGIApp

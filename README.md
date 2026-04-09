@@ -14,7 +14,7 @@
 > **Your AI's memory shouldn't be locked to one app. It should follow you everywhere.**
 
 > [!NOTE]
-> Early-stage but actively deployed — 747 tests, 16 releases, in daily use across Claude.ai, Claude Code, and Claude Desktop. See [Current status](#current-status) for what's working and what's planned.
+> Early-stage but actively deployed — 750 tests, 16 releases, in daily use across Claude.ai, Claude Code, and Claude Desktop. See [Current status](#current-status) for what's working and what's planned.
 
 ## What this is
 
@@ -243,7 +243,8 @@ See the [Auth Setup Guide](docs/auth-setup.md) for complete configuration instru
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `AWARENESS_SESSION_DATABASE_URL` | _(none)_ | Postgres DSN for session database. If unset, session registry is disabled and sessions are in-memory only. |
+| `AWARENESS_STATELESS_HTTP` | `false` | When `true`, uses stateless HTTP mode — fresh transport per request, no session tracking. Eliminates session drop / 409 issues. Recommended for production. |
+| `AWARENESS_SESSION_DATABASE_URL` | _(none)_ | Postgres DSN for session database. Ignored when `AWARENESS_STATELESS_HTTP=true`. If unset in stateful mode, session registry is disabled and sessions are in-memory only. |
 | `AWARENESS_SESSION_TTL` | `1800` | Session expiry in seconds (30 min). Sliding window — extended on each request. |
 | `AWARENESS_SESSION_POOL_MIN` | `1` | Min connection pool size for the session database. |
 | `AWARENESS_SESSION_POOL_MAX` | `5` | Max connection pool size for the session database. |
@@ -396,7 +397,7 @@ For single-user deployments, secret path + WAF is sufficient. For multi-user, en
 - Secret path auth + Cloudflare WAF for edge-level access control
 - Docker Compose with Postgres, optional Ollama, named Cloudflare Tunnel, or ephemeral quick tunnel
 - Request timing instrumentation and `/health` endpoint
-- 747 tests (all against real Postgres + Ollama in CI), strict type checking, CI pipeline with coverage, QA gate
+- 750 tests (all against real Postgres + Ollama in CI), strict type checking, CI pipeline with coverage, QA gate
 
 ### Not yet implemented
 - Layer 2 (baseline) detection — rolling averages and deviation calculation
