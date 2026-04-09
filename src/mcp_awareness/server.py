@@ -32,6 +32,7 @@ import logging
 import os
 import pathlib
 import re
+import threading
 import time
 from datetime import datetime, timezone
 from typing import Any, Literal
@@ -174,10 +175,16 @@ class _LazyStore:
     """
 
     _instance: Store | None = None
+    _lock: threading.Lock = threading.Lock()
 
     def __getattr__(self, name: str) -> Any:
+        # Double-checked locking: safe in CPython — GIL ensures atomic
+        # reference assignment, so the outer check never sees a
+        # partially-constructed object.
         if _LazyStore._instance is None:
-            _LazyStore._instance = _create_store()
+            with _LazyStore._lock:
+                if _LazyStore._instance is None:
+                    _LazyStore._instance = _create_store()
         return getattr(_LazyStore._instance, name)
 
 
