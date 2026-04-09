@@ -8,10 +8,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.16.1] - 2026-04-09
+
 ### Fixed
 - Per-owner concurrency limit now configurable via `AWARENESS_MAX_CONCURRENT_PER_OWNER` (default raised from 3 to 10) — Claude.ai sends parallel MCP requests that exceeded the old limit, causing 429 errors surfaced as "authorization failed"
 - OAuth proxy rate limits now configurable via `AWARENESS_OAUTH_PROXY_RATE_{AUTHORIZE,TOKEN,REGISTER}` (defaults raised from 20/10/5 to 60/60/30 req/min) and `AWARENESS_OAUTH_PROXY_RATE_WINDOW` (sliding window, default 60s)
 - SessionRegistryMiddleware now compatible with MCP SDK 1.27.0 SSE responses — `_buffer_body` forwards to real `receive` after replay, `_handle_subsequent` streams 2xx responses immediately, `_reinitialize` blocks until task group cancellation for SSE disconnect detection
+- Em dash in session SQL comment replaced with ASCII — `psycopg.sql.SQL` rejected the non-ASCII character
+- `deploy.sh` now aborts on first node health check failure instead of continuing to the next node
+- UTF-8 encoding enforced on all database creation paths — `CREATE DATABASE` uses `ENCODING 'UTF8' TEMPLATE template0` with locale `C` for portability; `pg_hba.conf` documented with single `host all awareness` rule
+- Runtime guard against `{}` in SQL comments that broke `psycopg.sql.SQL.format()` placeholder detection
 
 ## [0.16.0] - 2026-04-08
 
@@ -460,7 +466,8 @@ Initial implementation.
 - **Dockerfile** for container deployment
 - Design docs: core spec and collation layer
 
-[Unreleased]: https://github.com/cmeans/mcp-awareness/compare/v0.16.0...HEAD
+[Unreleased]: https://github.com/cmeans/mcp-awareness/compare/v0.16.1...HEAD
+[0.16.1]: https://github.com/cmeans/mcp-awareness/compare/v0.16.0...v0.16.1
 [0.16.0]: https://github.com/cmeans/mcp-awareness/compare/v0.15.0...v0.16.0
 [0.15.0]: https://github.com/cmeans/mcp-awareness/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/cmeans/mcp-awareness/compare/v0.12.0...v0.14.0
