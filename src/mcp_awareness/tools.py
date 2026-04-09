@@ -638,13 +638,13 @@ async def delete_entry(
     Returns JSON with status and count. If you receive an unstructured
     error, the failure is in the transport or platform layer, not in awareness."""
     if entry_id:
-        trashed = _srv.store.soft_delete_by_id(_srv._owner_id(), entry_id)
+        _srv.store.soft_delete_by_id(_srv._owner_id(), entry_id)
         return json.dumps(
             {
-                "status": "ok",
-                "trashed": 1 if trashed else 0,
+                "status": "acknowledged",
                 "entry_id": entry_id,
                 "recoverable_days": 30,
+                "note": "If the entry was not found, no action was taken.",
             }
         )
     if tags:
