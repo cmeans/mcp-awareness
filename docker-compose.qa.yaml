@@ -30,6 +30,7 @@ services:
       AWARENESS_EMBEDDING_PROVIDER: ollama
       AWARENESS_EMBEDDING_MODEL: nomic-embed-text
       AWARENESS_OLLAMA_URL: http://ollama-qa:11434
+      AWARENESS_DEFAULT_OWNER: qa
     depends_on:
       postgres-qa:
         condition: service_healthy
