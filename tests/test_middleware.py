@@ -31,6 +31,7 @@ from mcp_awareness.middleware import (
     _FAVICON_BYTES,
     AuthMiddleware,
     HealthMiddleware,
+    McpRequestLogger,
     SecretPathMiddleware,
 )
 
@@ -979,3 +980,134 @@ class TestUserinfoEnrichment:
             "sub_123",
             "https://auth.example.com",
         )
+
+
+# ---------------------------------------------------------------------------
+# McpRequestLogger
+# ---------------------------------------------------------------------------
+
+
+class TestMcpRequestLogger:
+    """Tests for the MCP request logging middleware."""
+
+    @pytest.mark.anyio
+    async def test_logs_mcp_post_with_session(self, caplog: pytest.LogCaptureFixture) -> None:
+        """POST /mcp with session ID is logged."""
+
+        async def inner(scope: Any, receive: Any, send: Any) -> None:
+            await send({"type": "http.response.start", "status": 200, "headers": []})
+            await send({"type": "http.response.body", "body": b"ok"})
+
+        mw = McpRequestLogger(inner)
+        scope: dict[str, Any] = {
+            "type": "http",
+            "method": "POST",
+            "path": "/mcp",
+            "headers": [(b"mcp-session-id", b"abc123def456xyz")],
+            "client": ("10.0.0.1", 12345),
+        }
+
+        async def receive() -> dict[str, Any]:
+            return {"type": "http.request", "body": b""}
+
+        captured: list[dict[str, Any]] = []
+
+        async def send(message: dict[str, Any]) -> None:
+            captured.append(message)
+
+        import logging
+
+        with caplog.at_level(logging.INFO, logger="mcp_awareness.middleware"):
+            await mw(scope, receive, send)
+
+        assert any("MCP POST /mcp session=abc123def456…" in r.message for r in caplog.records)
+        assert any("status=200" in r.message for r in caplog.records)
+
+    @pytest.mark.anyio
+    async def test_logs_mcp_post_without_session(self, caplog: pytest.LogCaptureFixture) -> None:
+        """POST /mcp without session ID logs session=none."""
+
+        async def inner(scope: Any, receive: Any, send: Any) -> None:
+            await send({"type": "http.response.start", "status": 200, "headers": []})
+            await send({"type": "http.response.body", "body": b"ok"})
+
+        mw = McpRequestLogger(inner)
+        scope: dict[str, Any] = {
+            "type": "http",
+            "method": "POST",
+            "path": "/mcp",
+            "headers": [],
+            "client": ("10.0.0.1", 12345),
+        }
+
+        async def receive() -> dict[str, Any]:
+            return {"type": "http.request", "body": b""}
+
+        captured: list[dict[str, Any]] = []
+
+        async def send(message: dict[str, Any]) -> None:
+            captured.append(message)
+
+        import logging
+
+        with caplog.at_level(logging.INFO, logger="mcp_awareness.middleware"):
+            await mw(scope, receive, send)
+
+        assert any("session=none" in r.message for r in caplog.records)
+
+    @pytest.mark.anyio
+    async def test_skips_non_mcp_paths(self, caplog: pytest.LogCaptureFixture) -> None:
+        """Requests to /health are not logged."""
+        called = False
+
+        async def inner(scope: Any, receive: Any, send: Any) -> None:
+            nonlocal called
+            called = True
+
+        mw = McpRequestLogger(inner)
+        scope: dict[str, Any] = {
+            "type": "http",
+            "method": "GET",
+            "path": "/health",
+            "headers": [],
+        }
+
+        import logging
+
+        with caplog.at_level(logging.INFO, logger="mcp_awareness.middleware"):
+            await mw(scope, lambda: {}, lambda m: None)  # type: ignore[arg-type, return-value]
+
+        assert called
+        assert not any("MCP" in r.message for r in caplog.records)
+
+    @pytest.mark.anyio
+    async def test_logs_get_mcp_request(self, caplog: pytest.LogCaptureFixture) -> None:
+        """GET /mcp (SSE) is logged."""
+
+        async def inner(scope: Any, receive: Any, send: Any) -> None:
+            await send({"type": "http.response.start", "status": 200, "headers": []})
+            await send({"type": "http.response.body", "body": b""})
+
+        mw = McpRequestLogger(inner)
+        scope: dict[str, Any] = {
+            "type": "http",
+            "method": "GET",
+            "path": "/mcp",
+            "headers": [(b"mcp-session-id", b"short-id")],
+            "client": ("10.0.0.1", 12345),
+        }
+
+        async def receive() -> dict[str, Any]:
+            return {"type": "http.request", "body": b""}
+
+        captured: list[dict[str, Any]] = []
+
+        async def send(message: dict[str, Any]) -> None:
+            captured.append(message)
+
+        import logging
+
+        with caplog.at_level(logging.INFO, logger="mcp_awareness.middleware"):
+            await mw(scope, receive, send)
+
+        assert any("MCP GET /mcp session=short-id" in r.message for r in caplog.records)

@@ -25,7 +25,7 @@ from collections.abc import Callable
 from typing import Any
 
 from starlette.responses import JSONResponse, Response
-from starlette.types import ASGIApp, Receive, Scope, Send
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 logger = logging.getLogger(__name__)
 
@@ -392,3 +392,60 @@ class AuthMiddleware:
         else:
             headers["WWW-Authenticate"] = "Bearer"
         return JSONResponse({"error": message}, status_code=401, headers=headers)
+
+
+# ---------------------------------------------------------------------------
+# MCP request logger — logs method, session ID, and response status for /mcp
+# ---------------------------------------------------------------------------
+
+
+class McpRequestLogger:
+    """ASGI middleware that logs MCP request headers for session debugging.
+
+    Logs method, Mcp-Session-Id (if present), and response status code
+    for every request to the MCP endpoint. Placed outside the session
+    registry so it captures both intercepted and pass-through requests.
+    """
+
+    def __init__(self, app: ASGIApp, mcp_path: str = "/mcp") -> None:
+        self.app = app
+        self.mcp_path = mcp_path
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        path = scope.get("path", "")
+        if path != self.mcp_path:
+            await self.app(scope, receive, send)
+            return
+
+        method = scope.get("method", "")
+        headers = dict(scope.get("headers", []))
+        session_id = headers.get(b"mcp-session-id", b"").decode() or None
+        client = scope.get("client")
+        client_ip = client[0] if client else "unknown"
+
+        captured_status = 0
+
+        async def logging_send(message: Message) -> None:
+            nonlocal captured_status
+            if message["type"] == "http.response.start":
+                captured_status = message["status"]
+            await send(message)
+
+        try:
+            await self.app(scope, receive, logging_send)
+        finally:
+            session_label = (
+                session_id[:12] + "…" if session_id and len(session_id) > 12 else session_id
+            )
+            logger.info(
+                "MCP %s %s session=%s client=%s status=%d",
+                method,
+                path,
+                session_label or "none",
+                client_ip,
+                captured_status,
+            )

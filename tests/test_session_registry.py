@@ -327,6 +327,17 @@ def _mcp_post_scope(
     return {"type": "http", "method": "POST", "path": path, "headers": headers}
 
 
+def _mcp_get_scope(
+    path: str = "/mcp",
+    session_id: str | None = None,
+) -> dict[str, Any]:
+    """Build an ASGI scope for a GET /mcp request (SSE reconnect)."""
+    headers: list[tuple[bytes, bytes]] = [(b"accept", b"text/event-stream")]
+    if session_id:
+        headers.append((b"mcp-session-id", session_id.encode()))
+    return {"type": "http", "method": "GET", "path": path, "headers": headers}
+
+
 # ---------------------------------------------------------------------------
 # TestMiddlewareInitialize
 # ---------------------------------------------------------------------------
@@ -1764,3 +1775,102 @@ class TestIntegrationWithFastMCP:
                     assert "echo2" in tool_names
         finally:
             _owner_ctx.reset(token)
+
+
+# ---------------------------------------------------------------------------
+# GET intercept tests (#180)
+# ---------------------------------------------------------------------------
+
+
+class TestMiddlewareGetIntercept:
+    """Verify that GET /mcp with session ID is intercepted by the middleware."""
+
+    @pytest.mark.anyio
+    async def test_get_with_known_session_passes_through(self, session_store: SessionStore) -> None:
+        """GET with a known session_id passes through to FastMCP."""
+        session_store.register(
+            session_id="sess-get-ok",
+            owner_id="test-owner",
+            node="app-a",
+            protocol_version="2025-03-26",
+            capabilities={},
+            client_info={},
+        )
+        inner = await _make_fastmcp_stub(session_id="sess-get-ok")
+        mw = SessionRegistryMiddleware(inner, session_store, node_name="app-a")
+        scope = _mcp_get_scope(session_id="sess-get-ok")
+        from mcp_awareness.server import _owner_ctx
+
+        token = _owner_ctx.set("test-owner")
+        try:
+            status, _, _ = await _collect_response(mw, scope)
+        finally:
+            _owner_ctx.reset(token)
+        assert status == 200
+
+    @pytest.mark.anyio
+    async def test_get_without_session_passes_through(self, session_store: SessionStore) -> None:
+        """GET without a session_id passes straight through (no interception)."""
+        called = False
+
+        async def passthrough_app(scope: Any, receive: Any, send: Any) -> None:
+            nonlocal called
+            called = True
+            await send({"type": "http.response.start", "status": 200, "headers": []})
+            await send({"type": "http.response.body", "body": b""})
+
+        mw = SessionRegistryMiddleware(passthrough_app, session_store, node_name="app-a")
+        scope = _mcp_get_scope(session_id=None)
+        await _collect_response(mw, scope)
+        assert called
+
+    @pytest.mark.anyio
+    async def test_get_with_unknown_session_passes_through(
+        self, session_store: SessionStore
+    ) -> None:
+        """GET with an unknown session_id passes through — FastMCP handles the error."""
+        called = False
+
+        async def passthrough_app(scope: Any, receive: Any, send: Any) -> None:
+            nonlocal called
+            called = True
+            await send({"type": "http.response.start", "status": 404, "headers": []})
+            await send({"type": "http.response.body", "body": b"not found"})
+
+        mw = SessionRegistryMiddleware(passthrough_app, session_store, node_name="app-a")
+        scope = _mcp_get_scope(session_id="sess-unknown")
+        from mcp_awareness.server import _owner_ctx
+
+        token = _owner_ctx.set("test-owner")
+        try:
+            status, _, _ = await _collect_response(mw, scope)
+        finally:
+            _owner_ctx.reset(token)
+        # Passes through — FastMCP returns 404
+        assert status == 404
+
+    @pytest.mark.anyio
+    async def test_get_with_owner_mismatch_returns_403(self, session_store: SessionStore) -> None:
+        """GET with a session owned by a different user returns 403."""
+        session_store.register(
+            session_id="sess-get-other",
+            owner_id="other-owner",
+            node="app-a",
+            protocol_version="2025-03-26",
+            capabilities={},
+            client_info={},
+        )
+
+        async def should_not_be_called(scope: Any, receive: Any, send: Any) -> None:
+            raise AssertionError("Inner app should not be called")
+
+        mw = SessionRegistryMiddleware(should_not_be_called, session_store, node_name="app-a")
+        scope = _mcp_get_scope(session_id="sess-get-other")
+        from mcp_awareness.server import _owner_ctx
+
+        token = _owner_ctx.set("test-owner")
+        try:
+            status, _, _ = await _collect_response(mw, scope)
+        finally:
+            _owner_ctx.reset(token)
+        assert status == 403

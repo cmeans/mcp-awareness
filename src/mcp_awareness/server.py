@@ -579,13 +579,15 @@ def _run() -> None:
         from starlette.types import ASGIApp as _ASGIApp
 
         from mcp_awareness.middleware import (
+            McpRequestLogger,
             SecretPathMiddleware,
             WellKnownMiddleware,
         )
 
         inner_app = mcp.streamable_http_app()
         inner_app = _wrap_with_session_registry(inner_app)
-        app: _ASGIApp = SecretPathMiddleware(inner_app, MOUNT_PATH, _health_response)
+        logged_app: _ASGIApp = McpRequestLogger(inner_app)
+        app: _ASGIApp = SecretPathMiddleware(logged_app, MOUNT_PATH, _health_response)
 
         if OAUTH_ISSUER:
             app = WellKnownMiddleware(
@@ -613,11 +615,12 @@ def _run() -> None:
     elif TRANSPORT == "streamable-http":
         import uvicorn
 
-        from mcp_awareness.middleware import HealthMiddleware
+        from mcp_awareness.middleware import HealthMiddleware, McpRequestLogger
 
         inner_app = mcp.streamable_http_app()
         inner_app = _wrap_with_session_registry(inner_app)
-        health_app: Any = HealthMiddleware(inner_app, _health_response)
+        mcp_logged: Any = McpRequestLogger(inner_app)
+        health_app: Any = HealthMiddleware(mcp_logged, _health_response)
 
         if OAUTH_ISSUER:
             from mcp_awareness.middleware import WellKnownMiddleware
