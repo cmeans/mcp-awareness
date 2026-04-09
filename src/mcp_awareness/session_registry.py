@@ -249,7 +249,7 @@ class SessionRegistryMiddleware:
         path = scope.get("path", "")
         method = scope.get("method", "")
 
-        if path != self.mcp_path or method not in ("POST", "DELETE"):
+        if path != self.mcp_path or method not in ("GET", "POST", "DELETE"):
             await self.app(scope, receive, send)
             return
 
@@ -258,7 +258,7 @@ class SessionRegistryMiddleware:
 
         if method == "POST" and session_id is None:
             await self._handle_initialize(scope, receive, send)
-        elif method == "POST" and session_id is not None:
+        elif method in ("POST", "GET") and session_id is not None:
             await self._handle_subsequent(scope, receive, send, session_id)
         elif method == "DELETE":
             await self._handle_terminate(scope, receive, send, session_id)

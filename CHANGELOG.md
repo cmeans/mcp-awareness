@@ -10,8 +10,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - **Stateless HTTP mode** — opt-in via `AWARENESS_STATELESS_HTTP=true`. Creates a fresh MCP transport per request with no session tracking, eliminating the entire class of session drop / 409 Conflict bugs ([#180](https://github.com/cmeans/mcp-awareness/issues/180)). Auth still flows per-request via JWT Bearer token. Session registry is automatically skipped in stateless mode. Stateful mode (default) remains available for clients that need persistent sessions.
+- **MCP request logger** — logs method, truncated session ID, client IP, and response status for every `/mcp` request. Placed outside the session registry for full visibility into both intercepted and pass-through requests.
 
 ### Fixed
+- Session registry now intercepts `GET /mcp` (SSE reconnect) — previously only POST and DELETE were handled, causing stale GET requests to bypass re-initialization and return 409 directly from FastMCP ([#178](https://github.com/cmeans/mcp-awareness/issues/178))
 - `_LazyStore` thread safety — added double-checked locking to prevent duplicate `PostgresStore`/connection pool creation under concurrent access from embedding workers, cleanup thread, or parallel requests ([#164](https://github.com/cmeans/mcp-awareness/issues/164))
 - SQL template injection hardening — replaced `str.format()` with `psycopg.sql.SQL` composition across all 13 dynamic query sites in `postgres_store.py`, enforced via `psql.Composable` types that mypy validates at the call boundary ([#165](https://github.com/cmeans/mcp-awareness/issues/165))
 - `get_unread(since=...)` param ordering bug — `since` value was passed as `owner_id` and vice versa due to SQL placeholder position mismatch (pre-existing, discovered during #165 coverage work)
