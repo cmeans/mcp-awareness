@@ -128,6 +128,148 @@ class TestLazyStoreThreadSafety:
         assert not errors, f"Threads raised: {errors}"
         assert call_count == 1, f"_create_store called {call_count} times, expected 1"
 
+    def test_cleanup_thread_and_request_handler_race(
+        self, store: Store, pg_dsn: str, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Cleanup daemon thread and request handler must share a single store."""
+        monkeypatch.setenv("AWARENESS_DATABASE_URL", pg_dsn)
+        call_count = 0
+        count_lock = threading.Lock()
+        go = threading.Event()
+
+        real_create = server_mod._create_store
+
+        def _tracking_create_store() -> Store:
+            nonlocal call_count
+            with count_lock:
+                call_count += 1
+            return real_create()
+
+        monkeypatch.setattr(server_mod, "_create_store", _tracking_create_store)
+        server_mod._LazyStore._instance = None
+        lazy = server_mod._LazyStore()
+        errors: list[Exception] = []
+
+        def _simulate_cleanup() -> None:
+            """Simulates a daemon thread (like cleanup) accessing the store."""
+            try:
+                go.wait()
+                _ = lazy.get_stats
+            except Exception as exc:
+                errors.append(exc)
+
+        def _simulate_request() -> None:
+            """Simulates a request thread accessing the store."""
+            try:
+                go.wait()
+                _ = lazy.add
+            except Exception as exc:
+                errors.append(exc)
+
+        t_cleanup = threading.Thread(target=_simulate_cleanup, daemon=True)
+        t_request = threading.Thread(target=_simulate_request)
+        t_cleanup.start()
+        t_request.start()
+        go.set()
+        t_cleanup.join(timeout=5)
+        t_request.join(timeout=5)
+
+        server_mod._LazyStore._instance = None
+
+        assert not errors, f"Threads raised: {errors}"
+        assert call_count == 1, f"_create_store called {call_count} times, expected 1"
+
+    def test_embedding_worker_and_request_handler_race(
+        self, store: Store, pg_dsn: str, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Embedding thread pool worker and request handler must share a single store."""
+        monkeypatch.setenv("AWARENESS_DATABASE_URL", pg_dsn)
+        call_count = 0
+        count_lock = threading.Lock()
+        go = threading.Event()
+
+        real_create = server_mod._create_store
+
+        def _tracking_create_store() -> Store:
+            nonlocal call_count
+            with count_lock:
+                call_count += 1
+            return real_create()
+
+        monkeypatch.setattr(server_mod, "_create_store", _tracking_create_store)
+        server_mod._LazyStore._instance = None
+        lazy = server_mod._LazyStore()
+        errors: list[Exception] = []
+
+        def _simulate_embedding() -> None:
+            """Simulates an embedding worker accessing store.upsert_embedding."""
+            try:
+                go.wait()
+                _ = lazy.upsert_embedding
+            except Exception as exc:
+                errors.append(exc)
+
+        def _simulate_request() -> None:
+            """Simulates a request thread accessing store.get_knowledge."""
+            try:
+                go.wait()
+                _ = lazy.get_knowledge
+            except Exception as exc:
+                errors.append(exc)
+
+        t_embed = threading.Thread(target=_simulate_embedding, name="embed-0")
+        t_request = threading.Thread(target=_simulate_request)
+        t_embed.start()
+        t_request.start()
+        go.set()
+        t_embed.join(timeout=5)
+        t_request.join(timeout=5)
+
+        server_mod._LazyStore._instance = None
+
+        assert not errors, f"Threads raised: {errors}"
+        assert call_count == 1, f"_create_store called {call_count} times, expected 1"
+
+    def test_concurrent_real_postgres_store_creation(
+        self, pg_dsn: str, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Integration: 10 threads racing to create a real PostgresStore + pool."""
+        monkeypatch.setenv("AWARENESS_DATABASE_URL", pg_dsn)
+        call_count = 0
+        count_lock = threading.Lock()
+        barrier = threading.Barrier(10)
+
+        real_create = server_mod._create_store
+
+        def _tracking_create_store() -> Store:
+            nonlocal call_count
+            with count_lock:
+                call_count += 1
+            return real_create()
+
+        monkeypatch.setattr(server_mod, "_create_store", _tracking_create_store)
+        server_mod._LazyStore._instance = None
+        lazy = server_mod._LazyStore()
+        errors: list[Exception] = []
+
+        def _access() -> None:
+            try:
+                barrier.wait()  # synchronize start, not factory entry
+                _ = lazy.add  # triggers __getattr__ → _create_store
+            except Exception as exc:
+                errors.append(exc)
+
+        threads = [threading.Thread(target=_access) for _ in range(10)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=10)
+
+        server_mod._LazyStore._instance = None
+
+        assert not errors, f"Threads raised: {errors}"
+        assert call_count == 1, f"_create_store called {call_count} times, expected 1"
+
 
 # ---------------------------------------------------------------------------
 # Resource tests
