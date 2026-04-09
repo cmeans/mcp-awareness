@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import os
+import threading
 
 import pytest
 from mcp.server.fastmcp.exceptions import ToolError
@@ -79,6 +80,53 @@ class TestCreateStore:
         monkeypatch.delenv("AWARENESS_DATABASE_URL", raising=False)
         with pytest.raises(ValueError, match="AWARENESS_DATABASE_URL is required"):
             server_mod._create_store()
+
+
+class TestLazyStoreThreadSafety:
+    """Verify _LazyStore only creates one store under concurrent access."""
+
+    def test_concurrent_access_creates_single_instance(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Multiple threads racing through __getattr__ must produce exactly one store."""
+        call_count = 0
+        lock = threading.Lock()
+        barrier = threading.Barrier(10)
+
+        class _FakeStore:
+            def ping(self) -> str:
+                return "ok"
+
+        def _counting_create_store() -> _FakeStore:
+            nonlocal call_count
+            with lock:
+                call_count += 1
+            return _FakeStore()
+
+        monkeypatch.setattr(server_mod, "_create_store", _counting_create_store)
+
+        lazy = server_mod._LazyStore()
+        server_mod._LazyStore._instance = None
+        errors: list[Exception] = []
+
+        def _access() -> None:
+            try:
+                barrier.wait()  # all threads launch simultaneously
+                lazy.ping()
+            except Exception as exc:
+                errors.append(exc)
+
+        threads = [threading.Thread(target=_access) for _ in range(10)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=5)
+
+        # Restore to avoid leaking into other tests
+        server_mod._LazyStore._instance = None
+
+        assert not errors, f"Threads raised: {errors}"
+        assert call_count == 1, f"_create_store called {call_count} times, expected 1"
 
 
 # ---------------------------------------------------------------------------
