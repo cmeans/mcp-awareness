@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Design doc** — `docs/design/hybrid-retrieval-multilingual.md` — three-layer design for hybrid retrieval (vector + Postgres FTS + RRF), multilingual embeddings, and experimental proposition extraction. Closes the framing of [#195](https://github.com/cmeans/mcp-awareness/issues/195) in favor of a lower-blast-radius approach. Tracked by [#238](https://github.com/cmeans/mcp-awareness/issues/238), [#239](https://github.com/cmeans/mcp-awareness/issues/239), [#240](https://github.com/cmeans/mcp-awareness/issues/240). Amended 2026-04-10 after round-1 QA review and a sourcing audit.
+
 ## [0.16.2] - 2026-04-09
 
 ### Added
