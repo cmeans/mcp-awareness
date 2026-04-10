@@ -1,8 +1,7 @@
 /* name: cleanup_expired */
 /* mode: literal */
-/* Delete entries past their expiration timestamp. Runs on a background
-   daemon thread, debounced to 10-second intervals. Handles both natural
-   expiry and trash retention (soft-deleted entries expire after 30 days).
-   Params: now (current UTC timestamp)
+/* Delete expired entries for a specific owner who has opted in to auto-cleanup.
+   RLS-safe — scoped by owner_id, no row_security bypass needed.
+   Params: now (current UTC timestamp), owner_id
 */
-DELETE FROM entries WHERE expires IS NOT NULL AND expires <= %s
+DELETE FROM entries WHERE expires IS NOT NULL AND expires <= %s AND owner_id = %s

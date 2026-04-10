@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **MCP request logger** — logs method, truncated session ID, client IP, and response status for every `/mcp` request. Placed outside the session registry for full visibility into both intercepted and pass-through requests.
 
 ### Fixed
+- `_cleanup_expired` now RLS-safe and opt-in — scoped by `owner_id` instead of bypassing row-level security. Only runs for owners with `auto_cleanup=true` preference. Default: no cleanup — expired entries retained until user opts in. Handles both active expiry and trash retention ([#179](https://github.com/cmeans/mcp-awareness/issues/179), [#183](https://github.com/cmeans/mcp-awareness/issues/183))
 - `delete_entry` IDOR fix — single-entry delete by ID now returns `"status": "acknowledged"` with no count, preventing entry existence enumeration across tenants. Bulk deletes (tags, source) retain counts since they're already owner-scoped ([#193](https://github.com/cmeans/mcp-awareness/issues/193))
 - Session registry now intercepts `GET /mcp` (SSE reconnect) — previously only POST and DELETE were handled, causing stale GET requests to bypass re-initialization and return 409 directly from FastMCP ([#178](https://github.com/cmeans/mcp-awareness/issues/178))
 - `_LazyStore` thread safety — added double-checked locking to prevent duplicate `PostgresStore`/connection pool creation under concurrent access from embedding workers, cleanup thread, or parallel requests ([#164](https://github.com/cmeans/mcp-awareness/issues/164))
