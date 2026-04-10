@@ -1,22 +1,38 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-or-later | Copyright (C) 2026 Chris Means -->
 # Hybrid Retrieval + Multilingual Support
 
-**Status:** Draft
+**Status:** Draft (amended 2026-04-10 after PR #241 round-1 QA review)
 **Date:** 2026-04-10
 **Owner:** @cmeans
-**Related issues:** TBD (linked after creation)
+**Related issues:** #238 (Layer 1), #239 (Layer 2), #240 (Layer 3). Supersedes #195.
 
 ## Context
 
-A dogfooding finding on 2026-03-24 surfaced a fundamental problem with current search: a 5000-word vision doc lost to a 2-sentence calendar note for the query *"broader vision six domains knowledge fragmentation life silos"*. The long doc's single averaged embedding vector was weakly similar to everything; the short note's focused embedding won on cosine distance alone.
+A dogfooding finding on 2026-03-24 surfaced a fundamental problem with current search: a 5000-word vision doc lost to a 2-sentence calendar note for the query *"broader vision six domains knowledge fragmentation life silos"*. This is the *dilution bug* and Issue #195 originally proposed chunked storage as the fix.
 
-This is the *dilution bug* and it's a known failure mode of dense retrieval with long documents. Issue #195 originally proposed chunked storage as the fix.
+The literal mechanism is worth naming precisely, because it changes how hybrid retrieval helps. At `src/mcp_awareness/embeddings.py:212-217`:
 
-A separate requirement surfaced 2026-04-10: **awareness should be multilingual, with cross-language search working at all times.** A user writing a note in English should be searchable by themselves or others using a Japanese query, and vice versa. This is a differentiator for bilingual users, multinational teams, expat families, and language learners — and it's hard to retrofit.
+```python
+_max_content_len = 500
+if content := data.get("content"):
+    content_str = str(content)
+    if len(content_str) > _max_content_len:
+        content_str = content_str[:_max_content_len] + "..."
+```
+
+**The bulk of any long document is never embedded at all.** Only the first ~500 characters of `data['content']` reach the embedding model. The "averaged dilution" framing I used originally was imprecise — the content isn't diluted in the vector, it's *absent from the vector*. The vision doc query lost because the vision doc's content was invisible to the vector branch from the start; cosine similarity was doing its job correctly on the impoverished text it was given.
+
+This matters for the design in two ways:
+
+1. **Hybrid retrieval is complementary at the data level, not just the algorithm level.** The FTS branch reads the full `data->>'content'` (no 500-char cap in the generated tsvector), while the vector branch sees only the first 500 chars. They observe different data, not just different signals on the same data. The lexical branch rescues long docs by matching terms buried deep in the content that the vector branch never saw.
+
+2. **The dogfooding regression test has to assert the right mechanism.** When the vision doc surfaces in the amended test, it will be rescued by FTS, not by vector. Asserting the source of the rescue (inspecting which branch matched) prevents a future false "it works" signal from masking a regression in either branch.
+
+A separate requirement surfaced 2026-04-10: **awareness should be multilingual, with cross-language search working at all times.** A user writing a note in English should be searchable by themselves or others using a Japanese query, and vice versa. This is a differentiator for bilingual users, multinational teams, expat families, and language learners — and it's hard to retrofit. This requirement is met by **Layer 2** (cross-lingual vector model), not by Layer 1 alone; see "Layer scoping and user-facing releases" below.
 
 ## Problem statements
 
-1. **Long documents lose to short documents on pure vector similarity** (dilution bug)
+1. **Long documents lose to short documents** — actually because their content is truncated at 500 chars before embedding, not because cosine dilutes them
 2. **Exact-term queries are weakly supported** (identifiers, acronyms, rare words)
 3. **Language is hardcoded** — `nomic-embed-text` is English-centric, no per-entry language metadata, no lexical retrieval
 4. **Response sizes are large** — full entries returned even when one sentence would answer the query
@@ -36,16 +52,32 @@ Parent embedding + child chunks + merge-up threshold. **Rejected:** most complex
 Document a convention. **Rejected:** violates the standing token-efficiency directive; clients will chunk inconsistently.
 
 ### E. Hybrid retrieval (vector + FTS + RRF) — **chosen for Layer 1**
-The dilution bug is not a chunking problem — it's a "cosine similarity is the wrong signal alone" problem. Add Postgres FTS as a second retriever, fuse via Reciprocal Rank Fusion. Long docs are rescued by term matches; exact terms are found by FTS; semantic queries still use vector.
+The dilution bug is not a chunking problem — it's a "cosine similarity is the wrong signal alone" problem, compounded by the 500-char content truncation. Add Postgres FTS as a second retriever, fuse via Reciprocal Rank Fusion. Long docs are rescued by term matches on their full content; exact terms are found by FTS; semantic queries still use vector.
 
 ### F. Proposition extraction — **chosen for Layer 3**
-Extract atomic claims via a small LLM, embed each individually, return matching claims with backrefs to source entries. Semantic sub-document splits instead of structural ones. Follows Dense X Retrieval (Chen et al., 2023).
+Extract atomic claims via a small local LLM, embed each individually, return matching claims with backrefs to source entries. Semantic sub-document splits instead of structural ones. Follows Dense X Retrieval (Chen et al., 2023).
+
+## Layer scoping and user-facing releases
+
+The three layers have different *technical* scopes and different *user-facing* scopes, and conflating them is a mistake we are explicitly avoiding:
+
+- **Layer 1 alone** delivers: dilution-bug fix + lexical cross-language precision + hybrid ranking. With `nomic-embed-text` as the vector model, vector retrieval remains English-centric. Layer 1 alone is **not** a user-facing multilingual feature.
+- **Layer 1 + Layer 2 bundled** delivers: all of Layer 1 *plus* cross-lingual semantic retrieval via a multilingual embedding model. This is the first user-facing "multilingual" release.
+- **Layer 3** is an experimental follow-on for sub-document semantic granularity.
+
+**User-facing release framing:**
+
+| Release | User-facing story | Internal contents |
+|---|---|---|
+| v1 (dilution fix) | "Search is smarter now" | Layer 1 alone; no multilingual marketing claim |
+| v2 (multilingual) | "Cross-language unified memory" | Layer 1 + Layer 2, bundled |
+| v3 (sub-document) | "Find the answer, not the document" | Layer 3, experimental |
+
+Layer 1 alone can ship first if it provides value (it does — the dilution fix is meaningful on its own), but the project should not call it "multilingual" publicly until Layer 2 lands. Bilingual users who try a Japanese query against English vector-only content will get nothing useful and conclude the feature is broken — exactly the opposite of what we're trying to build.
 
 ## Design — three independent layers
 
-Each layer ships on its own and provides standalone value. Layers 1 and 2 can bundle; Layer 3 is follow-on work.
-
-### Layer 1 — Multilingual hybrid retrieval
+### Layer 1 — Hybrid retrieval (dilution-bug fix + lexical cross-language)
 
 **Schema:**
 ```sql
@@ -61,6 +93,8 @@ ALTER TABLE entries ADD COLUMN tsv tsvector GENERATED ALWAYS AS (
 CREATE INDEX idx_entries_tsv ON entries USING GIN (tsv);
 CREATE INDEX idx_entries_language ON entries(language) WHERE language != 'simple';
 ```
+
+**Note on FTS weights:** initial guess is description=A, content/goal=B, tags=C. Add a Phase 1 task to benchmark this weighting against awareness data before it calcifies. If `description`-as-A doesn't actually outperform `content`-as-A for our entry distribution, adjust before the default ships.
 
 **Query (single CTE):**
 ```sql
@@ -94,29 +128,123 @@ ORDER BY f.score DESC
 LIMIT %s;
 ```
 
-Both branches use their indexes (HNSW + GIN). Fusion is in-memory over ≤100 rows. No planner cleverness required.
+Both branches use their indexes (HNSW + GIN). Fusion is in-memory over ≤100 rows. No planner cleverness required. RRF k=60 is the published default and stays unchanged unless benchmarks demand tuning.
 
 **Language resolution at write time:**
-1. Explicit `entry.data.language` override
-2. User preference (`users.preferences->>'language'`, ISO 639-1)
-3. Auto-detection via `lingua-py` on composed text
-4. Fall back to `'simple'` if detection is unsure
+
+1. Explicit `entry.data.language` override (ISO 639-1)
+2. Explicit `language` parameter on the write tool (new optional parameter, overrides everything below)
+3. User preference (`users.preferences->>'language'`, ISO 639-1)
+4. Auto-detection via `lingua-py` on composed text
+5. Fall back to `'simple'`
+6. **Validate the resolved regconfig exists before INSERT** (see below)
+
+The write tools (`remember`, `add_context`, `learn_pattern`, etc.) get an optional `language` parameter so bilingual users can override per-entry without going through `entry.data.language`. Global preference doesn't fit the bilingual case: one user, multiple languages, depending on context.
 
 **Language resolution at query time:**
+
 1. Explicit `search(language=...)` parameter
 2. Caller's user preference
 3. Fall back to `'simple'`
-4. **Vector branch ignores language entirely** — bge-m3 handles cross-lingual retrieval at the model level
+4. **Vector branch ignores language entirely** — the embedding model's cross-lingual properties handle multi-language retrieval at the model level (see Layer 2)
 
-### Layer 2 — bge-m3 embedding model swap
+**Write-time regconfig validation (Substantive finding — critical):**
 
-**Why:** multilingual by design (100+ languages in one shared vector space), drop-in Ollama replacement, long context (8192 tokens, incidentally helps long-doc dilution), produces dense + sparse + multi-vector representations in one model.
+If a write reaches INSERT with `language='japanese'` but the Japanese text search configuration doesn't exist (e.g. pgroonga isn't installed), the generated `tsv` column expression errors and **the entire INSERT fails**. The user loses their write. A retry hits the same failure.
 
-**Schema:** widen `embeddings.embedding` from `VECTOR(768)` to `VECTOR(1024)` via Alembic.
+The design mandates validation *before* the row reaches the database:
 
-**Prerequisite:** benchmark bge-m3 vs `nomic-embed-text` on awareness data using `benchmarks/semantic_search_bench.py`. **Abort the default swap if English content regresses.** Keep nomic as a config fallback (`AWARENESS_EMBEDDING_MODEL=nomic-embed-text` remains valid).
+1. At server startup, query `SELECT cfgname FROM pg_ts_config` and cache the result as a set of available regconfigs
+2. At write time, after language resolution (steps 1–5 above), verify the resolved regconfig is in the cached set
+3. If missing:
+   - Coerce to `'simple'` (do not fail the write)
+   - Fire `report_alert` with `level='warning'`, `alert_id='missing-ts-config-{lang}'`, pointing at install documentation
+   - Record the requested language in the alert so the operator can see exactly which config is needed
+4. On alert miss (extension was just installed), refresh the cache on next write of that language
 
-**Migration:** re-embed wave via existing `backfill_embeddings` background worker.
+This is the difference between "alert + degrade" and "writes fail for any user whose preferred language isn't supported by the current deployment."
+
+**Schema verification task (Substantive finding):**
+
+Generated tsvector columns using a `regconfig` sourced from another column are an edge case. `to_tsvector(regconfig, text)` is declared IMMUTABLE on modern Postgres, but this exact pattern has been rejected at column-creation time on PG12–PG14, and has had subtle issues on some PG15 minor versions. Before Layer 1 migration code is written, prove the pattern works on the actual target version:
+
+- [ ] Create a fresh PG17 database (matches the `pgvector/pgvector:pg17` base image used in all compose files)
+- [ ] Run the schema migration on an empty table
+- [ ] Insert sample rows with `language='english'`, `'spanish'`, `'japanese'` (assuming pgroonga configured)
+- [ ] Verify `tsv` column is populated correctly for each
+- [ ] Update an existing row's `language` column and verify `tsv` regenerates
+- [ ] `EXPLAIN ANALYZE` a query with `@@` — confirm GIN scan is used
+- [ ] Confirm the hybrid CTE plan uses both HNSW and GIN indexes
+
+If the generated-column approach fails on PG17 for any reason, the fallback is a `BEFORE INSERT/UPDATE` trigger that computes the same expression and stores it in a non-generated column. Functionally equivalent; adds a small write-time cost; keeps the query plan the same. Documenting the fallback now so implementation isn't blocked if the verification fails.
+
+**500-char content truncation — investigate lifting as part of Layer 1:**
+
+The 500-char cap in `embeddings.py:212-217` predates the hybrid retrieval design and was introduced to "keep embeddings focused." In the hybrid-retrieval world, the cap is actively harmful: the FTS branch will find long-content matches regardless, but the vector branch will keep missing them. The cap was a workaround for a problem Layer 1 now solves at the architectural level.
+
+**Add to Phase 1:** evaluate raising the cap to the embedding model's actual context limit (nomic-embed-text supports ~8192 tokens, roughly 30K chars of English prose), or removing it entirely. Re-embed wave via existing `backfill_embeddings` tool. This could be the single highest-leverage one-line change in the entire effort — it might substantially improve vector recall on long docs *before* Layer 2 even ships. Benchmark before committing: confirm the un-truncated content actually helps on the dogfooding query and doesn't degrade other cases.
+
+### Layer 2 — Multilingual embedding model
+
+**Goal:** replace `nomic-embed-text` (English-centric, Nomic/US) with a multilingual embedding model that provides a shared cross-lingual vector space, enabling the user-facing "cross-language unified memory" story.
+
+**Model sourcing constraint:** the default must not be a Chinese-sourced model. This rules out `bge-m3` (BAAI), `bge-large`, `bge-reranker`, `qwen-embed`, and similar. The constraint applies only to shipped defaults — operators who explicitly opt into a Chinese model via `AWARENESS_EMBEDDING_MODEL` on their own instance are making their own call.
+
+**Candidate models (all non-Chinese, all on Ollama or Hugging Face):**
+
+| Model | Source | License | Languages | Dim | Schema migration | Notes |
+|---|---|---|---|---|---|---|
+| **`intfloat/multilingual-e5-large`** | Microsoft / intfloat | MIT | 100+ | 1024 | yes (768→1024) | Primary candidate. Closest replacement for bge-m3 in scope. |
+| **`granite-embedding:278m`** | IBM | Apache 2.0 | ~12 | **768** | **no migration** | Lower-risk fallback. Covers EN, DE, ES, FR, JA, PT, AR, CS, IT, KO, NL, ZH. |
+| **`mxbai-embed-large`** | Mixedbread AI (Germany) | Apache 2.0 | English-focused | 1024 | yes | Strong English quality; weak multilingual. Reference option. |
+| **`jina-embeddings-v2-base-multilingual`** | Jina AI (Germany) | Apache 2.0 | ~30 | 768 | no migration | German provenance; narrower language coverage. |
+| **`snowflake-arctic-embed:l`** | Snowflake (US) | Apache 2.0 | English-only | 1024 | yes | "Best English, no multilingual story" reference. |
+| **`nomic-embed-text`** (current) | Nomic (US) | Apache 2.0 | English-centric | 768 | no migration | Do-nothing baseline. Kept as configurable fallback. |
+
+**Primary candidate: `intfloat/multilingual-e5-large`.** Closest like-for-like replacement for what bge-m3 would have been. 100+ languages, contrastive training on parallel pairs, matches the 1024-dim target, MIT license, Microsoft/intfloat provenance.
+
+**Fallback candidate: `granite-embedding:278m`.** If e5-large benchmarks only borderline against nomic on English, granite's 768-dim means **no schema migration** — the existing embeddings column stays. 12 major languages is a narrower story than 100+ but covers most bilingual user cohorts. Lower migration risk, simpler rollback.
+
+**Critical implementation detail: e5 prefix convention.**
+
+The e5 family requires prefixes on embedded text, or retrieval quality degrades significantly (published benchmarks show 5–10 point drops without them):
+
+- **Write path**: embedding worker prefixes `"passage: "` to composed text before calling the model
+- **Query path**: query handler prefixes `"query: "` to the user's query before embedding
+- The two paths must stay in sync — asymmetric prefixes silently degrade retrieval with no error signal
+
+This is an implementation tax bge-m3 wouldn't have had. The Layer 2 PR must include tests that assert both paths apply their prefixes, and a code-review checklist item to keep them in sync on any refactor. Cite the model card explicitly in the embedding worker's docstring.
+
+**Does not apply to:** `granite-embedding`, `mxbai-embed-large`, `nomic-embed-text`. Only e5 family. If the final choice is not e5, drop the prefix logic.
+
+**Schema changes (if e5-large or mxbai):**
+
+- Alembic migration to widen `embeddings.embedding` from `VECTOR(768)` to `VECTOR(1024)`
+- `AWARENESS_EMBEDDING_DIMENSIONS=1024` as new default
+- `AWARENESS_EMBEDDING_MODEL=intfloat/multilingual-e5-large` (or the chosen model) as new default
+- nomic remains a configurable fallback
+
+**Schema changes (if granite or jina v2):**
+
+- No migration. `VECTOR(768)` stays.
+- `AWARENESS_EMBEDDING_MODEL` updated to the chosen model.
+- Re-embed wave covers existing entries with the new model.
+
+**Benchmark gate (blocks default swap, unchanged from original design plus cross-lingual additions):**
+
+Before defaulting to any alternative model, run `benchmarks/semantic_search_bench.py` with the new model against current awareness data and:
+
+1. **English-quality gate (existing):** new model must match or exceed `nomic-embed-text` on English content. Recall @1, @5, @10; similarity score distributions; P50/P95 embedding latency. If English regresses, **abort the swap.**
+2. **Cross-lingual smoke tests (new):** prove cross-lingual retrieval actually works with the chosen model, not just that English doesn't regress.
+   - At least one **English query → non-English entry** test passes: write a Spanish note about "planning de jubilación", query "retirement planning", assert the Spanish note is in top-10
+   - At least one **non-English query → English entry** test passes: write an English note about "retirement planning", query "planning de jubilación", assert the English note is in top-10
+   - At least one **same-language non-English** test passes: Spanish query → Spanish entry in top-10 (proves the model handles non-English at all, not just English-via-translation)
+3. **Latency comparison:** document P50/P95 embedding latency delta. Larger model → longer embed latency is acceptable for the background worker, but flag if extreme.
+4. **Storage comparison:** 1024-dim vectors are ~33% larger than 768-dim; document the delta for operators planning disk capacity.
+
+**If the e5-large English benchmark comes in close to nomic but not clearly above**, switch to granite-embedding:278m as the default: narrower language coverage but no migration, simpler rollback, and the cross-lingual smoke tests still have to pass for it to be worth shipping.
+
+**Migration:** re-embed wave via existing `backfill_embeddings` background worker, same mechanism as prior model swaps.
 
 ### Layer 3 — Proposition extraction (experimental, follow-on)
 
@@ -124,115 +252,268 @@ Both branches use their indexes (HNSW + GIN). Fusion is in-memory over ≤100 ro
 
 **Schema:** new `propositions` table mirroring the entries/embeddings design with `entry_id` backref (ON DELETE CASCADE), its own tsvector, its own HNSW index, `extractor_model` column for drift detection.
 
-**Pipeline:** background worker → Ollama generation model (candidates: `qwen2.5:3b`, `phi3.5`) → JSON-parsed claim list → dedupe by text_hash → embed → index.
+**Retrieval:** new `find` tool returns propositions with entry backrefs. Entry-level embeddings retained as recall fallback for short/non-propositionalizable entries. Feature-flagged by `AWARENESS_PROPOSITION_EXTRACTION=true`.
 
-**Retrieval:** new `find` tool returns propositions with entry backrefs. Entry-level embeddings retained as recall fallback. Feature-flagged by `AWARENESS_PROPOSITION_EXTRACTION=true`.
+**Extraction pipeline:**
 
-**Risks:** extraction quality is the recall ceiling on that path; LLM drift requires `extractor_model` tracking; write-time LLM cost (free local, billable cloud); backfill is the most expensive one-time operation; some entry types don't propositionalize (status, alert, suppression, preference) — skip-list.
+- Background worker (separate from embedding worker, same pattern)
+- Pulls entries flagged as extraction-pending via a view
+- Calls a **local** Ollama generation model (see candidate list below)
+- Parses output as a JSON array of proposition strings
+- For each proposition: compute `text_hash`, upsert by `(entry_id, text_hash)` — propositions surviving an edit are preserved
+- Embed propositions via existing embedding worker
+- Mark entry as extracted
+
+**Model sourcing constraint:** same as Layer 2 — the default extractor must not be a Chinese-sourced model. This rules out `qwen2.5`, `qwen3`, `deepseek`, and similar. Additionally, **the default extractor must be local-runnable** (see risk below).
+
+**Candidate models (all non-Chinese, available on Ollama):**
+
+| Model | Source | License | Size | Primary criterion | Use case |
+|---|---|---|---|---|---|
+| **`phi3.5`** | Microsoft | MIT | ~3.8B | **Reliable JSON output** | **Default.** Fast, good size/quality balance, handles strict JSON extraction reliably. |
+| **`gemma2:2b`** | Google | Gemma License | ~2B | Smallest footprint | Low-resource alternative (Raspberry Pi, low-end VPS). JSON reliability is OK but not as strong as phi3.5 — needs schema enforcement at parse time. |
+| **`mistral-nemo`** | Mistral AI (France) | Apache 2.0 | ~12B | Extraction quality | High-quality alternative for users who care more about accuracy than speed. Slower; acceptable for background worker, not write-path. |
+| **`llama3.2:3b`** | Meta | Llama Community License | ~3B | — | **Not recommended as default.** License has a >700M MAU clause that's friendly but not as clean as MIT for redistribution. Listed for completeness as a third alternative. |
+
+**Primary default: `phi3.5`.** Most permissive license of the candidates, good size/quality balance, and crucially — reliable at strict JSON output. This matters more than raw extraction quality: some 2–3B models are unreliable at JSON and silently output prose when given structured prompts. When that happens, the pipeline's JSON parser breaks, the entry is marked extraction-failed, and extraction quality drops to zero for that entry. "Reliable at schema" is the first criterion, not the second.
+
+**Configurable from day one:** `AWARENESS_PROPOSITION_EXTRACTION_MODEL=phi3.5` as the default env var. Operators can swap without a code release.
+
+**Entry type handling:**
+
+- **Extract**: note, pattern, context (long-form knowledge)
+- **Use as-is**: intention (goal is already atomic)
+- **Skip**: alert, status, suppression, preference (structured or ephemeral)
+
+**Risks (expanded from original):**
+
+1. **Extraction quality is the recall ceiling** on the proposition path. Propositions missed by the extractor are invisible to proposition search. Mitigation: keep entry-level embeddings as a recall fallback, always. Dual-index means the worst case for proposition extraction is "no worse than Layer 1+2 search alone."
+
+2. **Non-determinism of LLM extraction.** Two runs of the same entry against the same model produce different propositions. This is fundamental, not a bug:
+   - **Tests against extraction quality are flaky by construction.** Regression tests must use fixed seeds *or* accept fuzzy matches against a gold standard.
+   - **`extractor_model` drift detection cannot distinguish genuine drift from noise.** A `text_hash` mismatch might mean "model behavior changed" or just "same model, different sampling." Document that retries of the same entry produce different rows and the dedupe mechanism accepts that.
+   - **Benchmarks must be averaged over multiple runs** or use temperature=0 to make extraction deterministic. Temperature=0 reduces quality variance but also reduces diversity in the extracted propositions.
+
+3. **Backref staleness on entry edits.** When an entry's content is edited, its existing propositions become stale. Three options, each with downsides:
+   - (a) Re-extract on every edit — LLM cost on every write, tight consistency
+   - (b) Mark stale, re-extract on next background worker cycle — window of incorrect retrievals, lower write cost
+   - (c) Accept indefinite staleness — propositions diverge from source
+   
+   **Design commitment: option (b).** Mark propositions stale synchronously on entry edit, rely on the background worker to re-extract asynchronously. Acceptable window of "proposition retrieval for this entry may return outdated claims for up to N minutes." Consistent with how embeddings are re-computed today. Entry-level embeddings stay current synchronously so Layer 1+2 search is always accurate even during the proposition staleness window.
+
+4. **Cloud-hosted extractor is a data exfiltration risk.** If the default extraction model ever gets swapped for a cloud-hosted LLM (OpenAI, Anthropic, Google Gemini), **every entry's content passes through the cloud provider's context window** at write time. This is a privacy violation for a personal knowledge store whose value proposition includes data sovereignty.
+   
+   **Design commitment: the default extractor must be local-runnable, period.** The candidate list above is all local Ollama models. Cloud extractors are **not** listed as candidates and are **not** supported via the default configuration path. Operators who want to use a cloud extractor must explicitly opt in via `AWARENESS_PROPOSITION_EXTRACTION_ALLOW_CLOUD=true` plus a separately-named env var for the provider. Cloud extractor support is out of scope for the Layer 3 initial release.
+
+5. **Short/structured entries don't propositionalize well.** A status entry `cpu: 80%, mem: 60%` has no propositions to extract. Skip-list by entry type + content length. Documented above under "Entry type handling."
+
+6. **Write-time LLM cost.** Free for local Ollama (CPU/GPU time), billable per-call if the operator opts into a cloud extractor. Backfill on first enable is the most expensive one-time operation.
+
+7. **LLM drift across model updates.** When an operator upgrades phi3.5 (or swaps to a different model entirely), extraction behavior changes. Store `extractor_model` per row for drift detection; treat it like `text_hash` for stale detection. Operators see an alert in their briefing if extraction model changes and they need to re-backfill.
+
+8. **Extraction prompt is production code.** The prompt we ship has to be maintained, versioned, tested, and occasionally updated as underlying models evolve. Document the prompt in the Layer 3 implementation PR and version it in the same file as the worker.
 
 ## Language support
 
 ### Built into Postgres (28)
+
 arabic, armenian, basque, catalan, danish, dutch, english, finnish, french, german, greek, hindi, hungarian, indonesian, irish, italian, lithuanian, nepali, norwegian, portuguese, romanian, russian, serbian, spanish, swedish, tamil, turkish, yiddish, plus `simple`.
 
 ### Via pgroonga extension (CJK + improved Arabic/Hebrew)
+
 japanese, chinese_simplified, chinese_traditional, korean, hebrew. Postgres base image swap to `groonga/pgroonga:latest-alpine-17`, one Alembic migration to `CREATE EXTENSION pgroonga`.
 
 ### Detection
-`lingua-py` — high accuracy on short text, pure Python, MIT license, no model downloads beyond the wheel.
 
-### Fallback chain
-Explicit override → user preference → auto-detection → `'simple'`. Never breaks a write.
+`lingua-py` — high accuracy on short text, pure Python, MIT license, no model downloads beyond the wheel. Uses `detect_language_of()` which applies lingua's own decision logic across vocabulary overlap.
+
+### Fallback chain (write time)
+
+Explicit `entry.data.language` → explicit tool `language` parameter → user preference → auto-detection → `'simple'` → **regconfig validation against `pg_ts_config` cache**. Never breaks a write.
 
 ### Unsupported languages
-Fall back to `'simple'` (word-boundary tokenization, no stemming — works universally but loses stem-based recall). Server fires a `report_alert` with `alert_id=missing-ts-config-{lang}` so the operator sees it in the briefing and can install the extension. Alert auto-clears once the config exists.
+
+Fall back to `'simple'` and fire a `report_alert` (`alert_id=missing-ts-config-{lang}`). Alert auto-clears once the config exists. This self-dogfoods the awareness alert system — the operator sees the missing-language problem in their own briefing.
 
 ### ISO 639-1 at boundaries
-API accepts `'en'`, `'ja'`, `'es'`, etc. Server maps to `regconfig` at the boundary. Unknown ISO codes fall back to `'simple'`.
+
+API accepts `'en'`, `'ja'`, `'es'`, etc. Server maps to `regconfig` at the boundary via the helpers in `src/mcp_awareness/language.py`. Unknown ISO codes fall back to `'simple'`.
 
 ## Migration plan
 
-### Phase 1 — Hybrid retrieval + language column
-1. Alembic: add `language` + `tsv` columns + GIN index
-2. Language resolution helpers in `schema.py`
-3. `lingua-py` as runtime dependency
-4. Rewrite `semantic_search` SQL to hybrid CTE
-5. `search` tool gains `language` parameter; `get_knowledge` gains optional `language` filter
-6. Backfill migration detects language on existing ~700 entries
-7. Unsupported-language alert infra
-8. Test coverage across vector/FTS/fusion branches + language resolution + alert firing
-9. Dogfooding regression test: the vision doc query surfaces the vision doc
+### Phase 1 — Layer 1: Hybrid retrieval + language column
 
-### Phase 2 — pgroonga extension
+1. **Phase 1.0 — Schema verification on PG17** (new, Substantive 2): prove the `to_tsvector(regconfig-from-other-column, text)` generated column pattern works on a fresh PG17 database before writing migration code. Trigger-based fallback documented if verification fails.
+2. Alembic: add `language regconfig NOT NULL DEFAULT 'simple'` + `tsv` generated column + GIN index + partial index on language
+3. Language resolution helpers in `src/mcp_awareness/language.py` *(already landed as foundation)*
+4. `lingua-language-detector>=2.0` runtime dependency *(already landed as foundation)*
+5. **Write-time regconfig validation** (new, Substantive 3): startup cache of `pg_ts_config`, pre-INSERT validation, fall-through to `'simple'` + alert, cache refresh on alert miss
+6. Rewrite `semantic_search` SQL to hybrid CTE (vector + FTS + RRF)
+7. Rename `semantic_search` tool → `search`; keep `semantic_search` as deprecated alias for one release
+8. `search` tool gains optional `language` parameter; `get_knowledge` gains optional `language` filter
+9. Write tools (`remember`, `add_context`, `learn_pattern`) gain optional `language` parameter
+10. **Evaluate lifting the 500-char content truncation** in `embeddings.py:212-217` (new): benchmark with full content vs 500-char cap, ship whichever wins
+11. Backfill migration: detect language on existing ~700 entries via lingua-py
+12. Unsupported-language alert infrastructure
+13. FTS weight validation benchmark: confirm A/B/C weighting is correct for awareness data
+14. Test coverage: vector branch, FTS branch, fusion, language resolution, regconfig validation, alert firing
+15. Dogfooding regression test: the vision doc query surfaces the vision doc *and asserts the FTS branch is what rescued it* (not a false-positive rescue from vector)
+
+### Phase 2 — Layer 2: Multilingual embedding model
+
+1. Run `benchmarks/semantic_search_bench.py` with `intfloat/multilingual-e5-large` against awareness data
+2. **English benchmark gate:** match or exceed nomic on English; abort if regression
+3. **Cross-lingual smoke tests:** EN→non-EN, non-EN→EN, non-EN→non-EN (all must pass before default swap)
+4. If e5-large benchmarks close-but-borderline, switch to `granite-embedding:278m` (no migration path) and re-run gates
+5. Alembic migration for vector dimension change (if e5-large or mxbai chosen — not needed for granite/jina/nomic)
+6. Docker compose pulls the chosen model on startup
+7. **e5 prefix convention** (if e5 chosen): embedding worker applies `"passage: "`, query path applies `"query: "`, tests assert both
+8. `backfill_embeddings` mass re-embed wave
+9. nomic remains a config fallback
+10. README + deployment guide updates
+
+### Phase 3 — pgroonga extension
+
 1. Postgres base image swap: `groonga/pgroonga:latest-alpine-17`
 2. Alembic: `CREATE EXTENSION pgroonga`
 3. Create text search configurations for japanese, chinese_simplified, chinese_traditional, korean, hebrew
-4. LXC install docs for non-Docker production deploys
+4. LXC install docs for non-Docker production deploys (install pgroonga from Groonga apt repo)
 5. Test coverage with CJK sample content
+6. **This phase can run in parallel with Phase 1 or Phase 2** — independent concern
 
-### Phase 3 — bge-m3 swap (behind env var)
-1. Benchmark bge-m3 vs nomic-embed-text on awareness data
-2. If benchmarks pass: Alembic migration `VECTOR(768) → VECTOR(1024)`
-3. Docker compose pulls bge-m3 on startup
-4. `backfill_embeddings` mass re-embed wave
-5. nomic remains a config fallback
-6. README + deployment guide updates
+### Phase 4 — Layer 3: Proposition extraction (experimental)
 
-### Phase 4 — Proposition extraction (experimental)
-1. New `propositions` table + indexes
-2. Extraction worker + prompt + model config
-3. `find` tool + feature flag
-4. Backfill on existing entries
-5. Benchmark proposition vs hybrid retrieval on sub-document queries
-6. Promote to default only after quality validation
+1. New `propositions` table + HNSW + GIN indexes + RLS policies
+2. Extraction worker (background thread, separate from embedding worker)
+3. Extractor prompt + phi3.5 model config + JSON schema enforcement
+4. `find` tool returns propositions with backrefs + `AWARENESS_PROPOSITION_EXTRACTION` feature flag
+5. `AWARENESS_PROPOSITION_EXTRACTION_MODEL` env var (default `phi3.5`)
+6. Backfill on existing entries
+7. Benchmark proposition retrieval vs hybrid retrieval alone on sub-document queries
+8. Promote to default only after quality validation
 
-## Open questions
+### User-facing release packaging
 
-1. **RRF k parameter** — k=60 is the published default; does awareness data warrant tuning?
-2. **FTS weights** — initial guess is description=A, content/goal=B, tags=C. Empirical validation TBD.
-3. **Extraction model (Layer 3)** — qwen2.5:3b vs phi3.5 vs larger. Size × quality × latency tradeoff.
-4. **Proposition dedupe threshold (Layer 3)** — exact `text_hash`, or near-duplicate via embedding similarity?
-5. **Tool rename** — `semantic_search` → `search`? Cleaner name; add alias for compat.
-6. **Per-entry language override surface** — expose in write tools, or implicit via preference + detection only?
+- **v1 release** — Phase 1 + Phase 3 (hybrid retrieval + CJK support). User-facing story: "search is smarter, 35 languages supported lexically."
+- **v2 release** — Phase 2 bundled on top of v1. User-facing story: "cross-language unified memory."
+- **v3 release** — Phase 4 (experimental). User-facing story: "find the answer, not the document."
+
+## Open questions (remaining after amendment)
+
+1. **Proposition dedupe threshold (Layer 3)** — exact `text_hash` match, or near-duplicate detection via embedding similarity? Defer until Layer 3 implementation.
+2. **Multilingual model final choice** — e5-large vs granite-278m depends on the English benchmark outcome. Run the benchmark before committing.
+
+**Resolved in this amendment:**
+- RRF k=60: stick with published default ✓
+- FTS weights: initial guess + Phase 1 benchmark validation task ✓
+- Tool rename: `search` + deprecated `semantic_search` alias ✓
+- Per-entry language override surface: optional `language` parameter on write tools ✓
+- Layer 3 extraction model: `phi3.5` default, env-configurable, local-runnable constraint ✓
+- Sequencing: v1 ships Phase 1+3, v2 adds Phase 2, v3 adds Phase 4 (experimental) ✓
+- bge-m3 sourcing concern: model replaced with e5-large or granite ✓
 
 ## Risks
 
-### Layer 1 — Low
-Generated column write cost is negligible. `ts_rank_cd` is not BM25 but is sufficient for personal-scale content. lingua-py is a small pure-Python dep. FTS behavior needs language-specific test coverage.
+### Layer 1 — Low-Medium (upgraded from Low after QA review)
+
+- Generated-column + regconfig-from-another-column pattern needs PG17 verification (Phase 1.0 task). Trigger fallback documented if verification fails.
+- Write-time regconfig validation is new code on the write path; must be covered by tests that exercise missing-language scenarios (explicitly).
+- `ts_rank_cd` is not BM25 but is sufficient for personal-scale content. Bigger concern at web scale, not here.
+- FTS behavior needs language-specific test coverage across at least 3 representative languages.
+- lingua-py is a small pure-Python dep, already integrated in the foundation commit.
+- **GIN + RLS at multi-tenant scale** (Substantive 5): common-term queries may see GIN matches on all owners' rows, then RLS filters. Correct but wasteful. Personal-scale (current state) doesn't have the problem; revisit if the threat model changes. Noted as future scaling concern.
 
 ### Layer 2 — Low-Medium
-bge-m3 quality on English content must match or exceed nomic — blocked on benchmark. Re-embed wave briefly degrades production search recall. Larger model → longer embed latency (acceptable for background worker). 1024-dim vectors are ~33% larger storage.
 
-### Layer 3 — Medium
-Extraction quality ceilings recall on that path. LLM drift requires per-row `extractor_model` tracking. Short/structured entries need skip rules. Write-time LLM cost is nonzero. Backfill is the most expensive one-time operation.
+- Chosen model must match or exceed nomic on English — blocked on benchmark.
+- Cross-lingual smoke tests must pass before default swap (new acceptance criterion).
+- Re-embed wave briefly degrades production search recall during the migration.
+- Larger model → longer embed latency (acceptable for background worker).
+- 1024-dim vectors are ~33% larger storage (if e5-large or mxbai chosen; zero change for granite).
+- **e5 prefix convention asymmetry** (if e5 chosen): test-enforced symmetry is mandatory. Missing a prefix is silent degradation.
+
+### Layer 3 — Medium-High (upgraded after QA review)
+
+- Extraction quality ceilings recall on that path; mitigation is dual-index with entry-level embeddings as recall fallback.
+- **Non-determinism of LLM extraction** — fundamental, not fixable. Tests must use fixed seeds or fuzzy matching.
+- **Backref staleness on edits** — committed to mark-stale + background re-extract; accept the staleness window.
+- **Cloud extractor privacy hazard** — default must be local-runnable, cloud extractors not supported in default config.
+- LLM drift requires per-row `extractor_model` tracking.
+- Short/structured entries need skip rules.
+- Write-time LLM cost is nonzero (free local, billable cloud).
+- Backfill is the most expensive one-time operation.
+- Extraction prompt is production code requiring maintenance.
 
 ### pgroonga — Low
-~150MB image-size increase. New operational dependency for CJK support. Extension install on non-Docker deploys needs documentation.
+
+~150MB image-size increase. New operational dependency for CJK support. Extension install on non-Docker deploys (LXC production) needs documentation and a Groonga apt repo source configured.
 
 ## Out of scope
 
 - **#184 response size cap** — Layer 3 mitigates it for the search path, but other read tools still need their own cap. Tracked separately.
-- **Federation across language instances** — long-term future work; current design is single-instance multilingual via Option A.
+- **Federation across language instances** — long-term future work; current design is single-instance multilingual (Option A from the architecture discussion).
 - **Custom BM25 implementation** — `ts_rank_cd` is good enough for personal-scale.
-- **OpenAI embedding provider (#111)** — parallel work; bge-m3 is the Ollama-side default.
+- **OpenAI embedding provider (#111)** — parallel work; tracked independently.
+- **Cloud-hosted extraction models (Layer 3)** — explicitly out of scope for the initial Layer 3 release.
 
-## Acceptance criteria (high level)
+## Acceptance criteria
 
-- [ ] Dogfooding regression query returns the vision doc as top result
-- [ ] Japanese query returns English entries on the same topic (bge-m3 cross-lingual)
-- [ ] English query returns Japanese entries on the same topic
-- [ ] Unsupported language write fires an alert and falls back to `'simple'`
-- [ ] No regression on pure-English recall vs current nomic-based search
+### Layer 1 (Phase 1)
+
+- [ ] Schema verification task (Phase 1.0) completed and documented
+- [ ] Dogfooding regression query returns the vision doc as top result, **with assertion that the FTS branch is what rescued it**
+- [ ] Unsupported-language write fires a `report_alert` and falls back to `'simple'` without failing the INSERT
+- [ ] No regression on pure-English recall vs the current nomic-based search
+- [ ] `search` tool runs vector + FTS + RRF in a single CTE
+- [ ] `language` parameter on `search` and `get_knowledge`; optional override on write tools
+- [ ] `semantic_search` tool name kept as deprecated alias for one release
+- [ ] FTS weight validation benchmark documents the A/B/C choice
 - [ ] Backfill re-detects language on all existing entries without loss
-- [ ] CHANGELOG + README updated to document multilingual support
-- [ ] Test coverage across all retrieval branches and the fusion layer
+- [ ] Test coverage across vector branch, FTS branch, fusion layer, language resolution, regconfig validation, alert firing
+- [ ] 500-char content truncation investigation completed with a committed direction (lift or keep)
+
+### Layer 2 (Phase 2)
+
+- [ ] Benchmark report: chosen model vs nomic-embed-text on English (recall@k, latency, storage)
+- [ ] **Cross-lingual smoke tests pass**: EN→non-EN, non-EN→EN, non-EN→non-EN-same-lang
+- [ ] Alembic migration for vector dimension change (if applicable to the chosen model)
+- [ ] Docker compose pulls the chosen model on startup
+- [ ] (If e5 family) embedding worker applies `"passage: "` prefix; query path applies `"query: "` prefix; tests assert both
+- [ ] `backfill_embeddings` re-embeds all existing data with the new model
+- [ ] nomic remains a valid config fallback
+- [ ] Japanese query returns English entries on the same topic
+- [ ] English query returns Japanese entries on the same topic
+- [ ] Spanish query returns Spanish entries on the same topic
+- [ ] Documentation update (README + deployment guide)
+
+### Layer 3 (Phase 4, experimental)
+
+- [ ] `propositions` table + HNSW + GIN + RLS policies
+- [ ] Background extraction worker
+- [ ] Extractor prompt + `phi3.5` default + `AWARENESS_PROPOSITION_EXTRACTION_MODEL` env var
+- [ ] `find` tool returns propositions with entry backrefs
+- [ ] Dedupe by `text_hash` on edit; propositions surviving an edit are preserved
+- [ ] Entry-level embeddings retained as recall fallback
+- [ ] Feature flag (`AWARENESS_PROPOSITION_EXTRACTION=true`) gating
+- [ ] Cloud extractor explicitly unsupported in default config
+- [ ] Benchmark: proposition retrieval improves recall on sub-document queries vs Layer 1+2 alone
+- [ ] Smoke test: "retire at 62" query returns the matching proposition, not the full retirement-planning entry
+
+## Merge checklist (after amended #241 merges)
+
+- [ ] Close #195 with a comment pointing to this design doc and issues #238/#239/#240
+- [ ] Update issue #239 body: drop bge-m3, add e5-large/granite candidates + e5 prefix convention + cross-lingual smoke tests
+- [ ] Update issue #240 body: drop qwen, add phi3.5 default + local-runnable constraint + non-determinism/staleness risks
 
 ## References
 
 - Dogfooding finding — awareness entry `06f85fd0` (2026-03-24)
+- 500-char truncation source — `src/mcp_awareness/embeddings.py:212-217`
 - Cormack, Clarke, Büttcher, *Reciprocal Rank Fusion outperforms Condorcet and individual Rank Learning Methods* (2009)
 - Chen et al., *Dense X Retrieval: What Retrieval Granularity Should We Use?* (2023) — https://arxiv.org/abs/2312.06648
-- Chen et al., *BGE M3-Embedding: Multi-Lingual, Multi-Functionality, Multi-Granularity Text Embeddings Through Self-Knowledge Distillation* (2024) — https://arxiv.org/abs/2402.03216
+- Wang et al., *Text Embeddings by Weakly-Supervised Contrastive Pre-training* (E5 paper, 2022) — https://arxiv.org/abs/2212.03533
+- IBM Granite embedding — https://www.ibm.com/granite
 - Postgres full-text search docs — https://www.postgresql.org/docs/current/textsearch.html
+- Postgres text search configurations — https://www.postgresql.org/docs/current/textsearch-configuration.html
 - pgroonga — https://pgroonga.github.io/
 - lingua-py — https://github.com/pemistahl/lingua-py
