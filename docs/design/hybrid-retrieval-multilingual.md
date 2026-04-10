@@ -36,6 +36,7 @@ A separate requirement surfaced 2026-04-10: **awareness should be multilingual, 
 2. **Exact-term queries are weakly supported** (identifiers, acronyms, rare words)
 3. **Language is hardcoded** — `nomic-embed-text` is English-centric, no per-entry language metadata, no lexical retrieval
 4. **Response sizes are large** — full entries returned even when one sentence would answer the query
+5. **Data sovereignty is undefined.** The current design does not explicitly govern where user content can be sent for inference. As soon as cloud embedding providers (e.g. #111) or cloud extraction models are introduced, every entry's content may pass through a third party without a coherent framework for when this is acceptable. Layer 2 and Layer 3 both need this framework before any non-local inference path ships as a default.
 
 ## Alternatives considered
 
@@ -74,6 +75,104 @@ The three layers have different *technical* scopes and different *user-facing* s
 | v3 (sub-document) | "Find the answer, not the document" | Layer 3, experimental |
 
 Layer 1 alone can ship first if it provides value (it does — the dilution fix is meaningful on its own), but the project should not call it "multilingual" publicly until Layer 2 lands. Bilingual users who try a Japanese query against English vector-only content will get nothing useful and conclude the feature is broken — exactly the opposite of what we're trying to build.
+
+## Data sovereignty policy
+
+This section is a cross-cutting policy that governs **any** inference call awareness makes — embedding generation (Layer 2 and future embedding providers), proposition extraction (Layer 3), and any future LLM-using feature (summarization, tagging, classification, rewriting). Every code path that sends user content to an inference target, local or remote, must respect this policy.
+
+### Trust anchors: `safe = (we-control-it) OR (contract-protects-it)`
+
+The question "is it safe to send user data to this inference target?" is answered not by network location but by one of two **trust anchors**:
+
+**Trust anchor B — Control.** We (operator, user, or administratively-owned infrastructure) control the machine the model runs on. The data never leaves infrastructure we own.
+
+- Examples: Ollama on the awareness host itself; Ollama on a user's LAN NAS over Tailscale; Ollama on a user-owned GCE instance; an internal corporate LLM endpoint; a model running in the operator's VPC with no external egress.
+- **Network location is irrelevant to this classification.** Ollama on a user-owned cloud VM is trust-anchor-B even though the machine is "in the cloud." Ollama running in a VPC alongside a cloud-deployed awareness instance is trust-anchor-B. What matters is administrative ownership, not network topology.
+- **"Cloud deployment" ≠ "cloud inference".** Awareness deployed in AWS/GCP/Azure can absolutely use trust-anchor-B by pointing at Ollama (or any other controlled model) running in the same VPC, via private peering, or over a private network. This is a core nuance and the design must not assume otherwise. A managed cloud awareness offering that runs Ollama privately within its own infrastructure qualifies as trust-anchor-B, not trust-anchor-C.
+
+**Trust anchor C — Contract.** A legal instrument binds the third party running the model: enterprise-tier API, zero-retention agreement, BAA, no-training-on-data clause. The third party sees the data in flight but is contractually bound not to retain it, train on it, or access it beyond serving the inference request.
+
+- Examples: OpenAI Enterprise with zero-retention configured; Anthropic Enterprise; Google Workspace-tier Gemini with BAA; Cohere Enterprise.
+- **Not examples:** OpenAI consumer API (default 30-day retention); Anthropic consumer tier; Google consumer Gemini; public inference endpoints without a signed contract; OpenAI-compatible proxies of unknown provenance.
+
+**Safety rule.** An inference target is **safe** if it satisfies trust-anchor-B *or* trust-anchor-C. An inference target that satisfies neither is **unprotected**.
+
+### Scope: "our deployments" vs "other operators"
+
+The sovereignty policy has two enforcement levels depending on deployment context:
+
+**Our deployments** — the awareness project's canonical hosted instances (`mcp.mcpawareness.com`, any managed cloud offering that ships in the future, internal instances operated by the awareness project itself). These deployments **must** use trust-anchor-B or trust-anchor-C exclusively. Unprotected providers are not a configuration option in our shipped defaults, full stop.
+
+**Other operators' deployments** — self-hosted awareness instances run by anyone else. Operators are free to configure their instances however they want, including unprotected providers. The awareness server **does not hard-block** unprotected providers — an operator who knows what they're doing can use them. But the server **does emit a log warning** at startup and at each inference call to an unprotected provider, and surfaces the condition through the consent surface below.
+
+The principle is **soft enforcement with visibility**, not hard block. Informed consent is the mechanism; the server's job is to make sure an operator can't *accidentally* leak data through an unprotected path, not to stop a determined operator from making an informed choice.
+
+### Per-entry sensitivity routing (opt-in)
+
+Even with trust-anchor-C (enterprise contract), some users want certain categories of content to never leave infrastructure they personally control. The per-entry sensitivity routing mechanism provides this:
+
+**Reserved tag: `sensitive`.** Any entry with the `sensitive` tag must be routed to a trust-anchor-B inference target. Trust-anchor-C is *not* acceptable for sensitive entries — the contract doesn't matter here; the user's choice is that the data stays on infrastructure they own.
+
+**Operator-configurable additional tags** via env var:
+```
+AWARENESS_LOCAL_ONLY_TAGS=sensitive,health,family,finance,therapy
+```
+Sets the deployment-level floor of tags that trigger local-only routing.
+
+**User preference additions** via `users.preferences.local_only_tags`:
+```json
+{"local_only_tags": ["private", "estate-plan"]}
+```
+Users can *extend* the set of local-only tags with their own additions. They **cannot remove** tags from the operator's deployment-level floor — the operator's choices are always respected (additive, not subtractive).
+
+**Routing rule at inference time.** For any given entry, compute the union of (env-var tags, user-preference tags). If any of the entry's tags intersect this set, all inference for that entry must use a trust-anchor-B target. If the deployment has no trust-anchor-B target configured at all, see "availability degradation" below.
+
+### The three tradeoffs of sensitivity routing
+
+Users opting into per-entry sensitivity routing are making an explicit choice to prioritize sovereignty over retrieval quality. The three specific costs are documented so users understand what they are giving up:
+
+**1. Quality degradation.** If the deployment's trust-anchor-B model is smaller or weaker than its trust-anchor-C model, sensitive entries get lower-quality embeddings and extractions. In a hybrid deployment, sensitive entries receive a measurably different quality floor than non-sensitive entries on the same instance. See the Sovereignty benchmark requirement below — we are committed to publishing quantitative comparisons so users can make informed tradeoff decisions.
+
+**2. Availability degradation in pure-cloud deployments.** In a deployment with **no trust-anchor-B option configured at all** — pure cloud, no VPC-internal model, no user-controlled LLM endpoint — sensitive entries **receive no vector embeddings and no propositions**. They fall back to Postgres full-text search, which is always local because it *is* Postgres itself. The entries are still stored, still searchable via term matches, and still appear in `search` results — they just don't benefit from Layer 2 semantic retrieval or Layer 3 proposition retrieval.
+
+**This is silent graceful degradation, not a write failure.** The sensitive tag is a promise: "keep this local or don't process it." Overriding the promise to get better retrieval would be worse than degrading. The user sees the effect in their search results (sensitive entries rank lower on semantic queries) and can adjust.
+
+**3. Search consistency drift.** In a hybrid deployment (both B and C available), a query that matches both a sensitive entry (B-only signals) and a non-sensitive entry (B + C signals) may rank the non-sensitive entry higher simply because it has more signals contributing to its score. Users' sensitive entries are systematically less discoverable by semantic queries than their non-sensitive entries on the same instance.
+
+This is the correct behavior — sovereignty has a cost — but it is the subtlest of the three and worth surfacing in user-facing documentation so nobody is surprised by it later.
+
+### Sovereignty benchmark (release criterion for cloud inference)
+
+Before any cloud-inference code path ships as a supported option — cloud embedding providers (Layer 2 / #111), cloud extraction providers (Layer 3), or any future LLM integration — a **sovereignty benchmark** must be published comparing retrieval quality with sensitivity routing enabled versus disabled.
+
+**Benchmark scope:**
+- Representative query set covering semantic search, exact-term search, and mixed queries across multiple entry types
+- Same entries, same queries, two configurations:
+  - "Best available": `AWARENESS_LOCAL_ONLY_TAGS=` (empty) — all inference uses the best configured provider (B or C, whichever is stronger)
+  - "Sovereignty mode": `AWARENESS_LOCAL_ONLY_TAGS=sensitive` applied to every entry — all inference uses only trust-anchor-B
+- Metrics: recall @1, @5, @10; mean reciprocal rank (MRR); latency P50/P95; storage delta if embeddings differ by dimension
+- Published in the deployment guide or README as a quantitative table users can reference when deciding whether the sovereignty tradeoff is worth it for their use case
+
+**Purpose.** Users opting into sensitivity routing are making a quality/sovereignty tradeoff. We owe them the data to make that tradeoff **informed** rather than **superstitious**.
+
+**Gating.** The sovereignty benchmark is a **hard release criterion** for any cloud-inference path shipped as an awareness default. Layer 1+2 with local-only defaults can ship without it — there is nothing cloud to compare against. The moment a trust-anchor-C path is supported as a shipped default, the benchmark must exist before the feature ships.
+
+### Consent surface
+
+Three complementary visibility mechanisms, each serving a different purpose:
+
+**1. `get_info` tool exposes active inference providers (always on).** The `get_info` tool (issue #235) surfaces the current extraction and embedding provider configuration, each tagged with its trust-anchor classification:
+- `B` — we-control-it (local/owned infrastructure)
+- `C` — contract-protects-it (enterprise-tier with zero-retention guarantees)
+- `U` — unprotected (neither B nor C detected)
+
+Users and operators can check at any time. No proactive alerts. This is the "I'm curious, let me look" lane.
+
+**2. First-time-seen briefing notice (one-shot, per provider configuration).** The first time a new inference provider configuration is observed — on first boot, after an operator swaps providers, after a version upgrade changes defaults — a one-line note appears in the briefing: *"inference providers updated: extraction=phi3.5 (B), embedding=multilingual-e5-large (B)."* The operator acknowledges it via `acted_on` and it goes silent. This is the "something changed, you should know" lane.
+
+**3. Recurring briefing warning only when unprotected (conditional).** If the server detects an unprotected inference provider (neither B nor C), a persistent briefing warning appears on every briefing until the condition is resolved. All-protected state (everything is B or C) is **silent** after the first-time notice. This follows the same philosophy as every other awareness alert: silent on all-clear, speak only on warning. Briefings are not polluted with routine status.
+
+This three-surface approach balances visibility against noise. The on-demand `get_info` gives anyone who cares the full picture. The first-time notice catches configuration changes. The briefing warning fires only when there's something that actively needs fixing.
 
 ## Design — three independent layers
 
@@ -188,7 +287,9 @@ The 500-char cap in `embeddings.py:212-217` predates the hybrid retrieval design
 
 **Goal:** replace `nomic-embed-text` (English-centric, Nomic/US) with a multilingual embedding model that provides a shared cross-lingual vector space, enabling the user-facing "cross-language unified memory" story.
 
-**Model sourcing constraint:** the default must not be a Chinese-sourced model. This rules out `bge-m3` (BAAI), `bge-large`, `bge-reranker`, `qwen-embed`, and similar. The constraint applies only to shipped defaults — operators who explicitly opt into a Chinese model via `AWARENESS_EMBEDDING_MODEL` on their own instance are making their own call.
+**Data sovereignty constraint.** Any embedding provider must satisfy the [Data sovereignty policy](#data-sovereignty-policy) — trust-anchor-B (we-control-it) or trust-anchor-C (enterprise contract). The initial Layer 2 candidate list below is all trust-anchor-B (local Ollama models). Future cloud embedding providers (e.g. #111 OpenAI embedding provider) must be configured for enterprise-tier API access (zero-retention, BAA) to qualify as trust-anchor-C — consumer-tier configurations will trigger the log warning defined in the sovereignty policy. The sovereignty benchmark must be published before a trust-anchor-C embedding path ships as a default.
+
+**Model sourcing constraint.** Independent of sovereignty, the default must not be a Chinese-sourced model. This rules out `bge-m3` (BAAI), `bge-large`, `bge-reranker`, `qwen-embed`, and similar, regardless of whether they run local or remote. The constraint applies only to shipped defaults — operators who explicitly opt into a Chinese model via `AWARENESS_EMBEDDING_MODEL` on their own instance are making their own call.
 
 **Candidate models (all non-Chinese, all on Ollama or Hugging Face):**
 
@@ -264,7 +365,9 @@ Before defaulting to any alternative model, run `benchmarks/semantic_search_benc
 - Embed propositions via existing embedding worker
 - Mark entry as extracted
 
-**Model sourcing constraint:** same as Layer 2 — the default extractor must not be a Chinese-sourced model. This rules out `qwen2.5`, `qwen3`, `deepseek`, and similar. Additionally, **the default extractor must be local-runnable** (see risk below).
+**Data sovereignty constraint.** Same as Layer 2 — the extractor must satisfy the [Data sovereignty policy](#data-sovereignty-policy): trust-anchor-B (local/we-control-it) or trust-anchor-C (enterprise contract). The Layer 3 initial release ships with trust-anchor-B candidates only (local Ollama models) because provider-specific cloud extraction integrations (OpenAI, Anthropic, etc.) are real work that is out of scope for Layer 3's experimental release. When a trust-anchor-C extraction path is added in a future release, the sovereignty benchmark must be published alongside it.
+
+**Model sourcing constraint.** Independent of sovereignty, the default extractor must not be a Chinese-sourced model. This rules out `qwen2.5`, `qwen3`, `deepseek`, and similar, regardless of whether they run local or remote.
 
 **Candidate models (all non-Chinese, available on Ollama):**
 
@@ -301,9 +404,11 @@ Before defaulting to any alternative model, run `benchmarks/semantic_search_benc
    
    **Design commitment: option (b).** Mark propositions stale synchronously on entry edit, rely on the background worker to re-extract asynchronously. Acceptable window of "proposition retrieval for this entry may return outdated claims for up to N minutes." Consistent with how embeddings are re-computed today. Entry-level embeddings stay current synchronously so Layer 1+2 search is always accurate even during the proposition staleness window.
 
-4. **Cloud-hosted extractor is a data exfiltration risk.** If the default extraction model ever gets swapped for a cloud-hosted LLM (OpenAI, Anthropic, Google Gemini), **every entry's content passes through the cloud provider's context window** at write time. This is a privacy violation for a personal knowledge store whose value proposition includes data sovereignty.
+4. **Cloud-hosted extractor is a data exfiltration risk if unprotected.** Every entry's content passes through the extractor's context window at write time. For unprotected providers (consumer-tier APIs, public endpoints), this is a privacy violation. For trust-anchor-C providers (enterprise-tier with zero-retention contracts), it is acceptable under the [Data sovereignty policy](#data-sovereignty-policy). For trust-anchor-B providers (local Ollama, user-controlled model endpoints), no third party sees the data.
    
-   **Design commitment: the default extractor must be local-runnable, period.** The candidate list above is all local Ollama models. Cloud extractors are **not** listed as candidates and are **not** supported via the default configuration path. Operators who want to use a cloud extractor must explicitly opt in via `AWARENESS_PROPOSITION_EXTRACTION_ALLOW_CLOUD=true` plus a separately-named env var for the provider. Cloud extractor support is out of scope for the Layer 3 initial release.
+   **Design commitment for Layer 3 initial release: candidates are all trust-anchor-B (local Ollama).** Trust-anchor-C extraction providers (enterprise-tier cloud APIs) are acceptable under the sovereignty policy *in principle* but require provider-specific integration work (client libraries, auth, retries, error handling, telemetry) that is out of scope for Layer 3's experimental release. When cloud extraction is added in a future release, the sovereignty benchmark (see policy section) must be published alongside it, and the consent surface must surface the provider's trust-anchor classification through `get_info`.
+   
+   Sensitivity routing (`sensitive` tag) applies to extraction the same way it applies to embedding: sensitive entries always route to trust-anchor-B regardless of the global extractor configuration. In a pure-cloud deployment with no trust-anchor-B extractor configured, sensitive entries get no propositions and fall back to entry-level search.
 
 5. **Short/structured entries don't propositionalize well.** A status entry `cpu: 80%, mem: 60%` has no propositions to extract. Skip-list by entry type + content length. Documented above under "Entry type handling."
 
@@ -356,8 +461,15 @@ API accepts `'en'`, `'ja'`, `'es'`, etc. Server maps to `regconfig` at the bound
 11. Backfill migration: detect language on existing ~700 entries via lingua-py
 12. Unsupported-language alert infrastructure
 13. FTS weight validation benchmark: confirm A/B/C weighting is correct for awareness data
-14. Test coverage: vector branch, FTS branch, fusion, language resolution, regconfig validation, alert firing
-15. Dogfooding regression test: the vision doc query surfaces the vision doc *and asserts the FTS branch is what rescued it* (not a false-positive rescue from vector)
+14. **Sovereignty framework scaffolding** (new):
+    - Parse `AWARENESS_LOCAL_ONLY_TAGS` env var (default `"sensitive"`)
+    - Read `users.preferences.local_only_tags` at inference call sites
+    - Add helper `requires_trust_anchor_b(entry, user_prefs, env_tags) -> bool`
+    - Add helper `classify_inference_target(url_or_provider) -> Literal["B", "C", "U"]` with allowlists for known trust-anchor-B (localhost, loopback, LAN ranges, well-known Ollama URLs) and trust-anchor-C (enterprise OpenAI with explicit zero-retention env var set, etc.)
+    - Document the framework in user docs
+    - **No behavior change in Phase 1** (all current providers are trust-anchor-B, so the routing helper is a no-op). The framework is in place, ready to activate when cloud providers are added.
+15. Test coverage: vector branch, FTS branch, fusion, language resolution, regconfig validation, alert firing, sovereignty helpers
+16. Dogfooding regression test: the vision doc query surfaces the vision doc *and asserts the FTS branch is what rescued it* (not a false-positive rescue from vector)
 
 ### Phase 2 — Layer 2: Multilingual embedding model
 
@@ -471,6 +583,10 @@ API accepts `'en'`, `'ja'`, `'es'`, etc. Server maps to `regconfig` at the bound
 - [ ] Backfill re-detects language on all existing entries without loss
 - [ ] Test coverage across vector branch, FTS branch, fusion layer, language resolution, regconfig validation, alert firing
 - [ ] 500-char content truncation investigation completed with a committed direction (lift or keep)
+- [ ] Sovereignty framework scaffolding (env var + user preference parsing, routing helper, trust-anchor classification helper) implemented and unit-tested, even though all Layer 1+Phase 1 providers are trust-anchor-B (no-op at this stage)
+- [ ] `get_info` tool (#235) exposes extraction and embedding provider trust-anchor classification
+- [ ] First-time-seen briefing notice fires on provider configuration changes
+- [ ] Unprotected provider detection fires a persistent briefing warning (no unprotected providers in Layer 1+Phase 1, but the detection code is tested with a test fixture)
 
 ### Layer 2 (Phase 2)
 
@@ -485,6 +601,7 @@ API accepts `'en'`, `'ja'`, `'es'`, etc. Server maps to `regconfig` at the bound
 - [ ] English query returns Japanese entries on the same topic
 - [ ] Spanish query returns Spanish entries on the same topic
 - [ ] Documentation update (README + deployment guide)
+- [ ] If any trust-anchor-C embedding path ships as part of Phase 2: sovereignty benchmark published (sensitivity-on vs sensitivity-off quality comparison) before the feature ships; per-entry sensitivity routing honors the sensitive tag in the embedding worker; consent surface (get_info + first-time notice) reflects the new provider
 
 ### Layer 3 (Phase 4, experimental)
 
@@ -495,9 +612,11 @@ API accepts `'en'`, `'ja'`, `'es'`, etc. Server maps to `regconfig` at the bound
 - [ ] Dedupe by `text_hash` on edit; propositions surviving an edit are preserved
 - [ ] Entry-level embeddings retained as recall fallback
 - [ ] Feature flag (`AWARENESS_PROPOSITION_EXTRACTION=true`) gating
-- [ ] Cloud extractor explicitly unsupported in default config
+- [ ] Trust-anchor-B default extractor (phi3.5 or equivalent local Ollama model); no trust-anchor-C providers in the initial release candidate list
+- [ ] Sensitivity routing honored by extraction worker: sensitive entries get no proposition extraction if the configured extractor is not trust-anchor-B
 - [ ] Benchmark: proposition retrieval improves recall on sub-document queries vs Layer 1+2 alone
 - [ ] Smoke test: "retire at 62" query returns the matching proposition, not the full retirement-planning entry
+- [ ] If any trust-anchor-C extraction path ships in a later release: sovereignty benchmark published, consent surface updated, sensitivity routing verified
 
 ## Merge checklist (after amended #241 merges)
 
