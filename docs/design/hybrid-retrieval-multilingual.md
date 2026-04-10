@@ -442,8 +442,9 @@ Generated tsvector columns using a `regconfig` sourced from another column are a
 - [ ] Update an existing row's `language` column and verify `tsv` regenerates
 - [ ] `EXPLAIN ANALYZE` a query with `@@` — confirm GIN scan is used
 - [ ] Confirm the hybrid CTE plan uses both HNSW and GIN indexes
+- [ ] **Repeat the verification against AWS RDS Postgres 17** (and, if access is available, Aurora PostgreSQL-compatible 17) to confirm the generated `tsvector` + per-row `regconfig` pattern works on managed providers. RDS has subtle differences from the upstream Docker image (parameter group defaults, extension versioning, no superuser access, role/permission model), and the deployment compatibility claim in this design depends on the verification actually exercising a managed instance, not just the docker `pg17` image. Use a minimal RDS test instance for the verification pass, then tear down. If Aurora access isn't available to the verifier, document the gap — it remains an open verification item until confirmed.
 
-If the generated-column approach fails on PG17 for any reason, the fallback is a `BEFORE INSERT/UPDATE` trigger that computes the same expression and stores it in a non-generated column. Functionally equivalent; adds a small write-time cost; keeps the query plan the same. Documenting the fallback now so implementation isn't blocked if the verification fails.
+If the generated-column approach fails on PG17 for any reason (docker image or managed provider), the fallback is a `BEFORE INSERT/UPDATE` trigger that computes the same expression and stores it in a non-generated column. Functionally equivalent; adds a small write-time cost; keeps the query plan the same. Documenting the fallback now so implementation isn't blocked if the verification fails.
 
 **500-char content truncation — investigate lifting as part of Layer 1:**
 
@@ -754,11 +755,12 @@ Most of this design runs unchanged on managed Postgres services. Specifically, t
 
 - `pgvector` + HNSW indexes (available on RDS since 2023, Aurora shortly after)
 - Standard Postgres full-text search (`tsvector`, GIN, `regconfig`, `plainto_tsquery`, `ts_rank_cd`)
-- Per-row `regconfig` in a generated `tsvector` column (Postgres 12+; still subject to the Phase 1.0 verification task, but not for managed-Postgres reasons specifically)
+- Per-row `regconfig` in a generated `tsvector` column (Postgres 12+; still subject to the Phase 1.0 verification task — see below for the managed-provider extension of that task)
 - Row-level security and `FORCE RLS`
 - JSONB with GIN indexes
-- `wal_level=logical` via parameter group configuration
 - All application-level features: sovereignty framework, `data_sovereignty` field, hybrid retrieval CTE, `get_info`, session persistence, embedding and extraction workers, multi-tenant RLS
+
+**Not required for hybrid retrieval** (but sometimes present in awareness deployments for other reasons): `wal_level=logical` is part of the standard awareness Postgres parameter set for Debezium CDC readiness (see `docs/data-dictionary.md`), not for anything in this design. Operators deploying only hybrid retrieval do not need to configure it.
 
 **Phase 1 and Phase 2 ship on managed Postgres with zero issues.** Anyone deploying awareness on AWS/GCP/Azure can use the managed service for Postgres and run awareness itself on EC2/EKS/Fargate/GKE/AKS/Cloud Run — standard modern cloud deployment.
 
@@ -772,10 +774,10 @@ Most of this design runs unchanged on managed Postgres services. Specifically, t
 |---|---|---|---|
 | RDS Postgres + Ollama on EC2/EKS | ✅ | ❌ | `'simple'` regconfig (word-boundary tokenization, no stemming) |
 | Aurora Postgres-compatible + Ollama on EC2/EKS | ✅ | ❌ | `'simple'` regconfig |
-| RDS/Aurora + enterprise-tier OpenAI embeddings | ✅ | ❌ | `'simple'` regconfig |
+| RDS/Aurora + enterprise-tier OpenAI embeddings | ⏳ once [#111](https://github.com/cmeans/mcp-awareness/issues/111) ships and is configured as trust-anchor-C per the sovereignty policy | ❌ | `'simple'` regconfig |
 | Self-managed Postgres on EC2 (custom image with pgroonga) + Ollama | ✅ | ✅ | full feature set |
 | EKS/GKE/AKS with custom Postgres container + Ollama | ✅ | ✅ | full feature set |
-| Fargate/Cloud Run + RDS + OpenAI Enterprise | ✅ | ❌ | `'simple'` regconfig |
+| Fargate/Cloud Run + RDS + OpenAI Enterprise | ⏳ once [#111](https://github.com/cmeans/mcp-awareness/issues/111) ships and is configured as trust-anchor-C per the sovereignty policy | ❌ | `'simple'` regconfig |
 
 **Graceful degradation.** Phase 3's pgroonga integration is not all-or-nothing. When pgroonga is not available, the sovereignty policy's unsupported-language fallback kicks in: CJK language writes fall back to `'simple'` regconfig (word-boundary tokenization without stemming), FTS still works but loses stem-based recall, and the vector branch handles cross-lingual retrieval via the Layer 2 embedding model. The per-write alert (`missing-ts-config-{lang}`) fires so operators know their deployment has degraded CJK support.
 
