@@ -1076,19 +1076,24 @@ class TestDeleteEntryTool:
         entry_id = json.loads(result)["id"]
         delete_result = await server_mod.delete_entry(entry_id=entry_id)
         data = json.loads(delete_result)
-        assert data["status"] == "ok"
-        assert data["trashed"] == 1
+        assert data["status"] == "acknowledged"
         assert data["recoverable_days"] == 30
+        assert "note" in data
+        assert "trashed" not in data  # No count — prevents IDOR
         # Not visible in normal queries
         assert len(_store().get_patterns(TEST_OWNER)) == 0
         # But in trash
         assert len(_store().get_deleted(TEST_OWNER)) == 1
 
     @pytest.mark.anyio
-    async def test_delete_by_id_not_found(self) -> None:
+    async def test_delete_by_id_not_found_same_response(self) -> None:
+        """Nonexistent entry returns identical shape — no information leakage."""
         result = await server_mod.delete_entry(entry_id="nonexistent")
         data = json.loads(result)
-        assert data["trashed"] == 0
+        assert data["status"] == "acknowledged"
+        assert data["recoverable_days"] == 30
+        assert "note" in data
+        assert "trashed" not in data
 
     @pytest.mark.anyio
     async def test_dry_run_without_confirm(self) -> None:
