@@ -241,6 +241,40 @@ Users can *extend* the trigger tag list with their own additions in whatever lan
 
 This keeps the hot path simple: **the field is the source of truth at inference time**, the tag-trigger is one of several ways to set it.
 
+#### Sticky semantics: `update_entry` never silently weakens sovereignty
+
+`update_entry` has a specific semantic rule around `data_sovereignty` that differs from other fields: **once `data_sovereignty="strict"` has been set on an entry, editing the entry's tags alone will not unset it.** Only an explicit `data_sovereignty=None` (or a future sentinel meaning "clear the constraint") passed through the write tool's parameter can clear the strict constraint.
+
+Rationale: `data_sovereignty="strict"` is a *promise* the user made to themselves about the entry's data handling. Tags are labels, and editing labels should not silently break promises. If a user removes the `health` tag from an entry that was previously coerced to strict via a tag-trigger match, re-evaluating sovereignty would downgrade that entry's handling without the user's knowledge. Sticky semantics prevent that failure mode.
+
+Concretely, when `update_entry` is called:
+
+1. If the caller passed `data_sovereignty` **explicitly** (any value, including `None`), use it directly — the user has made an explicit choice
+2. Otherwise, **preserve the existing `data_sovereignty` value** from the stored entry — tag changes do not re-evaluate sovereignty
+3. If the existing value is absent and the caller is adding a new tag that matches the trigger set, coerce to `"strict"` (the tag-trigger still works for adding sovereignty, it just doesn't work for removing it)
+
+In short: tag-triggers can **set** strict mode on update, but only explicit field writes can **clear** it. Drift between tags and field is an acceptable cost; silent promise-breaking is not.
+
+#### Write-time-only coercion: limitation and backfill
+
+The tag-trigger convenience layer coerces `data_sovereignty="strict"` **at write time**, not at inference time or on every read. This keeps the inference hot path to a single dict lookup, but it has a consequence:
+
+**Changes to the trigger tag set are not retroactive.** If an operator adds `health` to `AWARENESS_SOVEREIGNTY_STRICT_TAGS` after entries with the `health` tag already exist in the store, those existing entries will **not** be automatically coerced to strict. They will continue to be processed by whatever provider is configured. The same applies to users who add new tags to `users.preferences.sovereignty_strict_tags` later — existing entries are unaffected.
+
+This is a real gap between the operator/user mental model ("I added a strict tag, all matching entries are now strict") and the implementation behavior. Two ways to address it, both shipped in Phase 1:
+
+1. **Document the limitation** in the user-facing sovereignty docs so operators know changes are forward-only
+2. **Ship a one-shot backfill CLI tool** that operators can run on demand to walk all entries, apply the current trigger tag set, and update `data_sovereignty` on matches. Idempotent (running it twice is a no-op on the second run). Operator-initiated, not automatic — running it without thinking could retroactively lock entries that the user meant to stay unconstrained.
+
+The CLI command shape:
+```
+mcp-awareness-sovereignty-backfill [--dry-run] [--owner-id UUID]
+```
+
+`--dry-run` prints what would change without writing. `--owner-id` scopes to one user (for multi-tenant deployments where the operator wants to apply per-user changes). Omitting `--owner-id` applies to all owners.
+
+The backfill tool is **additive only** — it never *removes* `data_sovereignty` from an entry whose tags no longer match. This is consistent with the sticky-update semantics above: strict is a promise, not a label, and removing the promise requires explicit intent.
+
 #### Operator-floor consequence for users
 
 A user who joins an instance where the operator has configured a restrictive floor (say, `AWARENESS_SOVEREIGNTY_STRICT_TAGS=sensitive,health,family,finance`) cannot opt back into trust-anchor-C inference for entries whose tags match the floor, even with fully informed consent. This is the correct design for a managed multi-tenant deployment (operator policy is authoritative), but operators choosing a restrictive floor are committing all users on the instance to that floor — worth surfacing in the instance's terms of service or user onboarding.
@@ -277,7 +311,7 @@ This is the correct behavior — sovereignty has a cost — but it is the subtle
 
 ### Sovereignty benchmark (release criterion for cloud inference)
 
-Before any cloud-inference code path ships as a supported option — cloud embedding providers (Layer 2 / #111), cloud extraction providers (Layer 3), or any future LLM integration — a **sovereignty benchmark** must be published comparing retrieval quality with sensitivity routing enabled versus disabled.
+Before any cloud-inference code path ships as a supported option — cloud embedding providers (Layer 2 / #111), cloud extraction providers (Layer 3), or any future LLM integration — a **sovereignty benchmark** must be published comparing retrieval quality with sovereignty routing enabled versus disabled.
 
 **Benchmark scope:**
 - Representative query set covering semantic search, exact-term search, and mixed queries across multiple entry types
@@ -287,7 +321,7 @@ Before any cloud-inference code path ships as a supported option — cloud embed
 - Metrics: recall @1, @5, @10; mean reciprocal rank (MRR); latency P50/P95; storage delta if embeddings differ by dimension
 - Published in the deployment guide or README as a quantitative table users can reference when deciding whether the sovereignty tradeoff is worth it for their use case
 
-**Purpose.** Users opting into sensitivity routing are making a quality/sovereignty tradeoff. We owe them the data to make that tradeoff **informed** rather than **superstitious**.
+**Purpose.** Users opting into sovereignty routing are making a quality/sovereignty tradeoff. We owe them the data to make that tradeoff **informed** rather than **superstitious**.
 
 **Gating.** The sovereignty benchmark is a **hard release criterion** for any cloud-inference path shipped as an awareness default. Layer 1+2 with local-only defaults can ship without it — there is nothing cloud to compare against. The moment a trust-anchor-C path is supported as a shipped default, the benchmark must exist before the feature ships.
 
@@ -598,6 +632,8 @@ API accepts `'en'`, `'ja'`, `'es'`, etc. Server maps to `regconfig` at the bound
 14. **Sovereignty framework scaffolding** (new):
     - **`data_sovereignty` field on entries**: optional `Literal["strict"]` value in `entry.data`, with room for future values. Validation at write time; unknown values raise a structured error listing valid values.
     - **Write-tool parameter**: every write tool (`remember`, `add_context`, `learn_pattern`, `update_entry`, `report_alert`, `report_status`, `remind`) gains an optional `data_sovereignty` parameter. Documented in each tool's docstring so agents see it in the schema.
+    - **`update_entry` sticky semantics** (see "Sticky semantics" in the sovereignty policy section): when `update_entry` is called without an explicit `data_sovereignty` parameter, the existing value is preserved. Tag changes alone cannot clear `data_sovereignty="strict"` — only an explicit `data_sovereignty=None` (or future "unset" sentinel) on a write can clear it. Test coverage must include: tag-add coerces to strict; tag-remove does NOT re-evaluate; explicit clear works.
+    - **Backfill CLI tool** (`mcp-awareness-sovereignty-backfill`): one-shot operator-run tool that walks all entries, applies the current `AWARENESS_SOVEREIGNTY_STRICT_TAGS` and per-user `sovereignty_strict_tags` preferences, and coerces `data_sovereignty="strict"` on matching entries. Additive only — never removes strict from an entry. Supports `--dry-run` and `--owner-id UUID` scoping. Idempotent.
     - **Read-tool filter**: `get_knowledge` gains an optional `data_sovereignty` filter (e.g., `data_sovereignty="strict"` to list all strict entries).
     - **Tag-trigger convenience layer**:
       - Parse `AWARENESS_SOVEREIGNTY_STRICT_TAGS` env var — **default empty**, no English bias in shipped config
@@ -739,6 +775,9 @@ API accepts `'en'`, `'ja'`, `'es'`, etc. Server maps to `regconfig` at the bound
 - [ ] `get_info` exposes aggregate counts of strict vs unconstrained entries per caller
 - [ ] Tag-trigger convenience layer: `AWARENESS_SOVEREIGNTY_STRICT_TAGS` parsing, `users.preferences.sovereignty_strict_tags` reading, write-time coercion of `data_sovereignty="strict"` when a matching tag is present
 - [ ] **Shipped default for `AWARENESS_SOVEREIGNTY_STRICT_TAGS` is empty** — no English bias, verified in the deployment guide
+- [ ] **`update_entry` sticky semantics**: tag-add can coerce to strict, tag-remove does NOT re-evaluate sovereignty, explicit `data_sovereignty=None` clears it. All three paths covered by tests.
+- [ ] **Backfill CLI tool** (`mcp-awareness-sovereignty-backfill`) implemented with `--dry-run` and `--owner-id` flags; idempotent; additive-only semantics tested (never removes strict from an entry)
+- [ ] User-facing documentation explains the write-time-only coercion limitation and points at the backfill CLI
 - [ ] Sovereignty framework scaffolding (trust-anchor classification helper with URL allowlist including Tailscale CGNAT, operator self-certification env vars, default-to-U behavior) implemented and unit-tested, even though all Layer 1+Phase 1 providers are trust-anchor-B (routing is a no-op at this stage)
 - [ ] `get_info` tool (#235) exposes extraction and embedding provider trust-anchor classification plus contract/trust-anchor references
 - [ ] First-time-seen briefing notice fires on provider configuration changes
@@ -773,7 +812,7 @@ API accepts `'en'`, `'ja'`, `'es'`, etc. Server maps to `regconfig` at the bound
 - [ ] Sovereignty routing honored by extraction worker: entries with `data_sovereignty="strict"` get no proposition extraction if the configured extractor is not trust-anchor-B
 - [ ] Benchmark: proposition retrieval improves recall on sub-document queries vs Layer 1+2 alone
 - [ ] Smoke test: "retire at 62" query returns the matching proposition, not the full retirement-planning entry
-- [ ] If any trust-anchor-C extraction path ships in a later release: sovereignty benchmark published, consent surface updated, sensitivity routing verified
+- [ ] If any trust-anchor-C extraction path ships in a later release: sovereignty benchmark published, consent surface updated, sovereignty routing verified
 
 ## Merge checklist (after amended #241 merges)
 
