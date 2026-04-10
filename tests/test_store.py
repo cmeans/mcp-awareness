@@ -268,7 +268,39 @@ def test_global_suppression_matches_any_source(store):
     assert len(store.get_active_suppressions(TEST_OWNER, "ci")) == 1
 
 
-def test_expired_entries_cleaned(store):
+def _opt_in_cleanup(store, owner_id: str) -> None:
+    """Helper: opt an owner in to auto-cleanup via preference."""
+    store.upsert_preference(
+        owner_id,
+        key="auto_cleanup",
+        scope="global",
+        tags=[],
+        data={"key": "auto_cleanup", "value": "true", "scope": "global"},
+    )
+
+
+def test_expired_entries_cleaned_when_opted_in(store):
+    from datetime import datetime, timedelta, timezone
+
+    _opt_in_cleanup(store, TEST_OWNER)
+    past = datetime.now(timezone.utc) - timedelta(hours=1)
+    entry = Entry(
+        id=make_id(),
+        type=EntryType.SUPPRESSION,
+        source="nas",
+        tags=[],
+        created=past,
+        expires=past,
+        data={"metric": "cpu_pct", "suppress_level": "warning"},
+    )
+    store.add(TEST_OWNER, entry)
+    store._do_cleanup()
+    # Entry purged — owner opted in
+    assert store.get_entry_by_id(TEST_OWNER, entry.id) is None
+
+
+def test_expired_entries_kept_when_not_opted_in(store):
+    """Without auto_cleanup preference, expired entries are retained."""
     from datetime import datetime, timedelta, timezone
 
     past = datetime.now(timezone.utc) - timedelta(hours=1)
@@ -282,26 +314,10 @@ def test_expired_entries_cleaned(store):
         data={"metric": "cpu_pct", "suppress_level": "warning"},
     )
     store.add(TEST_OWNER, entry)
-    # Force cleanup to run on next write despite debounce
-    store._last_cleanup = 0.0
-    # Trigger cleanup via a write — cleanup runs in background
-    dummy = Entry(
-        id=make_id(),
-        type=EntryType.CONTEXT,
-        source="test",
-        tags=[],
-        created=past,
-        expires=None,
-        data={"description": "trigger cleanup"},
-    )
-    store.add(TEST_OWNER, dummy)
-    # Cleanup runs in a background thread — poll instead of fixed sleep
-    # to avoid flaky failures on slow CI runners
-    for _ in range(20):
-        time.sleep(0.2)
-        if store.count_active_suppressions(TEST_OWNER) == 0:
-            break
-    assert store.count_active_suppressions(TEST_OWNER) == 0
+    store._do_cleanup()
+    # Entry still in DB — owner hasn't opted in. Use get_entry_by_id
+    # since count_active_suppressions filters out expired entries.
+    assert store.get_entry_by_id(TEST_OWNER, entry.id) is not None
 
 
 def test_knowledge_includes_patterns_context_preferences(store):
@@ -478,7 +494,8 @@ def test_restore_not_found(store):
 
 
 def test_soft_deleted_entries_auto_expire(store):
-    """Soft-deleted entries get an expires timestamp and will be purged by cleanup."""
+    """Soft-deleted entries get expires and are purged by cleanup (opted in)."""
+    _opt_in_cleanup(store, TEST_OWNER)
     now = now_utc()
     entry = Entry(
         id=make_id(),
@@ -538,8 +555,8 @@ def test_clear_isolates_owners(store):
     store.clear(other_owner)
 
 
-def test_cleanup_respects_rls(store):
-    """_do_cleanup() must delete expired entries across all owners."""
+def test_cleanup_only_affects_opted_in_owners(store):
+    """_do_cleanup() only deletes expired entries for opted-in owners."""
     from datetime import datetime, timedelta, timezone
 
     other_owner = "other-owner"
@@ -555,11 +572,16 @@ def test_cleanup_respects_rls(store):
             data={"metric": "cpu", "suppress_level": "warning"},
         )
         store.add(owner, entry)
-    # Run cleanup directly (bypasses debounce)
+    # Only opt in TEST_OWNER
+    _opt_in_cleanup(store, TEST_OWNER)
+    # Track entry IDs to verify presence/absence after cleanup
+    test_entries = store.get_entries(TEST_OWNER, entry_type=EntryType.SUPPRESSION)
+    other_entries = store.get_entries(other_owner, entry_type=EntryType.SUPPRESSION)
     store._do_cleanup()
-    # Expired entries for both owners should be gone
-    assert store.count_active_suppressions(TEST_OWNER) == 0
-    assert store.count_active_suppressions(other_owner) == 0
+    # TEST_OWNER's expired entries purged
+    assert store.get_entry_by_id(TEST_OWNER, test_entries[0].id) is None
+    # other_owner's expired entries retained (not opted in)
+    assert store.get_entry_by_id(other_owner, other_entries[0].id) is not None
 
 
 # ------------------------------------------------------------------

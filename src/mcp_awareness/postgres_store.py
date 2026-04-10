@@ -176,16 +176,24 @@ class PostgresStore:
         self._cleanup_thread.start()
 
     def _do_cleanup(self) -> None:
-        """Run the actual DELETE using a pool connection (background thread).
+        """Delete expired entries for owners who opted in to auto-cleanup.
 
-        Uses SET LOCAL row_security = off because cleanup is a system-wide
-        maintenance task — expired entries should be cleaned regardless of owner.
+        Only processes owners with an ``auto_cleanup=true`` preference.
+        RLS-safe — each DELETE is scoped by owner_id, no row_security
+        bypass needed.  Owners who haven't opted in keep all their data.
         """
         try:
+            now = datetime.now(timezone.utc)
             with self._pool.connection() as conn, conn.transaction(), conn.cursor() as cur:
-                cur.execute(_load_sql("disable_row_security"))
-                now = datetime.now(timezone.utc)
-                cur.execute(_load_sql("cleanup_expired"), (now,))
+                cur.execute(_load_sql("get_cleanup_opted_in_owners"))
+                owners = [row["owner_id"] for row in cur.fetchall()]
+            for owner_id in owners:
+                with self._pool.connection() as conn, conn.transaction(), conn.cursor() as cur:
+                    self._set_rls_context(cur, owner_id)
+                    cur.execute(_load_sql("cleanup_expired"), (now, owner_id))
+                    deleted = cur.rowcount
+                    if deleted:
+                        logger.info("Cleanup: removed %d expired entries for %s", deleted, owner_id)
         except Exception as exc:
             logger.error("Cleanup failed: %s: %s", type(exc).__name__, exc)
 
