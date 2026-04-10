@@ -746,6 +746,63 @@ API accepts `'en'`, `'ja'`, `'es'`, etc. Server maps to `regconfig` at the bound
 
 ~150MB image-size increase. New operational dependency for CJK support. Extension install on non-Docker deploys (LXC production) needs documentation and a Groonga apt repo source configured.
 
+## Deployment compatibility and interface localization
+
+### Managed Postgres (AWS RDS, Aurora, GCP Cloud SQL, Azure Database)
+
+Most of this design runs unchanged on managed Postgres services. Specifically, these decisions are all stock Postgres features available on RDS, Aurora PostgreSQL-compatible, Cloud SQL, and Azure Database:
+
+- `pgvector` + HNSW indexes (available on RDS since 2023, Aurora shortly after)
+- Standard Postgres full-text search (`tsvector`, GIN, `regconfig`, `plainto_tsquery`, `ts_rank_cd`)
+- Per-row `regconfig` in a generated `tsvector` column (Postgres 12+; still subject to the Phase 1.0 verification task, but not for managed-Postgres reasons specifically)
+- Row-level security and `FORCE RLS`
+- JSONB with GIN indexes
+- `wal_level=logical` via parameter group configuration
+- All application-level features: sovereignty framework, `data_sovereignty` field, hybrid retrieval CTE, `get_info`, session persistence, embedding and extraction workers, multi-tenant RLS
+
+**Phase 1 and Phase 2 ship on managed Postgres with zero issues.** Anyone deploying awareness on AWS/GCP/Azure can use the managed service for Postgres and run awareness itself on EC2/EKS/Fargate/GKE/AKS/Cloud Run — standard modern cloud deployment.
+
+### Phase 3 (`pgroonga` CJK support) is incompatible with managed Postgres
+
+**`pgroonga` is not available on AWS RDS, Aurora, GCP Cloud SQL, or Azure Database.** It is a third-party extension that the managed-database providers do not include in their supported extension lists as of this design's date. This is a managed-Postgres ecosystem limitation, not something we can resolve server-side.
+
+**Deployment matrix for CJK language support:**
+
+| Deployment shape | Works? | CJK via pgroonga? | Fallback |
+|---|---|---|---|
+| RDS Postgres + Ollama on EC2/EKS | ✅ | ❌ | `'simple'` regconfig (word-boundary tokenization, no stemming) |
+| Aurora Postgres-compatible + Ollama on EC2/EKS | ✅ | ❌ | `'simple'` regconfig |
+| RDS/Aurora + enterprise-tier OpenAI embeddings | ✅ | ❌ | `'simple'` regconfig |
+| Self-managed Postgres on EC2 (custom image with pgroonga) + Ollama | ✅ | ✅ | full feature set |
+| EKS/GKE/AKS with custom Postgres container + Ollama | ✅ | ✅ | full feature set |
+| Fargate/Cloud Run + RDS + OpenAI Enterprise | ✅ | ❌ | `'simple'` regconfig |
+
+**Graceful degradation.** Phase 3's pgroonga integration is not all-or-nothing. When pgroonga is not available, the sovereignty policy's unsupported-language fallback kicks in: CJK language writes fall back to `'simple'` regconfig (word-boundary tokenization without stemming), FTS still works but loses stem-based recall, and the vector branch handles cross-lingual retrieval via the Layer 2 embedding model. The per-write alert (`missing-ts-config-{lang}`) fires so operators know their deployment has degraded CJK support.
+
+**For the managed awareness cloud offering (future):**
+
+- **Option A:** RDS/Aurora + accept no pgroonga. CJK customers get degraded (but working) retrieval via `'simple'` + cross-lingual vector. Simpler operationally.
+- **Option B:** Self-managed Postgres on EKS with a custom image. Full feature set including pgroonga. Operational cost: we manage Postgres upgrades, backups, failover, monitoring.
+- **Option C:** Hybrid. RDS/Aurora for most customer segments, self-managed for CJK segments. Probably too operational for Phase 1 of a managed offering.
+
+**Decision for this design:** none. The managed offering is a future concern. This subsection exists to document the tradeoff so the eventual decision is informed.
+
+### Interface localization (separate follow-up — #242)
+
+The hybrid retrieval + multilingual design makes *data* language-agnostic but keeps the *interface* (tool docstrings, prompt text, error messages, CLI help, `instructions.md`, briefing template wrapper strings) in English. This is a deliberate dual-lane framing:
+
+- **Protocol surface stays English.** Tool names, docstrings, prompts, errors, CLI help all stay in English — like MCP itself, like SQL keywords, like Python syntax. Modern LLM clients translate technical English well enough that the runtime translation tax is small, and shipping a translation catalog for 35+ languages is a maintenance burden that pays off only at a scale the project hasn't hit.
+- **Data stays native.** Entries, search results, embeddings, FTS, and the sovereignty control signal all work across languages. This is where the user actually lives and it's what the multilingual work is solving.
+
+**Two specific exceptions** where interface English bleeds into user-facing content enough to justify localization:
+
+1. **Briefing template wrapper strings** — "Status summary:", "No alerts", "Recent activity" — headings that mix with the user's own content in the generated briefing
+2. **`instructions.md`** — server instructions read by the client LLM at connection time, which shape how the agent interacts with awareness
+
+These two hooks are tracked as **[#242](https://github.com/cmeans/mcp-awareness/issues/242)** as a separate follow-up issue, not Phase 1 scope. The issue depends on Phase 1 landing first (specifically `get_info` and `users.preferences.language` from the sovereignty work) and can ship in parallel with Layer 2 or Layer 3.
+
+**Translation pipeline (per the round-5 discussion):** LLM-generated initially, with community contributions via Issues and PRs welcome. Native speakers can open PRs with corrections or new languages; the maintainer reviews. Quality floor: no partial translations — a language either has both briefing template + instructions or falls back entirely to English.
+
 ## Out of scope
 
 - **#184 response size cap** — Layer 3 mitigates it for the search path, but other read tools still need their own cap. Tracked separately.
@@ -820,6 +877,8 @@ API accepts `'en'`, `'ja'`, `'es'`, etc. Server maps to `regconfig` at the bound
 - [ ] Update issue #239 body: drop bge-m3, add e5-large/granite candidates + e5 prefix convention + cross-lingual smoke tests
 - [ ] Update issue #240 body: drop qwen, add phi3.5 default + local-runnable constraint + non-determinism/staleness risks
 - [ ] Update issue #235 body: note that `get_info` is now bundled into Phase 1 as a dependency of the sovereignty consent surface
+- [ ] Update issue #111 body: any cloud embedding provider shipped as a default must be enterprise-tier (trust-anchor-C per the sovereignty policy) — zero-retention contract, BAA, no-training clause; consumer-tier configurations trigger the `U` classification and the unprotected-provider log warning
+- [ ] Cross-link issue #242 (interface localization follow-up) from this design doc's "Deployment compatibility and interface localization" subsection — already done, but verify the link works after merge
 
 ## Post-Phase-1 follow-ups
 
