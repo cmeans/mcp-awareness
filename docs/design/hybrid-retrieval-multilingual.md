@@ -107,6 +107,71 @@ The sovereignty policy has two enforcement levels depending on deployment contex
 
 The principle is **soft enforcement with visibility**, not hard block. Informed consent is the mechanism; the server's job is to make sure an operator can't *accidentally* leak data through an unprotected path, not to stop a determined operator from making an informed choice.
 
+### Trust-anchor classification mechanism (operator self-certification)
+
+Trust-anchor-C cannot be technically verified. There is no way for awareness to inspect a provider and confirm they have a zero-retention contract in place, a BAA signed, or a no-training clause in their terms of service. The design accepts this and uses **operator self-certification with auditability**.
+
+**Default classification is `U` (unprotected)** for any inference provider that is not either (a) auto-classified as trust-anchor-B via the URL allowlist below, or (b) explicitly asserted by the operator via an env var. "Failure to classify defaults to unprotected" is the deliberately safer policy: misconfigurations surface as warnings rather than hiding behind an optimistic default.
+
+**Operator self-certification** via env vars:
+
+```
+# Required to assert C for any provider not auto-classifiable
+AWARENESS_EMBEDDING_TRUST_ANCHOR=C
+AWARENESS_EXTRACTION_TRUST_ANCHOR=C
+
+# Optional contract reference — documentation only, logged at startup
+# and surfaced via get_info for auditability
+AWARENESS_EMBEDDING_CONTRACT_REFERENCE=https://internal.example/enterprise-openai-baa-2026
+AWARENESS_EXTRACTION_CONTRACT_REFERENCE=https://internal.example/anthropic-enterprise-contract
+```
+
+The operator asserts the trust anchor level. The `*_CONTRACT_REFERENCE` fields are informational — awareness does not fetch or validate them. They exist so that when someone later asks "how did you decide OpenAI was C?", the answer is in the config: "this env var was set on this date, this contract reference was provided."
+
+**Auditability.** All trust-anchor assertions (auto and operator-asserted) are logged at startup at INFO level with the assertion source (URL match, env var, or default) and the contract reference if provided. `get_info` exposes the current classification for each provider with the same metadata. An operator can always answer the question "what did I assert and when?" by checking the startup log or calling `get_info`.
+
+**Operator override for trust-anchor-B URLs outside the allowlist.** If an operator runs Ollama on `ollama.example.com` — a custom domain resolving to a user-owned GCE instance — awareness cannot classify it as B from the URL alone. The operator can override:
+
+```
+AWARENESS_EMBEDDING_TRUST_ANCHOR=B
+AWARENESS_EMBEDDING_TRUST_ANCHOR_REFERENCE=GCE-owned-instance-my-project-prod
+```
+
+Same self-certification pattern as C, with a reference that gets logged and surfaced via `get_info`. This is how "cloud deployment with trust-anchor-B" is expressed operationally.
+
+### Automatic trust-anchor-B classification (URL allowlist)
+
+For Ollama and similar locally-run inference endpoints that do not require an operator override, awareness auto-classifies a provider URL as trust-anchor-B when the host matches any of the following patterns. Matching is first-match-wins against the parsed URL host component; unmatched hosts default to `U` unless an override env var is set.
+
+**Loopback and host addressing:**
+- `localhost`, `127.0.0.0/8`, `::1`
+- `host.docker.internal` — Ollama on the host accessed from inside an awareness container. Critical for Docker-based deployments.
+
+**RFC1918 private ranges (LAN):**
+- `10.0.0.0/8`
+- `172.16.0.0/12`
+- `192.168.0.0/16`
+
+**IPv6 unique local addresses:**
+- `fc00::/7`
+
+**Tailscale CGNAT range (critical for Tailscale mesh users):**
+- `100.64.0.0/10` — Tailscale assigns addresses in this range to connected nodes. Without this entry, Ollama running on a Tailscale-connected NAS or workstation would be misclassified as `U` despite being fully operator-controlled. This is the most important entry in the allowlist for users who follow the self-hosted-mesh pattern.
+
+**mDNS / zeroconf:**
+- `*.local`
+
+**Common LAN suffixes (with startup note):**
+- `*.lan`, `*.home`, `*.internal` — auto-classified as B, but the server logs a one-time startup note so operators who use these suffixes for non-LAN purposes can override.
+
+**Not in the allowlist — requires operator override:**
+- Custom domains pointing at user-owned cloud infrastructure (`ollama.example.com` → user-owned GCE, `llm.internal.corp` → corporate-owned endpoint, etc.). These cannot be classified from the URL alone and must be asserted via `AWARENESS_EMBEDDING_TRUST_ANCHOR=B` or the equivalent extraction env var. This is the "cloud deployment with trust-anchor-B" path.
+
+**What's deliberately not in the allowlist:**
+- Public DNS names (`*.openai.com`, `*.anthropic.com`, etc.) — these are trust-anchor-C candidates at best, never auto-classified as B.
+- Private IPv6 global unicast addresses outside `fc00::/7` — too much ambiguity; operators can override explicitly.
+- Addresses reached via ad-hoc port-forwarding setups — the allowlist operates on hostnames/IPs, not on network path.
+
 ### Per-entry sensitivity routing (opt-in)
 
 Even with trust-anchor-C (enterprise contract), some users want certain categories of content to never leave infrastructure they personally control. The per-entry sensitivity routing mechanism provides this:
@@ -125,7 +190,23 @@ Sets the deployment-level floor of tags that trigger local-only routing.
 ```
 Users can *extend* the set of local-only tags with their own additions. They **cannot remove** tags from the operator's deployment-level floor — the operator's choices are always respected (additive, not subtractive).
 
+**Operator-floor consequence for users.** A user who joins an instance where the operator has configured a restrictive floor (say, `AWARENESS_LOCAL_ONLY_TAGS=sensitive,health,family,finance`) cannot opt back into trust-anchor-C inference for entries with those tags, even with fully informed consent. This is the correct design for a managed multi-tenant deployment (operator policy is authoritative), but operators choosing a restrictive floor are committing all users on the instance to that floor — worth surfacing in the instance's terms of service or user onboarding.
+
 **Routing rule at inference time.** For any given entry, compute the union of (env-var tags, user-preference tags). If any of the entry's tags intersect this set, all inference for that entry must use a trust-anchor-B target. If the deployment has no trust-anchor-B target configured at all, see "availability degradation" below.
+
+### Deployment-time mismatch warning
+
+At startup, awareness performs a consistency check: if `AWARENESS_LOCAL_ONLY_TAGS` is configured (implying some entries should route to trust-anchor-B) but no trust-anchor-B inference target is available (meaning those entries will silently fall back to FTS-only retrieval), a startup alert fires:
+
+- **Level:** `warning`
+- **Alert ID:** `sovereignty-degraded-deployment`
+- **Message:** *"`local_only_tags` configured ({tag_list}) but no trust-anchor-B inference target available — sensitive-tagged entries will fall back to FTS-only retrieval."*
+- **Dismissal:** only via `acted_on` (operator explicitly acknowledges the tradeoff)
+- **Persistence:** remains in the briefing until resolved (operator configures a trust-anchor-B target, clears `local_only_tags`, or acks)
+
+This is **distinct from the per-call unprotected-provider warning**. The per-call warning fires when a specific inference request routes to an unprotected provider. The deployment-time mismatch warning fires when the *configuration itself* is inconsistent: the operator has opted into sensitivity routing without the infrastructure to honor it.
+
+The principle: silent graceful degradation **per entry** is correct behavior (the sensitive tag is a promise, honored by fallback), but silent misconfiguration **at the deployment level** is not. An operator who has configured `local_only_tags` deserves to know at startup that their configuration will systematically degrade some entries, not discover it months later when a user complains that their `health`-tagged entries never surface in semantic search.
 
 ### The three tradeoffs of sensitivity routing
 
@@ -465,11 +546,22 @@ API accepts `'en'`, `'ja'`, `'es'`, etc. Server maps to `regconfig` at the bound
     - Parse `AWARENESS_LOCAL_ONLY_TAGS` env var (default `"sensitive"`)
     - Read `users.preferences.local_only_tags` at inference call sites
     - Add helper `requires_trust_anchor_b(entry, user_prefs, env_tags) -> bool`
-    - Add helper `classify_inference_target(url_or_provider) -> Literal["B", "C", "U"]` with allowlists for known trust-anchor-B (localhost, loopback, LAN ranges, well-known Ollama URLs) and trust-anchor-C (enterprise OpenAI with explicit zero-retention env var set, etc.)
+    - Add helper `classify_inference_target(url_or_provider) -> Literal["B", "C", "U"]` implementing the URL allowlist specified in the [Data sovereignty policy](#automatic-trust-anchor-b-classification-url-allowlist) (including the Tailscale `100.64.0.0/10` range, `host.docker.internal`, RFC1918, `*.local`, IPv6 ULA, and the LAN suffix set)
+    - Implement operator self-certification env vars: `AWARENESS_EMBEDDING_TRUST_ANCHOR`, `AWARENESS_EXTRACTION_TRUST_ANCHOR`, plus the `*_CONTRACT_REFERENCE` and `*_TRUST_ANCHOR_REFERENCE` pairs
+    - Default classification is `U` when a provider is neither auto-classified nor operator-asserted
+    - **Deployment-time mismatch warning**: at startup, if `local_only_tags` is configured and no trust-anchor-B target is available, fire `report_alert(level="warning", alert_id="sovereignty-degraded-deployment")` — dismissable only via `acted_on`
     - Document the framework in user docs
-    - **No behavior change in Phase 1** (all current providers are trust-anchor-B, so the routing helper is a no-op). The framework is in place, ready to activate when cloud providers are added.
-15. Test coverage: vector branch, FTS branch, fusion, language resolution, regconfig validation, alert firing, sovereignty helpers
-16. Dogfooding regression test: the vision doc query surfaces the vision doc *and asserts the FTS branch is what rescued it* (not a false-positive rescue from vector)
+    - **Behavior change scope:** Phase 1 implements the framework with Ollama-local as the default provider. The routing helper is a no-op for today's awareness because all current providers are trust-anchor-B. The framework is in place, ready to activate when cloud providers are added in later phases.
+15. **`get_info` tool implementation** (#235, bundled into Phase 1 — see note below):
+    - New MCP tool returning version, uptime, node, transport mode, stateless flag, enabled features, recent changelog
+    - Exposes extraction and embedding provider URL, classification (`B`/`C`/`U`), and any contract/trust-anchor reference the operator supplied
+    - First-time-seen briefing notice plumbing: server detects new provider configuration at startup (compared against a persisted last-seen config), fires a one-shot `report_alert` that is dismissable via `acted_on`
+    - Recurring briefing warning plumbing: server detects any `U`-classified provider and fires a persistent `report_alert` until resolved
+    - Exposed via `get_info` so users can check the current state on demand without waiting for the briefing
+16. Test coverage: vector branch, FTS branch, fusion, language resolution, regconfig validation, alert firing, sovereignty helpers, trust-anchor classification (URL allowlist + env var overrides + deployment mismatch warning), `get_info` output
+17. Dogfooding regression test: the vision doc query surfaces the vision doc *and asserts the FTS branch is what rescued it* (not a false-positive rescue from vector)
+
+**Note on #235 bundling.** Issue #235 (`get_info` tool) was originally planned as an independent feature ("small, well-scoped, natural next pick"). Round-2 QA review identified that the Phase 1 sovereignty acceptance criteria depend on `get_info` being present as a consent surface. Rather than split sovereignty scaffolding across two phases, **#235 is bundled into Phase 1 scope** so the sovereignty framework ships with its consent surface intact. The bundled scope is still manageable: `get_info` is a small tool that reads already-available server state, and the sovereignty plumbing naturally fits alongside it.
 
 ### Phase 2 — Layer 2: Multilingual embedding model
 
@@ -549,7 +641,7 @@ API accepts `'en'`, `'ja'`, `'es'`, etc. Server maps to `regconfig` at the bound
 - Extraction quality ceilings recall on that path; mitigation is dual-index with entry-level embeddings as recall fallback.
 - **Non-determinism of LLM extraction** — fundamental, not fixable. Tests must use fixed seeds or fuzzy matching.
 - **Backref staleness on edits** — committed to mark-stale + background re-extract; accept the staleness window.
-- **Cloud extractor privacy hazard** — default must be local-runnable, cloud extractors not supported in default config.
+- **Cloud extractor privacy hazard** — governed by the [Data sovereignty policy](#data-sovereignty-policy). Layer 3 initial release ships trust-anchor-B candidates only (provider-specific cloud integration is out of scope for the experimental release); trust-anchor-C is acceptable in principle once a supported path exists.
 - LLM drift requires per-row `extractor_model` tracking.
 - Short/structured entries need skip rules.
 - Write-time LLM cost is nonzero (free local, billable cloud).
@@ -623,6 +715,12 @@ API accepts `'en'`, `'ja'`, `'es'`, etc. Server maps to `regconfig` at the bound
 - [ ] Close #195 with a comment pointing to this design doc and issues #238/#239/#240
 - [ ] Update issue #239 body: drop bge-m3, add e5-large/granite candidates + e5 prefix convention + cross-lingual smoke tests
 - [ ] Update issue #240 body: drop qwen, add phi3.5 default + local-runnable constraint + non-determinism/staleness risks
+- [ ] Update issue #235 body: note that `get_info` is now bundled into Phase 1 as a dependency of the sovereignty consent surface
+
+## Post-Phase-1 follow-ups
+
+- [ ] **Extract sovereignty policy to its own document** (`docs/policy/data-sovereignty.md`) once the policy stabilizes through Phase 1 implementation. The policy governs all awareness inference paths, not just hybrid retrieval — future contributors looking for "the data sovereignty policy" should find it as a top-level policy doc, not buried inside a design doc. Leave a stub pointer in this design doc so the reference stays intact.
+- [ ] **`text_hash` with language consideration** for Layer 2: if a user corrects an entry's language after the fact, the current `text_hash` doesn't include language so the embedding worker won't re-embed. Layer 1 doesn't need this (vector branch ignores language), but Layer 2 should evaluate whether language belongs in the composed text or in a separate hash component.
 
 ## References
 
