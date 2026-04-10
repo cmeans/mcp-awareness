@@ -494,7 +494,7 @@ def test_restore_not_found(store):
 
 
 def test_soft_deleted_entries_auto_expire(store):
-    """Soft-deleted entries get an expires timestamp and will be purged by cleanup (when opted in)."""
+    """Soft-deleted entries get expires and are purged by cleanup (opted in)."""
     _opt_in_cleanup(store, TEST_OWNER)
     now = now_utc()
     entry = Entry(
