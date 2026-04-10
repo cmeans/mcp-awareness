@@ -172,53 +172,106 @@ For Ollama and similar locally-run inference endpoints that do not require an op
 - Private IPv6 global unicast addresses outside `fc00::/7` — too much ambiguity; operators can override explicitly.
 - Addresses reached via ad-hoc port-forwarding setups — the allowlist operates on hostnames/IPs, not on network path.
 
-### Per-entry sensitivity routing (opt-in)
+### Per-entry sovereignty routing (opt-in)
 
-Even with trust-anchor-C (enterprise contract), some users want certain categories of content to never leave infrastructure they personally control. The per-entry sensitivity routing mechanism provides this:
+Even with trust-anchor-C (enterprise contract), some users want certain categories of content to never leave infrastructure they personally control. The per-entry sovereignty routing mechanism provides this, with two layered controls: a **primary structured field** on the entry (language-independent, explicit), and **optional tag-triggers** (convenience sugar for tag-based workflows).
 
-**Reserved tag: `sensitive`.** Any entry with the `sensitive` tag must be routed to a trust-anchor-B inference target. Trust-anchor-C is *not* acceptable for sensitive entries — the contract doesn't matter here; the user's choice is that the data stays on infrastructure they own.
+#### Primary mechanism: `data_sovereignty` field
 
-**Operator-configurable additional tags** via env var:
+Every entry can carry an optional `data_sovereignty` field in its `data` JSONB payload:
+
+```python
+# Storage (entry.data)
+{
+  "description": "My medical notes",
+  "content": "...",
+  "data_sovereignty": "strict"
+}
 ```
-AWARENESS_LOCAL_ONLY_TAGS=sensitive,health,family,finance,therapy
-```
-Sets the deployment-level floor of tags that trigger local-only routing.
 
-**User preference additions** via `users.preferences.local_only_tags`:
+**Type:** `Literal["strict"]` — for now. The field is shaped as an enum-style string (not a boolean) so future values can be added without breaking the API. Candidate future values (not implemented in Phase 1): `"audit"`, `"public"`, etc. Absent (`None`) means "no constraint — use whatever provider is configured."
+
+**`"strict"` semantics:** the entry must be routed to a trust-anchor-B inference target for every inference operation (embedding, extraction, future LLM features). Trust-anchor-C is *not* acceptable even if an enterprise contract is in place — the contract doesn't matter; the user's explicit choice is that the data stays on infrastructure they own. If no trust-anchor-B target is available, the entry degrades silently to FTS-only retrieval (see "Availability degradation" in the tradeoffs below).
+
+**Why a field instead of a tag.** The reserved tag is a *control signal*, not user content. Control signals have no business being expressed in any natural language — a plain-text tag like `sensitive` bakes an English bias into the mechanism that the multilingual design is specifically trying to avoid. A structured field is language-independent, explicit, trivially machine-checkable, and forward-compatible with future control signals (`no_index`, `excerpt_only`, etc.) that might land later.
+
+**Write-tool API.** All write tools (`remember`, `add_context`, `learn_pattern`, `update_entry`, `report_alert`, `report_status`, etc.) gain an optional `data_sovereignty` parameter:
+
+```python
+remember(
+    source="personal",
+    tags=["health"],
+    description="Medical appointment notes",
+    data_sovereignty="strict",  # optional; absent = no constraint
+)
+```
+
+The parameter is typed at the API boundary and validated before write. Unknown values raise a structured error with the list of valid values so agents and clients can self-correct.
+
+**Filtering and introspection.** `get_knowledge` gains an optional `data_sovereignty` filter so operators and users can query their strict entries. `get_info` exposes aggregate counts of strict vs unconstrained entries per owner (for the caller's own data) so users can see the size of their sovereignty footprint.
+
+#### Convenience: tag-triggers (optional, default empty)
+
+Some users prefer to organize their sovereignty choices through tags rather than explicit field assignments. The tag-trigger mechanism is **convenience sugar** that sets the `data_sovereignty` field automatically when an entry is written with a matching tag.
+
+**Operator-configurable trigger tags** via env var:
+
+```
+AWARENESS_SOVEREIGNTY_STRICT_TAGS=sensitive,health,family,finance,機密,プライベート
+```
+
+**The default is empty.** The awareness project ships with **no default trigger tags at all** — not `sensitive` (English), not any language's equivalent. An empty default is the only choice that avoids an English bias in shipped configuration. Operators deploying for a specific language community configure their own trigger tag list based on their users' vocabulary.
+
+**User preference additions** via `users.preferences.sovereignty_strict_tags`:
+
 ```json
-{"local_only_tags": ["private", "estate-plan"]}
+{"sovereignty_strict_tags": ["private", "estate-plan", "機微"]}
 ```
-Users can *extend* the set of local-only tags with their own additions. They **cannot remove** tags from the operator's deployment-level floor — the operator's choices are always respected (additive, not subtractive).
 
-**Operator-floor consequence for users.** A user who joins an instance where the operator has configured a restrictive floor (say, `AWARENESS_LOCAL_ONLY_TAGS=sensitive,health,family,finance`) cannot opt back into trust-anchor-C inference for entries with those tags, even with fully informed consent. This is the correct design for a managed multi-tenant deployment (operator policy is authoritative), but operators choosing a restrictive floor are committing all users on the instance to that floor — worth surfacing in the instance's terms of service or user onboarding.
+Users can *extend* the trigger tag list with their own additions in whatever language(s) they use. They **cannot remove** tags from the operator's deployment-level floor — the operator's choices are always respected (additive, not subtractive).
 
-**Routing rule at inference time.** For any given entry, compute the union of (env-var tags, user-preference tags). If any of the entry's tags intersect this set, all inference for that entry must use a trust-anchor-B target. If the deployment has no trust-anchor-B target configured at all, see "availability degradation" below.
+**Routing rule at write time.** When an entry is written, the server:
+
+1. If the write tool was called with an explicit `data_sovereignty` parameter, use it directly
+2. Otherwise, compute the union of (env-var trigger tags, user-preference trigger tags)
+3. If any of the entry's tags intersect that set, coerce `data_sovereignty="strict"` at write time
+4. Otherwise, leave `data_sovereignty` absent
+
+**Routing rule at inference time.** The inference worker (embedding, extraction, future LLM features) reads `entry.data.data_sovereignty`. If it is `"strict"`, the worker must use a trust-anchor-B provider. The tag-trigger mechanism does not participate in the inference-time decision — it has already done its job at write time by setting the field.
+
+This keeps the hot path simple: **the field is the source of truth at inference time**, the tag-trigger is one of several ways to set it.
+
+#### Operator-floor consequence for users
+
+A user who joins an instance where the operator has configured a restrictive floor (say, `AWARENESS_SOVEREIGNTY_STRICT_TAGS=sensitive,health,family,finance`) cannot opt back into trust-anchor-C inference for entries whose tags match the floor, even with fully informed consent. This is the correct design for a managed multi-tenant deployment (operator policy is authoritative), but operators choosing a restrictive floor are committing all users on the instance to that floor — worth surfacing in the instance's terms of service or user onboarding.
+
+Users who want *more* restriction than the operator mandates can always add their own trigger tags via `users.preferences.sovereignty_strict_tags`, or set `data_sovereignty="strict"` explicitly on individual writes regardless of tags.
 
 ### Deployment-time mismatch warning
 
-At startup, awareness performs a consistency check: if `AWARENESS_LOCAL_ONLY_TAGS` is configured (implying some entries should route to trust-anchor-B) but no trust-anchor-B inference target is available (meaning those entries will silently fall back to FTS-only retrieval), a startup alert fires:
+At startup, awareness performs a consistency check: if any sovereignty trigger is configured (either `AWARENESS_SOVEREIGNTY_STRICT_TAGS` set to a non-empty value, or any existing entry has `data_sovereignty="strict"`) but no trust-anchor-B inference target is available (meaning those entries will silently fall back to FTS-only retrieval), a startup alert fires:
 
 - **Level:** `warning`
 - **Alert ID:** `sovereignty-degraded-deployment`
-- **Message:** *"`local_only_tags` configured ({tag_list}) but no trust-anchor-B inference target available — sensitive-tagged entries will fall back to FTS-only retrieval."*
+- **Message:** *"sovereignty routing configured ({details}) but no trust-anchor-B inference target available — strict entries will fall back to FTS-only retrieval."*
 - **Dismissal:** only via `acted_on` (operator explicitly acknowledges the tradeoff)
-- **Persistence:** remains in the briefing until resolved (operator configures a trust-anchor-B target, clears `local_only_tags`, or acks)
+- **Persistence:** remains in the briefing until resolved (operator configures a trust-anchor-B target, clears the trigger tags and has no strict entries, or explicitly acks the tradeoff)
 
-This is **distinct from the per-call unprotected-provider warning**. The per-call warning fires when a specific inference request routes to an unprotected provider. The deployment-time mismatch warning fires when the *configuration itself* is inconsistent: the operator has opted into sensitivity routing without the infrastructure to honor it.
+This is **distinct from the per-call unprotected-provider warning**. The per-call warning fires when a specific inference request routes to an unprotected provider. The deployment-time mismatch warning fires when the *configuration itself* is inconsistent: the operator has opted into sovereignty routing (or has users who have) without the infrastructure to honor it.
 
-The principle: silent graceful degradation **per entry** is correct behavior (the sensitive tag is a promise, honored by fallback), but silent misconfiguration **at the deployment level** is not. An operator who has configured `local_only_tags` deserves to know at startup that their configuration will systematically degrade some entries, not discover it months later when a user complains that their `health`-tagged entries never surface in semantic search.
+The principle: silent graceful degradation **per entry** is correct behavior (the `data_sovereignty="strict"` field is a promise, honored by fallback), but silent misconfiguration **at the deployment level** is not. An operator who has strict entries or strict-trigger tags configured deserves to know at startup that their configuration will systematically degrade some entries, not discover it months later when a user complains that their health-related entries never surface in semantic search.
 
-### The three tradeoffs of sensitivity routing
+### The three tradeoffs of sovereignty routing
 
-Users opting into per-entry sensitivity routing are making an explicit choice to prioritize sovereignty over retrieval quality. The three specific costs are documented so users understand what they are giving up:
+Users opting into per-entry sovereignty routing (setting `data_sovereignty="strict"` on an entry, directly or via tag-trigger) are making an explicit choice to prioritize sovereignty over retrieval quality. The three specific costs are documented so users understand what they are giving up:
 
-**1. Quality degradation.** If the deployment's trust-anchor-B model is smaller or weaker than its trust-anchor-C model, sensitive entries get lower-quality embeddings and extractions. In a hybrid deployment, sensitive entries receive a measurably different quality floor than non-sensitive entries on the same instance. See the Sovereignty benchmark requirement below — we are committed to publishing quantitative comparisons so users can make informed tradeoff decisions.
+**1. Quality degradation.** If the deployment's trust-anchor-B model is smaller or weaker than its trust-anchor-C model, strict entries get lower-quality embeddings and extractions. In a hybrid deployment, strict entries receive a measurably different quality floor than unconstrained entries on the same instance. See the Sovereignty benchmark requirement below — we are committed to publishing quantitative comparisons so users can make informed tradeoff decisions.
 
-**2. Availability degradation in pure-cloud deployments.** In a deployment with **no trust-anchor-B option configured at all** — pure cloud, no VPC-internal model, no user-controlled LLM endpoint — sensitive entries **receive no vector embeddings and no propositions**. They fall back to Postgres full-text search, which is always local because it *is* Postgres itself. The entries are still stored, still searchable via term matches, and still appear in `search` results — they just don't benefit from Layer 2 semantic retrieval or Layer 3 proposition retrieval.
+**2. Availability degradation in pure-cloud deployments.** In a deployment with **no trust-anchor-B option configured at all** — pure cloud, no VPC-internal model, no user-controlled LLM endpoint — strict entries **receive no vector embeddings and no propositions**. They fall back to Postgres full-text search, which is always local because it *is* Postgres itself. The entries are still stored, still searchable via term matches, and still appear in `search` results — they just don't benefit from Layer 2 semantic retrieval or Layer 3 proposition retrieval.
 
-**This is silent graceful degradation, not a write failure.** The sensitive tag is a promise: "keep this local or don't process it." Overriding the promise to get better retrieval would be worse than degrading. The user sees the effect in their search results (sensitive entries rank lower on semantic queries) and can adjust.
+**This is silent graceful degradation, not a write failure.** The `data_sovereignty="strict"` field is a promise: "keep this local or don't process it." Overriding the promise to get better retrieval would be worse than degrading. The user sees the effect in their search results (strict entries rank lower on semantic queries) and can adjust.
 
-**3. Search consistency drift.** In a hybrid deployment (both B and C available), a query that matches both a sensitive entry (B-only signals) and a non-sensitive entry (B + C signals) may rank the non-sensitive entry higher simply because it has more signals contributing to its score. Users' sensitive entries are systematically less discoverable by semantic queries than their non-sensitive entries on the same instance.
+**3. Search consistency drift.** In a hybrid deployment (both B and C available), a query that matches both a strict entry (B-only signals) and an unconstrained entry (B + C signals) may rank the unconstrained entry higher simply because it has more signals contributing to its score. Users' strict entries are systematically less discoverable by semantic queries than their unconstrained entries on the same instance.
 
 This is the correct behavior — sovereignty has a cost — but it is the subtlest of the three and worth surfacing in user-facing documentation so nobody is surprised by it later.
 
@@ -229,8 +282,8 @@ Before any cloud-inference code path ships as a supported option — cloud embed
 **Benchmark scope:**
 - Representative query set covering semantic search, exact-term search, and mixed queries across multiple entry types
 - Same entries, same queries, two configurations:
-  - "Best available": `AWARENESS_LOCAL_ONLY_TAGS=` (empty) — all inference uses the best configured provider (B or C, whichever is stronger)
-  - "Sovereignty mode": `AWARENESS_LOCAL_ONLY_TAGS=sensitive` applied to every entry — all inference uses only trust-anchor-B
+  - "Best available": no sovereignty constraint — all inference uses the best configured provider (B or C, whichever is stronger)
+  - "Sovereignty mode": `data_sovereignty="strict"` applied to every entry — all inference uses only trust-anchor-B
 - Metrics: recall @1, @5, @10; mean reciprocal rank (MRR); latency P50/P95; storage delta if embeddings differ by dimension
 - Published in the deployment guide or README as a quantitative table users can reference when deciding whether the sovereignty tradeoff is worth it for their use case
 
@@ -489,7 +542,7 @@ Before defaulting to any alternative model, run `benchmarks/semantic_search_benc
    
    **Design commitment for Layer 3 initial release: candidates are all trust-anchor-B (local Ollama).** Trust-anchor-C extraction providers (enterprise-tier cloud APIs) are acceptable under the sovereignty policy *in principle* but require provider-specific integration work (client libraries, auth, retries, error handling, telemetry) that is out of scope for Layer 3's experimental release. When cloud extraction is added in a future release, the sovereignty benchmark (see policy section) must be published alongside it, and the consent surface must surface the provider's trust-anchor classification through `get_info`.
    
-   Sensitivity routing (`sensitive` tag) applies to extraction the same way it applies to embedding: sensitive entries always route to trust-anchor-B regardless of the global extractor configuration. In a pure-cloud deployment with no trust-anchor-B extractor configured, sensitive entries get no propositions and fall back to entry-level search.
+   Sovereignty routing (`data_sovereignty="strict"`) applies to extraction the same way it applies to embedding: strict entries always route to trust-anchor-B regardless of the global extractor configuration. In a pure-cloud deployment with no trust-anchor-B extractor configured, strict entries get no propositions and fall back to entry-level search.
 
 5. **Short/structured entries don't propositionalize well.** A status entry `cpu: 80%, mem: 60%` has no propositions to extract. Skip-list by entry type + content length. Documented above under "Entry type handling."
 
@@ -543,14 +596,19 @@ API accepts `'en'`, `'ja'`, `'es'`, etc. Server maps to `regconfig` at the bound
 12. Unsupported-language alert infrastructure
 13. FTS weight validation benchmark: confirm A/B/C weighting is correct for awareness data
 14. **Sovereignty framework scaffolding** (new):
-    - Parse `AWARENESS_LOCAL_ONLY_TAGS` env var (default `"sensitive"`)
-    - Read `users.preferences.local_only_tags` at inference call sites
-    - Add helper `requires_trust_anchor_b(entry, user_prefs, env_tags) -> bool`
-    - Add helper `classify_inference_target(url_or_provider) -> Literal["B", "C", "U"]` implementing the URL allowlist specified in the [Data sovereignty policy](#automatic-trust-anchor-b-classification-url-allowlist) (including the Tailscale `100.64.0.0/10` range, `host.docker.internal`, RFC1918, `*.local`, IPv6 ULA, and the LAN suffix set)
-    - Implement operator self-certification env vars: `AWARENESS_EMBEDDING_TRUST_ANCHOR`, `AWARENESS_EXTRACTION_TRUST_ANCHOR`, plus the `*_CONTRACT_REFERENCE` and `*_TRUST_ANCHOR_REFERENCE` pairs
-    - Default classification is `U` when a provider is neither auto-classified nor operator-asserted
-    - **Deployment-time mismatch warning**: at startup, if `local_only_tags` is configured and no trust-anchor-B target is available, fire `report_alert(level="warning", alert_id="sovereignty-degraded-deployment")` — dismissable only via `acted_on`
-    - Document the framework in user docs
+    - **`data_sovereignty` field on entries**: optional `Literal["strict"]` value in `entry.data`, with room for future values. Validation at write time; unknown values raise a structured error listing valid values.
+    - **Write-tool parameter**: every write tool (`remember`, `add_context`, `learn_pattern`, `update_entry`, `report_alert`, `report_status`, `remind`) gains an optional `data_sovereignty` parameter. Documented in each tool's docstring so agents see it in the schema.
+    - **Read-tool filter**: `get_knowledge` gains an optional `data_sovereignty` filter (e.g., `data_sovereignty="strict"` to list all strict entries).
+    - **Tag-trigger convenience layer**:
+      - Parse `AWARENESS_SOVEREIGNTY_STRICT_TAGS` env var — **default empty**, no English bias in shipped config
+      - Read `users.preferences.sovereignty_strict_tags` at write time
+      - If an incoming entry has any tag in the combined (env ∪ user-preference) set, coerce `data_sovereignty="strict"` before storing
+    - **Routing helpers**:
+      - `classify_inference_target(url_or_provider) -> Literal["B", "C", "U"]` implementing the URL allowlist specified in the [Data sovereignty policy](#automatic-trust-anchor-b-classification-url-allowlist) (including Tailscale `100.64.0.0/10`, `host.docker.internal`, RFC1918, `*.local`, IPv6 ULA, and the LAN suffix set)
+      - `requires_trust_anchor_b(entry) -> bool` — returns True iff `entry.data.get("data_sovereignty") == "strict"`. The hot-path check is a single dict lookup; tag-trigger resolution happens at write time, not inference time.
+    - **Operator self-certification**: implement `AWARENESS_EMBEDDING_TRUST_ANCHOR`, `AWARENESS_EXTRACTION_TRUST_ANCHOR`, plus `*_CONTRACT_REFERENCE` and `*_TRUST_ANCHOR_REFERENCE` pairs. Default classification is `U` when a provider is neither auto-classified nor operator-asserted.
+    - **Deployment-time mismatch warning**: at startup, if any sovereignty trigger is configured (non-empty `AWARENESS_SOVEREIGNTY_STRICT_TAGS`, OR any existing entry has `data_sovereignty="strict"`) and no trust-anchor-B target is available, fire `report_alert(level="warning", alert_id="sovereignty-degraded-deployment")` — dismissable only via `acted_on`.
+    - Document the framework in user docs (README section + deployment guide).
     - **Behavior change scope:** Phase 1 implements the framework with Ollama-local as the default provider. The routing helper is a no-op for today's awareness because all current providers are trust-anchor-B. The framework is in place, ready to activate when cloud providers are added in later phases.
 15. **`get_info` tool implementation** (#235, bundled into Phase 1 — see note below):
     - New MCP tool returning version, uptime, node, transport mode, stateless flag, enabled features, recent changelog
@@ -675,10 +733,17 @@ API accepts `'en'`, `'ja'`, `'es'`, etc. Server maps to `regconfig` at the bound
 - [ ] Backfill re-detects language on all existing entries without loss
 - [ ] Test coverage across vector branch, FTS branch, fusion layer, language resolution, regconfig validation, alert firing
 - [ ] 500-char content truncation investigation completed with a committed direction (lift or keep)
-- [ ] Sovereignty framework scaffolding (env var + user preference parsing, routing helper, trust-anchor classification helper) implemented and unit-tested, even though all Layer 1+Phase 1 providers are trust-anchor-B (no-op at this stage)
-- [ ] `get_info` tool (#235) exposes extraction and embedding provider trust-anchor classification
+- [ ] `data_sovereignty` field accepted on all write tools; unknown values return structured errors listing valid values
+- [ ] `data_sovereignty` value round-trips through storage (`entry.data.data_sovereignty`) and is visible in read results
+- [ ] `get_knowledge(data_sovereignty="strict")` filter returns only strict entries
+- [ ] `get_info` exposes aggregate counts of strict vs unconstrained entries per caller
+- [ ] Tag-trigger convenience layer: `AWARENESS_SOVEREIGNTY_STRICT_TAGS` parsing, `users.preferences.sovereignty_strict_tags` reading, write-time coercion of `data_sovereignty="strict"` when a matching tag is present
+- [ ] **Shipped default for `AWARENESS_SOVEREIGNTY_STRICT_TAGS` is empty** — no English bias, verified in the deployment guide
+- [ ] Sovereignty framework scaffolding (trust-anchor classification helper with URL allowlist including Tailscale CGNAT, operator self-certification env vars, default-to-U behavior) implemented and unit-tested, even though all Layer 1+Phase 1 providers are trust-anchor-B (routing is a no-op at this stage)
+- [ ] `get_info` tool (#235) exposes extraction and embedding provider trust-anchor classification plus contract/trust-anchor references
 - [ ] First-time-seen briefing notice fires on provider configuration changes
 - [ ] Unprotected provider detection fires a persistent briefing warning (no unprotected providers in Layer 1+Phase 1, but the detection code is tested with a test fixture)
+- [ ] Deployment-time mismatch warning fires when sovereignty triggers are configured without a trust-anchor-B target available (tested with a test fixture)
 
 ### Layer 2 (Phase 2)
 
@@ -693,7 +758,7 @@ API accepts `'en'`, `'ja'`, `'es'`, etc. Server maps to `regconfig` at the bound
 - [ ] English query returns Japanese entries on the same topic
 - [ ] Spanish query returns Spanish entries on the same topic
 - [ ] Documentation update (README + deployment guide)
-- [ ] If any trust-anchor-C embedding path ships as part of Phase 2: sovereignty benchmark published (sensitivity-on vs sensitivity-off quality comparison) before the feature ships; per-entry sensitivity routing honors the sensitive tag in the embedding worker; consent surface (get_info + first-time notice) reflects the new provider
+- [ ] If any trust-anchor-C embedding path ships as part of Phase 2: sovereignty benchmark published (strict-mode vs best-available quality comparison) before the feature ships; the embedding worker honors `data_sovereignty="strict"` and routes strict entries to trust-anchor-B only; consent surface (get_info + first-time notice) reflects the new provider
 
 ### Layer 3 (Phase 4, experimental)
 
@@ -705,7 +770,7 @@ API accepts `'en'`, `'ja'`, `'es'`, etc. Server maps to `regconfig` at the bound
 - [ ] Entry-level embeddings retained as recall fallback
 - [ ] Feature flag (`AWARENESS_PROPOSITION_EXTRACTION=true`) gating
 - [ ] Trust-anchor-B default extractor (phi3.5 or equivalent local Ollama model); no trust-anchor-C providers in the initial release candidate list
-- [ ] Sensitivity routing honored by extraction worker: sensitive entries get no proposition extraction if the configured extractor is not trust-anchor-B
+- [ ] Sovereignty routing honored by extraction worker: entries with `data_sovereignty="strict"` get no proposition extraction if the configured extractor is not trust-anchor-B
 - [ ] Benchmark: proposition retrieval improves recall on sub-document queries vs Layer 1+2 alone
 - [ ] Smoke test: "retire at 62" query returns the matching proposition, not the full retirement-planning entry
 - [ ] If any trust-anchor-C extraction path ships in a later release: sovereignty benchmark published, consent surface updated, sensitivity routing verified
