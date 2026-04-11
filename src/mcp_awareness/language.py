@@ -84,17 +84,32 @@ None of pgroonga's documented examples involve the standard FTS path.
 
 The 4 pgroonga entries were therefore removed pending #249's
 verification of whether the regconfig path is actually available on
-the target Postgres + pgroonga build.  zhparser is a verified
-counter-example for Chinese (it registers as a Postgres parser and
-the operator can build a regconfig on top via
-``CREATE TEXT SEARCH CONFIGURATION ... (PARSER = zhparser)``), so the
-parser-extension approach is known to work for at least one
-non-Western language.  Japanese / Korean / Hebrew equivalents have
-not been verified.  The wiring PR will either add CJK + Hebrew back
-to this mapping with verified extensions, use a separate pgroonga
-code path with a branched query CTE, or defer non-Western language
-support to Layer 1.5+.  See #249 for the verification plan and the
-three-option trilemma.
+the target Postgres + pgroonga build.
+
+For Chinese specifically, **zhparser** is a counter-example proving
+the parser-extension approach is viable.  Verified via context7
+against zhparser's official documentation
+(``/amutu/zhparser``, during PR #246's QA cycle, same approach as
+the pgroonga finding above): zhparser registers as a PostgreSQL
+parser, and an operator builds a usable regconfig on top of it via
+the standard ``CREATE TEXT SEARCH CONFIGURATION ... (PARSER = zhparser)``
+mechanism.  The resulting regconfig works with
+``to_tsvector(regconfig, text)``, generated ``tsvector`` columns,
+GIN indexes, and the standard FTS query operators (``@@``,
+``to_tsquery``, ``plainto_tsquery``, ``ts_rank``, ``ts_headline``).
+zhparser proves the design pattern works for at least one
+non-Western language with the right extension; pgroonga is just the
+wrong extension for this specific pattern.
+
+Japanese / Korean / Hebrew parser-extension equivalents have **not**
+been verified — context7 does not return a high-confidence
+PostgreSQL parser extension for Japanese on the equivalent query,
+and the Korean and Hebrew situations are similarly unconfirmed.  The
+wiring PR will either add CJK + Hebrew back to this mapping after
+verifying the appropriate extensions, use a separate pgroonga code
+path with a branched query CTE, or defer non-Western language
+support to a follow-up phase after Layer 1.  See #249 for the
+verification plan and the three-option trilemma.
 """
 
 from __future__ import annotations
@@ -136,10 +151,12 @@ SIMPLE: Final[str] = "simple"
 #: removing unverified data over shipping it with documentation.
 #:
 #: The wiring PR will either add CJK + Hebrew back after verifying the
-#: appropriate extensions (zhparser is verified for Chinese; Japanese /
-#: Korean / Hebrew equivalents need verification), use a separate
-#: pgroonga code path with a branched query CTE, or defer non-Western
-#: language support to Layer 1.5+.  Verification plan and the
+#: appropriate extensions (zhparser is the verified counter-example for
+#: Chinese — see the "Cost considerations" section of this module's
+#: docstring for the citation; Japanese / Korean / Hebrew equivalents
+#: need verification), use a separate pgroonga code path with a
+#: branched query CTE, or defer non-Western language support to a
+#: follow-up phase after Layer 1.  Verification plan and the
 #: three-option trilemma are tracked in #249.  Memory-cost measurement
 #: of whatever extensions are chosen is tracked in #248 (blocked on
 #: #249).
@@ -180,8 +197,9 @@ ISO_639_1_TO_REGCONFIG: Final[dict[str, str]] = {
     # has not been verified.  Tracked as #249; the wiring PR will either
     # add these entries back after verification, use a separate pgroonga
     # code path with a branched query CTE, or defer non-Western language
-    # support to Layer 1.5+.  See the "Cost considerations" section of
-    # this module's docstring for the full finding.
+    # support to a follow-up phase after Layer 1.  See the "Cost
+    # considerations" section of this module's docstring for the full
+    # finding.
 }
 
 #: Reverse lookup: ``regconfig`` name → ISO 639-1 code.  Does not include
