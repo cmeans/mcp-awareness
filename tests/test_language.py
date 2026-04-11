@@ -18,6 +18,9 @@
 
 from __future__ import annotations
 
+import sys
+from unittest.mock import patch
+
 import mcp_awareness.language as lang_mod
 from mcp_awareness.language import (
     ISO_639_1_TO_REGCONFIG,
@@ -218,3 +221,27 @@ class TestDetectorCaching:
         assert detector1 is detector2
         # Probed flag is set after first call
         assert lang_mod._detector_probed is True
+
+    def test_get_detector_returns_none_when_lingua_not_installed(self) -> None:
+        # Simulate lingua-py not being installed.  Setting the entry in
+        # sys.modules to None causes `from lingua import ...` to raise
+        # ImportError, exercising the fallback branch in _get_detector.
+        lang_mod._detector = None
+        lang_mod._detector_probed = False
+        try:
+            with patch.dict(sys.modules, {"lingua": None}):
+                assert lang_mod._get_detector() is None
+                # Second call returns the cached None without re-probing
+                assert lang_mod._get_detector() is None
+                assert lang_mod._detector_probed is True
+        finally:
+            # Restore state so other tests get a live detector
+            lang_mod._detector = None
+            lang_mod._detector_probed = False
+
+    def test_detect_language_returns_none_when_detector_unavailable(self) -> None:
+        # When _get_detector returns None (lingua not installed), detect_language
+        # must short-circuit to None so callers fall back to SIMPLE.
+        with patch.object(lang_mod, "_get_detector", return_value=None):
+            text = "The quick brown fox jumps over the lazy dog and runs."
+            assert lang_mod.detect_language(text) is None
