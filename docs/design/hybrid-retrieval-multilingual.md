@@ -431,7 +431,7 @@ The design mandates validation *before* the row reaches the database:
 
 This is the difference between "alert + degrade" and "writes fail for any user whose preferred language isn't supported by the current deployment."
 
-**pgroonga regconfig integration is unverified — and may not exist (Substantive finding — critical, supersedes Substantive 2 in priority):**
+**Substantive 3 — pgroonga regconfig integration is unverified — and may not exist (critical, supersedes Substantive 2 in priority):**
 
 The Layer 1 design assumes that installing pgroonga registers `japanese`, `chinese_simplified`, `chinese_traditional`, `korean`, and `hebrew` as standard Postgres regconfigs accessible via `to_tsvector(regconfig, text)`. This assumption was made when the design was written and has not been verified against pgroonga's actual integration model.
 
@@ -442,24 +442,20 @@ Verification via context7 against pgroonga's official documentation (during PR #
 - Queries use pgroonga-specific operators (`&@`, `&@~`, `&^`, `%%`), not standard FTS operators like `@@` against `tsvector @ tsquery`
 - None of pgroonga's documented usage examples involve `to_tsvector(regconfig, text)` or appear in `pg_ts_config`
 
-This is a **completely different mechanism** from the standard FTS infrastructure that the rest of Layer 1 is built around. If installing pgroonga does not also register the four CJK + Hebrew names in `pg_ts_config`, then:
+This is a **completely different mechanism** from the standard FTS infrastructure that the rest of Layer 1 is built around. PR #246 round 5 responded to this finding preemptively: the 4 pgroonga-listed entries that had been in `src/mcp_awareness/language.py:ISO_639_1_TO_REGCONFIG` at design time (`ja → japanese`, `zh → chinese_simplified`, `ko → korean`, `he → hebrew`) were removed from the foundation PR before it shipped. The current state of `language.py` on main contains only the 28 stock snowball entries, with a docstring section ("CJK and Hebrew are intentionally NOT in this mapping") citing this finding as the reason. The consequences that had been forcing the removal — if pgroonga does not also register the four CJK + Hebrew names in `pg_ts_config` — would have been:
 
-- The 4 pgroonga-listed entries in `src/mcp_awareness/language.py:ISO_639_1_TO_REGCONFIG` are incorrect data
+- The 4 pgroonga-listed entries that had been in `ISO_639_1_TO_REGCONFIG` at design time would have been incorrect data (they were never shipped in Layer 1's foundation)
 - The Layer 1 `tsv` generated column expression (`to_tsvector(language, ...)` with `language='japanese'`) would fail at INSERT time for any CJK or Hebrew write — `ERROR: text search configuration "japanese" does not exist`
 - The hybrid retrieval CTE's lexical arm (`tsv @@ plainto_tsquery(language, query)`) does not extend to CJK at all using pgroonga
-- Layer 1 needs a different mechanism for CJK + Hebrew support
+- Layer 1 needs a different mechanism for CJK + Hebrew support than pgroonga's assumed regconfig registration
+
+The Step 0 verification below answers, definitively, whether the removed entries should be added back and by what mechanism.
 
 **Counter-example proving the design pattern works with the right extension:**
 
-zhparser (`/amutu/zhparser` on context7) is a Postgres extension that does exactly what the design assumed pgroonga did, for Chinese specifically. After `CREATE EXTENSION zhparser`, the operator runs:
+zhparser (`/amutu/zhparser` on context7) is a Postgres extension that does exactly what the design assumed pgroonga did, for Chinese specifically. After `CREATE EXTENSION zhparser` and the standard `CREATE TEXT SEARCH CONFIGURATION chinese_fts (PARSER = zhparser)` setup (see zhparser's README for the recommended token-type `ADD MAPPING` list), `to_tsvector('chinese_fts', '保障房政策解读')` produces a `tsvector` that can be stored in a `tsvector` column with a GIN index and queried with `@@`, `to_tsquery`, `plainto_tsquery`, `phraseto_tsquery`, `ts_rank`, `ts_headline` — the entire standard FTS surface. zhparser plugs into the model that the Layer 1 design wants.
 
-    CREATE TEXT SEARCH CONFIGURATION chinese_fts (PARSER = zhparser);
-    ALTER TEXT SEARCH CONFIGURATION chinese_fts
-        ADD MAPPING FOR n,v,a,i,e,l,j,m,q,r WITH simple;
-
-…and then `to_tsvector('chinese_fts', '保障房政策解读')` produces a `tsvector` that can be stored in a `tsvector` column with a GIN index and queried with `@@`, `to_tsquery`, `plainto_tsquery`, `phraseto_tsquery`, `ts_rank`, `ts_headline` — the entire standard FTS surface. zhparser plugs into the model that the Layer 1 design wants.
-
-What zhparser proves is that the design pattern (regconfig → `tsvector` → GIN → standard FTS operators) works for non-Western languages **with the right extension**. pgroonga is the wrong fit for that pattern; zhparser is the right fit, but only for Chinese. The Japanese / Korean / Hebrew equivalents are not currently verified — context7 does not return a high-confidence Japanese FTS parser extension on the equivalent query.
+What zhparser proves is that the design pattern (regconfig → `tsvector` → GIN → standard FTS operators) works for non-Western languages **with the right extension**. pgroonga is the wrong fit for that pattern; zhparser is the right fit, but only for Chinese. The Japanese / Korean / Hebrew equivalents are not currently verified — the equivalent context7 query for Japanese parser extensions (run during PR #246's design-doc-edit work with library search `"textsearch_ja PostgreSQL Japanese"`) returned only `/takuyaa/ja-law-parser`, a Japanese law-text parser, not a PostgreSQL FTS extension. Korean and Hebrew were not exhaustively searched. This is a negative verification result (we checked for Japanese and found nothing) distinct from "we didn't check." See `src/mcp_awareness/language.py`'s "Cost considerations" docstring section for the full citation.
 
 **Decision deferred to the wiring PR, with three explicit options:**
 
@@ -481,8 +477,8 @@ Generated tsvector columns using a `regconfig` sourced from another column are a
 
 - [ ] Spin up a fresh `pgvector/pgvector:pg17` container with pgroonga installed. Use the actual install path the wiring PR will use, not a one-off `apt install` — packaging differences are part of what this verifies.
 - [ ] `SELECT cfgname FROM pg_ts_config ORDER BY cfgname;` — confirm whether `japanese`, `chinese_simplified`, `chinese_traditional`, `korean`, `hebrew` appear in the result.
-- [ ] If they appear: proceed to Step 1 below. Document the actual tokenizer used by each (via `pg_ts_parser`/`pg_ts_dict` introspection or by querying pgroonga's metadata if available). Update `src/mcp_awareness/language.py:ISO_639_1_TO_REGCONFIG` to remove the "unverified" caveat.
-- [ ] If they do NOT appear: stop. Open the wiring PR design conversation to pick between (1) per-language parser extensions, (2) branched query path with pgroonga, or (3) defer CJK + Hebrew from Layer 1. Document the choice in this design doc, update `ISO_639_1_TO_REGCONFIG` to remove the 4 pgroonga entries (or replace them with the chosen alternative), and revise Steps 1+ of this verification accordingly.
+- [ ] If they appear: proceed to Step 1 below. Document the actual tokenizer used by each (via `pg_ts_parser`/`pg_ts_dict` introspection or by querying pgroonga's metadata if available). Add the `ja`/`zh`/`ko`/`he` entries back to `src/mcp_awareness/language.py:ISO_639_1_TO_REGCONFIG` with the verified regconfig names, replacing the current "CJK and Hebrew are intentionally NOT in this mapping" docstring section with a short note citing the Step 0 verification result.
+- [ ] If they do NOT appear: stop. Open the wiring PR design conversation to pick between (1) per-language parser extensions, (2) branched query path with pgroonga, or (3) defer CJK + Hebrew from Layer 1. Document the choice in this design doc. If the chosen mechanism introduces new regconfig names (e.g. `chinese_fts` via zhparser, or per-language parser-extension names), add them to `ISO_639_1_TO_REGCONFIG`. If the chosen mechanism is pgroonga's branched query path, leave `ISO_639_1_TO_REGCONFIG` at its current 28-entry state and handle the pgroonga-routed languages in the wiring PR's retrieval-CTE code path instead. If the chosen mechanism is deferral from Layer 1, the current mapping is already in the right state and no change is needed. In all three branches, revise Steps 1+ of this verification accordingly.
 
 **Step 1 — basic schema verification (only meaningful if Step 0 yields pgroonga regconfigs OR an alternative mechanism is in place):**
 
@@ -673,9 +669,9 @@ The wiring PR's PG17 verification (Step 0 in the schema verification task) must 
 
 **Verified counter-example for the per-language parser approach:** zhparser (`/amutu/zhparser`) does exactly what the design wants, for Chinese. After `CREATE EXTENSION zhparser` and `CREATE TEXT SEARCH CONFIGURATION chinese_fts (PARSER = zhparser)`, the operator gets a regconfig that works with `to_tsvector('chinese_fts', text)`, `tsvector` columns, GIN indexes, `@@`, `to_tsquery`, `ts_rank`, and `ts_headline`. The full standard FTS surface. This proves the design pattern works with parser extensions; pgroonga is just the wrong tool for this specific pattern.
 
-Japanese, Korean, and Hebrew parser extensions need verification as part of Step 0 — context7 does not return a high-confidence Japanese parser extension on the equivalent query, suggesting that even if the per-language path is chosen, Japanese and Korean may need additional research.
+Japanese, Korean, and Hebrew parser extensions need verification as part of Step 0. The prior context7 query for Japanese (`"textsearch_ja PostgreSQL Japanese"`, run during PR #246's design-doc-edit work) returned only `/takuyaa/ja-law-parser` — a Japanese law-text parser, not a PostgreSQL FTS extension — so no high-confidence parallel to zhparser was found. Korean and Hebrew were not exhaustively searched. Even if the per-language path is chosen, Japanese and Korean (and likely Hebrew) may need additional research beyond context7's index. See Substantive 3 above for the full finding.
 
-The 4 entries currently in `src/mcp_awareness/language.py:ISO_639_1_TO_REGCONFIG` for `ja → japanese`, `zh → chinese_simplified`, `ko → korean`, `he → hebrew` are flagged as unverified in the file's docstrings and will be either confirmed-and-cleaned-up or removed-and-replaced based on the verification outcome.
+The 4 pgroonga-listed entries that had been in `src/mcp_awareness/language.py:ISO_639_1_TO_REGCONFIG` at design time (`ja → japanese`, `zh → chinese_simplified`, `ko → korean`, `he → hebrew`) were removed preemptively by #246 round 5 in response to this finding. The current state of `language.py` on main contains only the 28 stock snowball entries, with a docstring section ("CJK and Hebrew are intentionally NOT in this mapping") that cites this finding and points at #249. The Step 0 verification (see "Schema verification task" in the Layer 1 section above) determines whether the entries should be added back and by what mechanism. The wiring PR's Phase 1.05 selects between the three options above and updates `ISO_639_1_TO_REGCONFIG` accordingly.
 
 ### Detection
 
