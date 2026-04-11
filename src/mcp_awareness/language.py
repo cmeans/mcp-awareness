@@ -33,6 +33,60 @@ detection don't pay the import cost.
 
 Part of Layer 1 of the hybrid retrieval design
 (``docs/design/hybrid-retrieval-multilingual.md``).
+
+Cost considerations
+-------------------
+
+Language support has two distinct cost dimensions that scale very
+differently and need separate awareness when reading or modifying this
+module.  Both are tracked as follow-ups for the wiring PR; both are
+named here so a future reader gets the full picture from one place.
+
+**Client-side (this Python process)** — the lingua detector loaded by
+:func:`_get_detector` carries an n-gram model for every supported
+language.  Per lingua's own documentation this is on the order of
+several hundred MB resident set, with a multi-second build cost paid
+lazily on the first call to :func:`detect_language`.  See the
+:func:`_get_detector` docstring for the full analysis, including why
+the "narrow to supported languages" alternative
+(``LanguageDetectorBuilder.from_languages(*supported)``) was rejected
+on correctness grounds — narrowing produces false positives on
+out-of-set text rather than the correct ``None``-then-``simple``
+fallback.  Latency mitigation (background warmup at server start when
+detection will be enabled) is tracked as
+`#247 <https://github.com/cmeans/mcp-awareness/issues/247>`_.
+
+**Server-side (Postgres backend + pgroonga shared resources)** — the
+regconfigs in :data:`ISO_639_1_TO_REGCONFIG` carry very different
+server-side cost depending on type.  The 28 stock snowball-based
+configs are essentially free: the Snowball stemmer is compiled into
+the Postgres binary as C code, stop-word lists at
+``$PGSHARE/tsearch_data/*.stop`` are roughly 2 KB each, and configs
+are cached per-backend in ``TSCacheEntry`` after first use.  Order-of-
+magnitude estimate is ~10-50 KB per language per backend, so all 28
+in one backend ≈ 0.5-1.5 MB.  This estimate is based on architectural
+reasoning about Postgres' FTS infrastructure and **has not been
+measured against this codebase.**
+
+The 4 pgroonga-backed configs (``japanese``, ``chinese_simplified``,
+``korean``, ``hebrew``) are an unknown rather than an estimate.
+pgroonga ships dictionary-driven tokenizers — for example MeCab with
+IPADIC for Japanese, where IPADIC alone is ~50 MB on disk
+uncompressed — and whether those dictionaries are loaded per-backend,
+mmap'd shared, or kept in pgroonga's shared resources has not been
+verified against this codebase.  The honest range for "what does
+enabling Japanese cost the Postgres host" is somewhere between "tens
+of MB per backend" and "tens of MB once if mmap-shared," and the
+difference matters for connection-pooling decisions in multi-tenant
+deployments.  Verification plan, acceptance criteria, and the
+multi-backend test that determines per-backend-vs-shared behavior are
+tracked in
+`#248 <https://github.com/cmeans/mcp-awareness/issues/248>`_, queued
+for the wiring PR's PG17 verification phase.
+
+The two cost dimensions are independent: documentation in this module
+treats them in parallel rather than treating client-side as load-
+bearing and server-side as a footnote.
 """
 
 from __future__ import annotations
@@ -59,6 +113,15 @@ SIMPLE: Final[str] = "simple"
 #:     (``japanese``, ``chinese_simplified``, ``korean``, ``hebrew``)
 #:
 #: Codes not in this map fall back to :data:`SIMPLE`.
+#:
+#: **Server-side cost.** The 28 stock snowball-based regconfigs are
+#: essentially free per backend (estimate ~10-50 KB each, unmeasured).
+#: The 4 pgroonga-backed configs carry an unverified per-backend or
+#: shared-memory cost dominated by the underlying tokenizer's
+#: dictionary files.  See the "Cost considerations" section of this
+#: module's docstring for the full analysis; the verification plan
+#: for the pgroonga configs is tracked in
+#: `#248 <https://github.com/cmeans/mcp-awareness/issues/248>`_.
 #:
 #: **Chinese caveat.** ISO 639-1 ``zh`` is the macro code for Chinese and
 #: does not distinguish Simplified from Traditional script — that
@@ -180,8 +243,12 @@ def _get_detector() -> LanguageDetector | None:
     fallback semantics.
 
     Latency mitigation (background warmup at server start when
-    detection will be enabled) is tracked as a separate follow-up — see
-    the wiring PR for details.
+    detection will be enabled) is tracked in
+    `#247 <https://github.com/cmeans/mcp-awareness/issues/247>`_,
+    queued for the wiring PR.  For the parallel server-side cost
+    (Postgres backend + pgroonga shared resources for the regconfigs
+    in :data:`ISO_639_1_TO_REGCONFIG`), see the "Cost considerations"
+    section of this module's docstring.
     """
     global _detector, _detector_probed
     if _detector_probed:
