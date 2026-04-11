@@ -59,6 +59,19 @@ SIMPLE: Final[str] = "simple"
 #:     (``japanese``, ``chinese_simplified``, ``korean``, ``hebrew``)
 #:
 #: Codes not in this map fall back to :data:`SIMPLE`.
+#:
+#: **Chinese caveat.** ISO 639-1 ``zh`` is the macro code for Chinese and
+#: does not distinguish Simplified from Traditional script — that
+#: distinction requires ISO 15924 suffixes (``zh-Hans`` / ``zh-Hant``)
+#: which are not part of ISO 639-1.  Postgres has no
+#: ``chinese_traditional`` regconfig either; pgroonga only ships
+#: ``chinese_simplified``.  Both Simplified and Traditional Chinese text
+#: therefore route to ``chinese_simplified``.  pgroonga's
+#: ``chinese_simplified`` analyzer uses character-based segmentation
+#: (MeCab-style), which operates on Han characters regardless of variant
+#: form, so tokenization should work for both — but this has not been
+#: verified end-to-end against real Traditional text and is tracked as a
+#: QA verification item for the wiring PR.
 ISO_639_1_TO_REGCONFIG: Final[dict[str, str]] = {
     # Built into stock Postgres
     "ar": "arabic",
@@ -147,6 +160,28 @@ def _get_detector() -> LanguageDetector | None:
 
     Returns the detector on success, ``None`` if lingua-py is not
     installed.  Caches the result — subsequent calls are cheap.
+
+    **Cost note.** ``LanguageDetectorBuilder.from_all_languages().build()``
+    loads lingua's high-accuracy n-gram models for all ~75 supported
+    languages.  Per lingua's own documentation this is on the order of
+    several hundred MB resident set, and the build itself takes
+    multiple seconds on a typical machine.  This cost is paid lazily
+    on the first call rather than at module import, so the cost is
+    invisible until the first detection is requested.
+
+    The "narrow to supported languages" alternative
+    (``from_languages(*supported)``) was deliberately rejected: lingua's
+    cross-language disambiguation depends on having all candidate
+    languages in scope, so narrowing produces false positives — text in
+    an unsupported language (e.g. Tagalog) gets misclassified as the
+    closest supported language with high confidence rather than
+    correctly returning ``None`` so the caller can fall back to
+    :data:`SIMPLE`.  The footprint cost is the price of correct
+    fallback semantics.
+
+    Latency mitigation (background warmup at server start when
+    detection will be enabled) is tracked as a separate follow-up — see
+    the wiring PR for details.
     """
     global _detector, _detector_probed
     if _detector_probed:

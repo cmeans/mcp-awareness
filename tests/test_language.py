@@ -19,7 +19,10 @@
 from __future__ import annotations
 
 import sys
+from collections.abc import Iterator
 from unittest.mock import patch
+
+import pytest
 
 import mcp_awareness.language as lang_mod
 from mcp_awareness.language import (
@@ -211,6 +214,19 @@ class TestMappingCoverage:
 class TestDetectorCaching:
     """Verify the lazy singleton pattern for the lingua detector."""
 
+    @pytest.fixture(autouse=True)
+    def _save_detector_state(self) -> Iterator[None]:
+        # Snapshot module-level detector state and restore it after each
+        # test in this class so mutations don't bleed across tests or
+        # into the rest of the test session.
+        saved_detector = lang_mod._detector
+        saved_probed = lang_mod._detector_probed
+        try:
+            yield
+        finally:
+            lang_mod._detector = saved_detector
+            lang_mod._detector_probed = saved_probed
+
     def test_detector_is_lazy_loaded_and_cached(self) -> None:
         # Reset the module-level cache to force a reload
         lang_mod._detector = None
@@ -228,16 +244,11 @@ class TestDetectorCaching:
         # ImportError, exercising the fallback branch in _get_detector.
         lang_mod._detector = None
         lang_mod._detector_probed = False
-        try:
-            with patch.dict(sys.modules, {"lingua": None}):
-                assert lang_mod._get_detector() is None
-                # Second call returns the cached None without re-probing
-                assert lang_mod._get_detector() is None
-                assert lang_mod._detector_probed is True
-        finally:
-            # Restore state so other tests get a live detector
-            lang_mod._detector = None
-            lang_mod._detector_probed = False
+        with patch.dict(sys.modules, {"lingua": None}):
+            assert lang_mod._get_detector() is None
+            # Second call returns the cached None without re-probing
+            assert lang_mod._get_detector() is None
+            assert lang_mod._detector_probed is True
 
     def test_detect_language_returns_none_when_detector_unavailable(self) -> None:
         # When _get_detector returns None (lingua not installed), detect_language
