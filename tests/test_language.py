@@ -193,6 +193,22 @@ class TestResolveLanguage:
         )
         assert result == "english"
 
+    def test_japanese_text_routes_to_simple_pending_pgroonga_verification(self) -> None:
+        # User-facing consequence of the CJK + Hebrew deferral.  Full chain:
+        # lingua correctly detects the input as Japanese, detect_language()
+        # filters through ISO_639_1_TO_REGCONFIG.get('ja') which is now None
+        # (the 4 pgroonga entries were removed pending #249), so resolve_language()
+        # falls through to SIMPLE.  This is the user-facing-behavior layer of
+        # the deferral, complementing test_pgroonga_codes_intentionally_absent
+        # (data-shape layer) and test_japanese_returns_none_pending_pgroonga_verification
+        # (unit-behavior layer).  Update when CJK is added back via #249.
+        result = resolve_language(
+            text_for_detection=(
+                "今日は東京で友達と夕食を食べました。とても楽しい時間を過ごしました。"
+            )
+        )
+        assert result == SIMPLE
+
 
 class TestMappingCoverage:
     """Structural checks that guard the mapping tables."""
