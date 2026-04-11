@@ -102,14 +102,19 @@ non-Western language with the right extension; pgroonga is just the
 wrong extension for this specific pattern.
 
 Japanese / Korean / Hebrew parser-extension equivalents have **not**
-been verified — context7 does not return a high-confidence
-PostgreSQL parser extension for Japanese on the equivalent query,
-and the Korean and Hebrew situations are similarly unconfirmed.  The
-wiring PR will either add CJK + Hebrew back to this mapping after
-verifying the appropriate extensions, use a separate pgroonga code
-path with a branched query CTE, or defer non-Western language
-support to a follow-up phase after Layer 1.  See #249 for the
-verification plan and the three-option trilemma.
+been confirmed.  The equivalent context7 query for Japanese parser
+extensions (run during PR #246's design-doc-edit work, with library
+search ``"textsearch_ja PostgreSQL Japanese"``) returned only
+``/takuyaa/ja-law-parser`` — a Japanese law-text parser, not a
+PostgreSQL FTS extension — so no high-confidence parallel to zhparser
+was found in context7's index.  Korean and Hebrew were not
+exhaustively searched.  This is a negative verification result
+(query ran, returned nothing useful), not absence of verification.
+The wiring PR will either add CJK + Hebrew back to this mapping after
+identifying and verifying the appropriate extensions, use a separate
+pgroonga code path with a branched query CTE, or defer non-Western
+language support to a follow-up phase after Layer 1.  See #249 for
+the verification plan and the three-option trilemma.
 """
 
 from __future__ import annotations
