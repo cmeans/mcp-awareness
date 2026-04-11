@@ -53,49 +53,48 @@ the "narrow to supported languages" alternative
 on correctness grounds — narrowing produces false positives on
 out-of-set text rather than the correct ``None``-then-``simple``
 fallback.  Latency mitigation (background warmup at server start when
-detection will be enabled) is tracked as
-`#247 <https://github.com/cmeans/mcp-awareness/issues/247>`_.
+detection will be enabled) is tracked as #247.
 
-**Server-side (Postgres backend)** — the regconfigs in
-:data:`ISO_639_1_TO_REGCONFIG` carry very different server-side cost
-depending on type.  The 28 stock snowball-based configs are
-essentially free: the Snowball stemmer is compiled into the Postgres
-binary as C code, stop-word lists at ``$PGSHARE/tsearch_data/*.stop``
-are roughly 2 KB each, and configs are cached per-backend in
-``TSCacheEntry`` after first use.  Order-of-magnitude estimate is
-~10-50 KB per language per backend, so all 28 in one backend ≈
-0.5-1.5 MB.  This estimate is based on architectural reasoning about
-Postgres' FTS infrastructure and **has not been measured against this
-codebase.**
+**Server-side (Postgres backend)** — the 28 regconfigs in
+:data:`ISO_639_1_TO_REGCONFIG` are all stock snowball-based and
+essentially free per backend: the Snowball stemmer is compiled into
+the Postgres binary as C code, stop-word lists at
+``$PGSHARE/tsearch_data/*.stop`` are roughly 2 KB each, and configs
+are cached per-backend in ``TSCacheEntry`` after first use.
+Order-of-magnitude estimate is ~10-50 KB per language per backend, so
+all 28 in one backend ≈ 0.5-1.5 MB.  This estimate is based on
+architectural reasoning about Postgres' FTS infrastructure and **has
+not been measured against this codebase**; the verification plan is
+tracked in #248.
 
-**The 4 pgroonga-listed entries (japanese, chinese_simplified,
-korean, hebrew) are doubly unverified — both whether they exist as
-Postgres regconfigs at all, and what their cost would be if they
-do.**  pgroonga's documented integration model is its own
-PostgreSQL index access method (``USING pgroonga``), with tokenizers
-configured per-index via ``WITH (tokenizer = 'TokenMecab')`` and
-queries written with pgroonga-specific operators (``&@``, ``&@~``,
-``&^``, ``%%``).  This is a different mechanism from Postgres'
-built-in FTS infrastructure (``to_tsvector(regconfig, text)``,
-``tsvector``, ``tsquery``, the standard ``regconfig`` registry) that
-this module's mapping is built around.  Whether installing pgroonga
-also registers ``japanese`` / ``chinese_simplified`` / ``korean`` /
-``hebrew`` as entries in ``pg_ts_config`` — so that
-``to_tsvector('japanese', text)`` works through Postgres' FTS path
-rather than only through pgroonga's index access method — has not
-been verified against this codebase or against pgroonga's actual
-behavior on the target Postgres version.  If they are not registered
-as standard regconfigs, the 4 pgroonga entries in this mapping are
-incorrect data and the wiring PR will need a different mechanism for
-CJK and Hebrew support (either a separate pgroonga-based code path,
-a Groonga-bridging extension, or removal of CJK from Layer 1
-entirely).  This deeper finding is tracked as #249.  The original
-memory-cost question (assuming the regconfigs do exist) is tracked
-as #248, with #249 as a prerequisite.
+**CJK and Hebrew are intentionally NOT in this mapping.** An earlier
+version of this module included 4 pgroonga-listed entries (``ja`` →
+``japanese``, ``zh`` → ``chinese_simplified``, ``ko`` → ``korean``,
+``he`` → ``hebrew``) on the assumption that installing pgroonga
+registers those names in ``pg_ts_config``.  Verification via context7
+against pgroonga's official documentation (during PR #246's QA cycle)
+showed that pgroonga's documented integration model is its own
+PostgreSQL index access method (``USING pgroonga``) with per-index
+tokenizer configuration (``WITH (tokenizer = 'TokenMecab')``) and
+pgroonga-specific operators (``&@``, ``&@~``, ``&^``, ``%%``) — a
+completely different mechanism from Postgres' standard FTS
+infrastructure (``to_tsvector(regconfig, text)``, ``tsvector``,
+``tsquery``, ``pg_ts_config``) that this mapping is built around.
+None of pgroonga's documented examples involve the standard FTS path.
 
-The two cost dimensions are independent: documentation in this module
-treats them in parallel rather than treating client-side as load-
-bearing and server-side as a footnote.
+The 4 pgroonga entries were therefore removed pending #249's
+verification of whether the regconfig path is actually available on
+the target Postgres + pgroonga build.  zhparser is a verified
+counter-example for Chinese (it registers as a Postgres parser and
+the operator can build a regconfig on top via
+``CREATE TEXT SEARCH CONFIGURATION ... (PARSER = zhparser)``), so the
+parser-extension approach is known to work for at least one
+non-Western language.  Japanese / Korean / Hebrew equivalents have
+not been verified.  The wiring PR will either add CJK + Hebrew back
+to this mapping with verified extensions, use a separate pgroonga
+code path with a branched query CTE, or defer non-Western language
+support to Layer 1.5+.  See #249 for the verification plan and the
+three-option trilemma.
 """
 
 from __future__ import annotations
@@ -115,49 +114,37 @@ SIMPLE: Final[str] = "simple"
 
 #: ISO 639-1 (two-letter) → Postgres ``regconfig`` name.
 #:
-#: Coverage:
-#:   - 28 configurations built into stock Postgres (``english``, ``french``,
-#:     ``arabic``, ``hindi``, ``russian``, ``turkish``, etc.)
-#:   - 4 additional configurations via the ``pgroonga`` extension
-#:     (``japanese``, ``chinese_simplified``, ``korean``, ``hebrew``)
+#: Currently covers the 28 stock snowball-based regconfigs built into
+#: Postgres (``english``, ``french``, ``arabic``, ``hindi``, ``russian``,
+#: ``turkish``, etc.).  Codes not in this map fall back to :data:`SIMPLE`.
 #:
-#: Codes not in this map fall back to :data:`SIMPLE`.
+#: **CJK and Hebrew are intentionally deferred.**  An earlier version of
+#: this mapping included 4 pgroonga-listed entries (``ja``, ``zh``,
+#: ``ko``, ``he``) on the assumption that installing pgroonga registers
+#: ``japanese`` / ``chinese_simplified`` / ``korean`` / ``hebrew`` as
+#: standard Postgres regconfigs accessible via
+#: ``to_tsvector(regconfig, text)``.  Verification via context7 against
+#: pgroonga's official documentation (during PR #246's QA cycle) showed
+#: that pgroonga's documented integration is its own PostgreSQL index
+#: access method (``USING pgroonga``), not the standard regconfig
+#: registry.  See the "Cost considerations" section of this module's
+#: docstring for the full finding.  The 4 entries were removed rather
+#: than shipped with a caveat because the mapping is the public API of
+#: this module — downstream code (the wiring PR, tests, any consumer
+#: that imports this dict) needs to be able to trust that values in the
+#: mapping are real regconfigs, and the asymmetry of error costs favors
+#: removing unverified data over shipping it with documentation.
 #:
-#: **pgroonga entries are unverified.** The 4 pgroonga-listed entries
-#: (``ja``, ``zh``, ``ko``, ``he``) assume that installing pgroonga
-#: registers ``japanese`` / ``chinese_simplified`` / ``korean`` /
-#: ``hebrew`` as standard Postgres regconfigs accessible via
-#: ``to_tsvector(regconfig, text)``.  pgroonga's documented integration
-#: model is its own PostgreSQL index access method (``USING pgroonga``)
-#: with per-index tokenizer configuration, which is a different
-#: mechanism from Postgres' built-in FTS infrastructure that this
-#: mapping is built around.  Whether the regconfig path is also
-#: available has not been verified.  If it is not, these 4 entries are
-#: incorrect data and need to be removed (or replaced with a different
-#: CJK / Hebrew support mechanism in the wiring PR).  Tracked as #249.
-#:
-#: **Server-side cost.** The 28 stock snowball-based regconfigs are
-#: essentially free per backend (estimate ~10-50 KB each, unmeasured).
-#: The 4 pgroonga-listed entries carry an unverified cost on top of an
-#: unverified existence question (see above).  See the "Cost
-#: considerations" section of this module's docstring for the full
-#: analysis; the memory-cost verification plan is tracked as #248
-#: (blocked on #249).
-#:
-#: **Chinese caveat.** ISO 639-1 ``zh`` is the macro code for Chinese and
-#: does not distinguish Simplified from Traditional script — that
-#: distinction requires ISO 15924 suffixes (``zh-Hans`` / ``zh-Hant``)
-#: which are not part of ISO 639-1.  Postgres has no
-#: ``chinese_traditional`` regconfig either; pgroonga only ships
-#: ``chinese_simplified``.  Both Simplified and Traditional Chinese text
-#: therefore route to ``chinese_simplified``.  Whether pgroonga's
-#: ``chinese_simplified`` analyzer handles Traditional script consistently
-#: depends on which Groonga tokenizer it wraps and how that tokenizer
-#: treats Han variants — neither has been verified against this codebase.
-#: End-to-end verification against real Traditional Chinese text is
-#: tracked as a QA item for the wiring PR.
+#: The wiring PR will either add CJK + Hebrew back after verifying the
+#: appropriate extensions (zhparser is verified for Chinese; Japanese /
+#: Korean / Hebrew equivalents need verification), use a separate
+#: pgroonga code path with a branched query CTE, or defer non-Western
+#: language support to Layer 1.5+.  Verification plan and the
+#: three-option trilemma are tracked in #249.  Memory-cost measurement
+#: of whatever extensions are chosen is tracked in #248 (blocked on
+#: #249).
 ISO_639_1_TO_REGCONFIG: Final[dict[str, str]] = {
-    # Built into stock Postgres
+    # Built into stock Postgres (verified — 28 entries)
     "ar": "arabic",
     "hy": "armenian",
     "eu": "basque",
@@ -186,11 +173,15 @@ ISO_639_1_TO_REGCONFIG: Final[dict[str, str]] = {
     "ta": "tamil",
     "tr": "turkish",
     "yi": "yiddish",
-    # Provided by pgroonga extension (installed separately)
-    "ja": "japanese",
-    "zh": "chinese_simplified",
-    "ko": "korean",
-    "he": "hebrew",
+    # CJK and Hebrew support intentionally deferred from this foundation
+    # PR.  The pgroonga-listed regconfigs (japanese, chinese_simplified,
+    # korean, hebrew) assume pgroonga registers entries in pg_ts_config,
+    # which is not part of pgroonga's documented integration model and
+    # has not been verified.  Tracked as #249; the wiring PR will either
+    # add these entries back after verification, use a separate pgroonga
+    # code path with a branched query CTE, or defer non-Western language
+    # support to Layer 1.5+.  See the "Cost considerations" section of
+    # this module's docstring for the full finding.
 }
 
 #: Reverse lookup: ``regconfig`` name → ISO 639-1 code.  Does not include
@@ -266,10 +257,9 @@ def _get_detector() -> LanguageDetector | None:
     Latency mitigation (background warmup at server start when
     detection will be enabled) is tracked as #247, queued for the
     wiring PR.  For the parallel server-side cost (Postgres backend
-    for the regconfigs in :data:`ISO_639_1_TO_REGCONFIG`, plus the
-    deeper unverified question of whether the 4 pgroonga-listed
-    entries are real regconfigs at all), see the "Cost considerations"
-    section of this module's docstring.
+    for the 28 stock regconfigs in :data:`ISO_639_1_TO_REGCONFIG`)
+    and the deferral of CJK + Hebrew pending #249, see the "Cost
+    considerations" section of this module's docstring.
     """
     global _detector, _detector_probed
     if _detector_probed:

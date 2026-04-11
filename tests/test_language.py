@@ -40,8 +40,8 @@ class TestIsoToRegconfig:
     def test_known_code_maps(self) -> None:
         assert iso_to_regconfig("en") == "english"
         assert iso_to_regconfig("fr") == "french"
-        assert iso_to_regconfig("ja") == "japanese"
         assert iso_to_regconfig("ar") == "arabic"
+        assert iso_to_regconfig("ru") == "russian"
 
     def test_none_returns_simple(self) -> None:
         assert iso_to_regconfig(None) == SIMPLE
@@ -65,7 +65,7 @@ class TestIsoToRegconfig:
 class TestRegconfigToIso:
     def test_known_regconfig_maps(self) -> None:
         assert regconfig_to_iso("english") == "en"
-        assert regconfig_to_iso("japanese") == "ja"
+        assert regconfig_to_iso("russian") == "ru"
         assert regconfig_to_iso("arabic") == "ar"
 
     def test_simple_returns_none(self) -> None:
@@ -114,9 +114,16 @@ class TestDetectLanguage:
         )
         assert detect_language(text) == "german"
 
-    def test_detects_japanese(self) -> None:
+    def test_japanese_returns_none_pending_pgroonga_verification(self) -> None:
+        # lingua correctly identifies this as Japanese, but `ja` is not in
+        # ISO_639_1_TO_REGCONFIG (the 4 pgroonga entries were removed pending
+        # #249's verification of whether pgroonga registers regconfigs).  So
+        # detect_language returns None and the caller falls back to SIMPLE.
+        # When #249 resolves and CJK support is added back via the chosen
+        # mechanism, this test should be updated to assert the actual
+        # regconfig name.
         text = "今日は東京で友達と夕食を食べました。とても楽しい時間を過ごしました。"
-        assert detect_language(text) == "japanese"
+        assert detect_language(text) is None
 
     def test_garbage_input_returns_none_or_simple_fallback(self) -> None:
         # Random symbols / numbers are not in any language — lingua should
@@ -201,10 +208,31 @@ class TestMappingCoverage:
             assert len(iso) == 2, f"ISO code {iso!r} not two letters"
 
     def test_expected_languages_present(self) -> None:
-        # Core language coverage sanity check
-        expected = {"en", "fr", "de", "es", "ja", "zh", "ko", "ar", "ru", "pt"}
+        # Core language coverage sanity check.  CJK (`ja`, `zh`, `ko`) and
+        # Hebrew (`he`) are intentionally NOT in the expected set — they
+        # were removed from ISO_639_1_TO_REGCONFIG pending #249's
+        # verification of pgroonga's regconfig integration.  Restore them
+        # here when the wiring PR adds CJK + Hebrew support back via the
+        # chosen mechanism.
+        expected = {"en", "fr", "de", "es", "ar", "ru", "pt", "it", "nl", "tr"}
         missing = expected - ISO_639_1_TO_REGCONFIG.keys()
         assert not missing, f"missing expected languages: {missing}"
+
+    def test_pgroonga_codes_intentionally_absent(self) -> None:
+        # The 4 pgroonga-listed codes were removed from the mapping pending
+        # #249's verification of whether pgroonga registers regconfigs.
+        # This test documents the deferral at the test level so a future
+        # dev who tries to add them back without resolving #249 first sees
+        # the assertion failure with a clear pointer.
+        deferred = {"ja", "zh", "ko", "he"}
+        present = deferred & ISO_639_1_TO_REGCONFIG.keys()
+        assert not present, (
+            f"CJK / Hebrew codes {present} are in ISO_639_1_TO_REGCONFIG "
+            f"but should be deferred pending #249.  If #249 is resolved "
+            f"and the pgroonga regconfigs are confirmed (or replaced with "
+            f"a verified alternative), update this test along with the "
+            f"new entries."
+        )
 
     def test_simple_not_in_forward_mapping(self) -> None:
         # 'simple' should not have an ISO code mapping — it is the fallback
