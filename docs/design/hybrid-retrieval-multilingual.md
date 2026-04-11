@@ -431,20 +431,86 @@ The design mandates validation *before* the row reaches the database:
 
 This is the difference between "alert + degrade" and "writes fail for any user whose preferred language isn't supported by the current deployment."
 
-**Schema verification task (Substantive finding):**
+**pgroonga regconfig integration is unverified — and may not exist (Substantive finding — critical, supersedes Substantive 2 in priority):**
 
-Generated tsvector columns using a `regconfig` sourced from another column are an edge case. `to_tsvector(regconfig, text)` is declared IMMUTABLE on modern Postgres, but this exact pattern has been rejected at column-creation time on PG12–PG14, and has had subtle issues on some PG15 minor versions. Before Layer 1 migration code is written, prove the pattern works on the actual target version:
+The Layer 1 design assumes that installing pgroonga registers `japanese`, `chinese_simplified`, `chinese_traditional`, `korean`, and `hebrew` as standard Postgres regconfigs accessible via `to_tsvector(regconfig, text)`. This assumption was made when the design was written and has not been verified against pgroonga's actual integration model.
+
+Verification via context7 against pgroonga's official documentation (during PR #246 round 4) shows that pgroonga's primary documented integration is its own PostgreSQL **index access method**:
+
+- Indexes are created with `CREATE INDEX ... USING pgroonga (...)` rather than with the standard `tsvector` GIN pattern
+- Tokenizers are configured **per-index** via the `WITH (tokenizer = 'TokenMecab')` clause, not via Postgres's regconfig registry
+- Queries use pgroonga-specific operators (`&@`, `&@~`, `&^`, `%%`), not standard FTS operators like `@@` against `tsvector @ tsquery`
+- None of pgroonga's documented usage examples involve `to_tsvector(regconfig, text)` or appear in `pg_ts_config`
+
+This is a **completely different mechanism** from the standard FTS infrastructure that the rest of Layer 1 is built around. If installing pgroonga does not also register the four CJK + Hebrew names in `pg_ts_config`, then:
+
+- The 4 pgroonga-listed entries in `src/mcp_awareness/language.py:ISO_639_1_TO_REGCONFIG` are incorrect data
+- The Layer 1 `tsv` generated column expression (`to_tsvector(language, ...)` with `language='japanese'`) would fail at INSERT time for any CJK or Hebrew write — `ERROR: text search configuration "japanese" does not exist`
+- The hybrid retrieval CTE's lexical arm (`tsv @@ plainto_tsquery(language, query)`) does not extend to CJK at all using pgroonga
+- Layer 1 needs a different mechanism for CJK + Hebrew support
+
+**Counter-example proving the design pattern works with the right extension:**
+
+zhparser (`/amutu/zhparser` on context7) is a Postgres extension that does exactly what the design assumed pgroonga did, for Chinese specifically. After `CREATE EXTENSION zhparser`, the operator runs:
+
+    CREATE TEXT SEARCH CONFIGURATION chinese_fts (PARSER = zhparser);
+    ALTER TEXT SEARCH CONFIGURATION chinese_fts
+        ADD MAPPING FOR n,v,a,i,e,l,j,m,q,r WITH simple;
+
+…and then `to_tsvector('chinese_fts', '保障房政策解读')` produces a `tsvector` that can be stored in a `tsvector` column with a GIN index and queried with `@@`, `to_tsquery`, `plainto_tsquery`, `phraseto_tsquery`, `ts_rank`, `ts_headline` — the entire standard FTS surface. zhparser plugs into the model that the Layer 1 design wants.
+
+What zhparser proves is that the design pattern (regconfig → `tsvector` → GIN → standard FTS operators) works for non-Western languages **with the right extension**. pgroonga is the wrong fit for that pattern; zhparser is the right fit, but only for Chinese. The Japanese / Korean / Hebrew equivalents are not currently verified — context7 does not return a high-confidence Japanese FTS parser extension on the equivalent query.
+
+**Decision deferred to the wiring PR, with three explicit options:**
+
+1. **Per-language parser extensions** (zhparser-style). Use zhparser for Chinese; identify and verify equivalents for Japanese (textsearch_ja, pg_bigm, or similar — needs verification), Korean, and Hebrew. Pros: fits the design pattern with zero changes to Layer 1's query CTE. Cons: 3+ extensions to install, package, and maintain; equivalents for some languages may not exist or may be unmaintained.
+
+2. **pgroonga with a branched query path.** Keep pgroonga as the single extension for all CJK + Hebrew, but redesign the lexical arm of the hybrid CTE to branch by language: standard FTS for European/Cyrillic/etc., pgroonga's `&@` operator for CJK + Hebrew. Pros: single extension, wide language coverage in one install. Cons: branched query path adds real complexity; the `tsv` generated column doesn't apply to pgroonga-indexed rows; need to maintain two indexes per searchable column (one `tsvector` GIN, one `pgroonga`).
+
+3. **Defer CJK + Hebrew from Layer 1.** Ship Layer 1 with the 28 stock snowball regconfigs and `simple` as the fallback for everything else. CJK + Hebrew become wiring-PR-follow-on work, after the wiring PR has measured and validated the actual mechanics. Pros: simplest, lowest risk, ships nothing broken. Cons: Layer 1 advertises "language support" with a hole; cross-language hybrid retrieval story is incomplete until the follow-up.
+
+**This finding gates the schema verification task below.** The verification must answer the regconfig existence question before any of the existing verification steps (insert sample rows, etc.) are meaningful. See the revised verification task in the next subsection.
+
+Tracked as #249. Verification plan and acceptance criteria are documented there. The original memory cost question is tracked as #248, now blocked on #249 because there's no point measuring the cost of regconfigs that may not exist.
+
+**Schema verification task (Substantive 2 — gated by Substantive 3 above):**
+
+Generated tsvector columns using a `regconfig` sourced from another column are an edge case. `to_tsvector(regconfig, text)` is declared IMMUTABLE on modern Postgres, but this exact pattern has been rejected at column-creation time on PG12–PG14, and has had subtle issues on some PG15 minor versions. Before Layer 1 migration code is written, prove the pattern works on the actual target version.
+
+**Step 0 (gating step — answers Substantive 3) — does pgroonga even register the regconfigs the rest of this verification depends on?**
+
+- [ ] Spin up a fresh `pgvector/pgvector:pg17` container with pgroonga installed. Use the actual install path the wiring PR will use, not a one-off `apt install` — packaging differences are part of what this verifies.
+- [ ] `SELECT cfgname FROM pg_ts_config ORDER BY cfgname;` — confirm whether `japanese`, `chinese_simplified`, `chinese_traditional`, `korean`, `hebrew` appear in the result.
+- [ ] If they appear: proceed to Step 1 below. Document the actual tokenizer used by each (via `pg_ts_parser`/`pg_ts_dict` introspection or by querying pgroonga's metadata if available). Update `src/mcp_awareness/language.py:ISO_639_1_TO_REGCONFIG` to remove the "unverified" caveat.
+- [ ] If they do NOT appear: stop. Open the wiring PR design conversation to pick between (1) per-language parser extensions, (2) branched query path with pgroonga, or (3) defer CJK + Hebrew from Layer 1. Document the choice in this design doc, update `ISO_639_1_TO_REGCONFIG` to remove the 4 pgroonga entries (or replace them with the chosen alternative), and revise Steps 1+ of this verification accordingly.
+
+**Step 1 — basic schema verification (only meaningful if Step 0 yields pgroonga regconfigs OR an alternative mechanism is in place):**
 
 - [ ] Create a fresh PG17 database (matches the `pgvector/pgvector:pg17` base image used in all compose files)
 - [ ] Run the schema migration on an empty table
-- [ ] Insert sample rows with `language='english'`, `'spanish'`, `'japanese'` (assuming pgroonga configured)
+- [ ] Insert sample rows with `language='english'`, `'spanish'`, and (if Step 0 yielded the regconfig) `'japanese'`. If pgroonga regconfigs do not exist, exercise the chosen alternative path here instead.
 - [ ] Verify `tsv` column is populated correctly for each
 - [ ] Update an existing row's `language` column and verify `tsv` regenerates
 - [ ] `EXPLAIN ANALYZE` a query with `@@` — confirm GIN scan is used
 - [ ] Confirm the hybrid CTE plan uses both HNSW and GIN indexes
-- [ ] **Repeat the verification against AWS RDS Postgres 17** (and, if access is available, Aurora PostgreSQL-compatible 17) to confirm the generated `tsvector` + per-row `regconfig` pattern works on managed providers. RDS has subtle differences from the upstream Docker image (parameter group defaults, extension versioning, no superuser access, role/permission model), and the deployment compatibility claim in this design depends on the verification actually exercising a managed instance, not just the docker `pg17` image. Use a minimal RDS test instance for the verification pass, then tear down. If Aurora access isn't available to the verifier, document the gap — it remains an open verification item until confirmed.
 
-If the generated-column approach fails on PG17 for any reason (docker image or managed provider), the fallback is a `BEFORE INSERT/UPDATE` trigger that computes the same expression and stores it in a non-generated column. Functionally equivalent; adds a small write-time cost; keeps the query plan the same. Documenting the fallback now so implementation isn't blocked if the verification fails.
+**Step 2 — memory measurement (incorporates #248):**
+
+- [ ] Baseline: fresh `pgvector/pgvector:pg17` container, no extensions beyond pgvector. Capture postmaster + backend RSS via `ps`/`pmap`/`smaps_rollup`
+- [ ] Enable the chosen non-Western FTS mechanism (pgroonga, zhparser, or whatever Step 0 selects), restart postmaster, recapture baseline RSS. Delta = extension load cost.
+- [ ] Open one connection. Run `to_tsvector('english', 'sample text')`. Capture backend RSS. Delta = stock-snowball-config cost.
+- [ ] Same backend, exercise all 28 stock configs in sequence. Capture cumulative RSS. Delta = full stock-config-set cost.
+- [ ] Same backend, run `to_tsvector('japanese', '日本語のサンプルテキストです')` (or the equivalent for the chosen mechanism). Capture RSS. Delta = CJK config cost.
+- [ ] Same backend, exercise all CJK + Hebrew configs. Capture cumulative RSS.
+- [ ] Multi-backend test: open 10 fresh backends, exercise the heaviest CJK config in each. Compare cumulative RSS to single-backend × 10. **Determines whether dictionaries are per-backend or shared.**
+- [ ] Document the measured numbers in this design doc and in deployment docs.
+
+**Step 3 — RDS / managed Postgres compatibility:**
+
+- [ ] Repeat Steps 0–2 against AWS RDS Postgres 17 (and Aurora PostgreSQL-compatible 17 if access is available). Managed Postgres often has more restricted extension support, and the pgroonga / zhparser packaging story may differ.
+- [ ] If the chosen extension is not available on managed Postgres, document the gap and revisit the deployment compatibility claim.
+
+**Fallback if generated-column approach fails:** A `BEFORE INSERT/UPDATE` trigger that computes the same expression and stores it in a non-generated column. Functionally equivalent; adds a small write-time cost; keeps the query plan the same. Documenting the fallback now so implementation isn't blocked if Step 1 fails.
 
 **500-char content truncation — investigate lifting as part of Layer 1:**
 
@@ -593,9 +659,23 @@ Before defaulting to any alternative model, run `benchmarks/semantic_search_benc
 
 arabic, armenian, basque, catalan, danish, dutch, english, finnish, french, german, greek, hindi, hungarian, indonesian, irish, italian, lithuanian, nepali, norwegian, portuguese, romanian, russian, serbian, spanish, swedish, tamil, turkish, yiddish, plus `simple`.
 
-### Via pgroonga extension (CJK + improved Arabic/Hebrew)
+### Non-Western language support — extension choice is OPEN
 
-japanese, chinese_simplified, chinese_traditional, korean, hebrew. Postgres base image swap to `groonga/pgroonga:latest-alpine-17`, one Alembic migration to `CREATE EXTENSION pgroonga`.
+The original design assumed pgroonga registers `japanese`, `chinese_simplified`, `chinese_traditional`, `korean`, and `hebrew` as standard Postgres regconfigs. **This assumption is unverified and likely wrong** — pgroonga's documented integration model is its own PostgreSQL index access method (`USING pgroonga`), not the standard `regconfig` registry. See "pgroonga regconfig integration is unverified" in the Layer 1 section above for the full finding.
+
+The wiring PR's PG17 verification (Step 0 in the schema verification task) must answer this before non-Western language support can be implemented. Three options are open, all gated on that verification:
+
+| Option | Extensions to install | Coverage | Query CTE complexity |
+|---|---|---|---|
+| Per-language parser extensions | zhparser (Chinese) + N more for Japanese / Korean / Hebrew | One extension per language; some may not exist | Low — fits the design's existing CTE pattern |
+| pgroonga with branched query path | 1 (pgroonga) | All CJK + Hebrew + more | High — branched lexical arm, two indexes per searchable column |
+| Defer non-Western support from Layer 1 | 0 (use `simple` for everything non-Western) | None until wiring-PR follow-on | Zero — Layer 1 ships with stock-language-only support |
+
+**Verified counter-example for the per-language parser approach:** zhparser (`/amutu/zhparser`) does exactly what the design wants, for Chinese. After `CREATE EXTENSION zhparser` and `CREATE TEXT SEARCH CONFIGURATION chinese_fts (PARSER = zhparser)`, the operator gets a regconfig that works with `to_tsvector('chinese_fts', text)`, `tsvector` columns, GIN indexes, `@@`, `to_tsquery`, `ts_rank`, and `ts_headline`. The full standard FTS surface. This proves the design pattern works with parser extensions; pgroonga is just the wrong tool for this specific pattern.
+
+Japanese, Korean, and Hebrew parser extensions need verification as part of Step 0 — context7 does not return a high-confidence Japanese parser extension on the equivalent query, suggesting that even if the per-language path is chosen, Japanese and Korean may need additional research.
+
+The 4 entries currently in `src/mcp_awareness/language.py:ISO_639_1_TO_REGCONFIG` for `ja → japanese`, `zh → chinese_simplified`, `ko → korean`, `he → hebrew` are flagged as unverified in the file's docstrings and will be either confirmed-and-cleaned-up or removed-and-replaced based on the verification outcome.
 
 ### Detection
 
@@ -617,20 +697,21 @@ API accepts `'en'`, `'ja'`, `'es'`, etc. Server maps to `regconfig` at the bound
 
 ### Phase 1 — Layer 1: Hybrid retrieval + language column
 
-1. **Phase 1.0 — Schema verification on PG17** (new, Substantive 2): prove the `to_tsvector(regconfig-from-other-column, text)` generated column pattern works on a fresh PG17 database before writing migration code. Trigger-based fallback documented if verification fails.
-2. Alembic: add `language regconfig NOT NULL DEFAULT 'simple'` + `tsv` generated column + GIN index + partial index on language
-3. Language resolution helpers in `src/mcp_awareness/language.py` *(already landed as foundation)*
-4. `lingua-language-detector>=2.0` runtime dependency *(already landed as foundation)*
-5. **Write-time regconfig validation** (new, Substantive 3): startup cache of `pg_ts_config`, pre-INSERT validation, fall-through to `'simple'` + alert, cache refresh on alert miss
-6. Rewrite `semantic_search` SQL to hybrid CTE (vector + FTS + RRF)
-7. Rename `semantic_search` tool → `search`; keep `semantic_search` as deprecated alias for one release
-8. `search` tool gains optional `language` parameter; `get_knowledge` gains optional `language` filter
-9. Write tools (`remember`, `add_context`, `learn_pattern`) gain optional `language` parameter
-10. **Evaluate lifting the 500-char content truncation** in `embeddings.py:212-217` (new): benchmark with full content vs 500-char cap, ship whichever wins
-11. Backfill migration: detect language on existing ~700 entries via lingua-py
-12. Unsupported-language alert infrastructure
-13. FTS weight validation benchmark: confirm A/B/C weighting is correct for awareness data
-14. **Sovereignty framework scaffolding** (new):
+1. **Phase 1.0 — PG17 verification pass** (Substantive 2 + Substantive 3): answer the gating question — does pgroonga register the assumed regconfigs in `pg_ts_config`? — then prove the `to_tsvector(regconfig-from-other-column, text)` generated column pattern works on a fresh PG17 database, then measure server-side memory cost. Trigger-based fallback documented if the generated-column approach fails. If pgroonga regconfigs do not exist, this phase also selects the alternative non-Western FTS mechanism (per-language parser extensions like zhparser, branched pgroonga path, or deferral from Layer 1) and updates the language mapping accordingly. See "Schema verification task" in the Layer 1 section above.
+2. **Phase 1.05 — Extension selection** (gated on Phase 1.0's outcome): The design as originally written assumed `CREATE EXTENSION pgroonga` and a base image swap to `groonga/pgroonga:latest-alpine-17`. If Phase 1.0 confirms pgroonga registers regconfigs, that plan stands. If it does not, this phase selects between (1) per-language parser extensions (zhparser confirmed for Chinese; Japanese / Korean / Hebrew equivalents need verification), (2) keeping pgroonga and accepting a branched query path in the Layer 1 retrieval CTE, or (3) deferring CJK + Hebrew from Layer 1 entirely. Whichever option is chosen, update `src/mcp_awareness/language.py:ISO_639_1_TO_REGCONFIG`, `docker-compose.yaml`, and this design doc accordingly before proceeding to Phase 1.1.
+3. Alembic: add `language regconfig NOT NULL DEFAULT 'simple'` + `tsv` generated column + GIN index + partial index on language
+4. Language resolution helpers in `src/mcp_awareness/language.py` *(already landed as foundation)*
+5. `lingua-language-detector>=2.0` runtime dependency *(already landed as foundation)*
+6. **Write-time regconfig validation** (new, Substantive 3): startup cache of `pg_ts_config`, pre-INSERT validation, fall-through to `'simple'` + alert, cache refresh on alert miss
+7. Rewrite `semantic_search` SQL to hybrid CTE (vector + FTS + RRF)
+8. Rename `semantic_search` tool → `search`; keep `semantic_search` as deprecated alias for one release
+9. `search` tool gains optional `language` parameter; `get_knowledge` gains optional `language` filter
+10. Write tools (`remember`, `add_context`, `learn_pattern`) gain optional `language` parameter
+11. **Evaluate lifting the 500-char content truncation** in `embeddings.py:212-217` (new): benchmark with full content vs 500-char cap, ship whichever wins
+12. Backfill migration: detect language on existing ~700 entries via lingua-py
+13. Unsupported-language alert infrastructure
+14. FTS weight validation benchmark: confirm A/B/C weighting is correct for awareness data
+15. **Sovereignty framework scaffolding** (new):
     - **`data_sovereignty` field on entries**: optional `Literal["strict"]` value in `entry.data`, with room for future values. Validation at write time; unknown values raise a structured error listing valid values.
     - **Write-tool parameter**: every write tool (`remember`, `add_context`, `learn_pattern`, `update_entry`, `report_alert`, `report_status`, `remind`) gains an optional `data_sovereignty` parameter. Documented in each tool's docstring so agents see it in the schema.
     - **`update_entry` sticky semantics** (see "Sticky semantics" in the sovereignty policy section): when `update_entry` is called without an explicit `data_sovereignty` parameter, the existing value is preserved. Tag changes alone cannot clear `data_sovereignty="strict"` — only an explicit `data_sovereignty=None` (or future "unset" sentinel) on a write can clear it. Test coverage must include: tag-add coerces to strict; tag-remove does NOT re-evaluate; explicit clear works.
@@ -647,14 +728,14 @@ API accepts `'en'`, `'ja'`, `'es'`, etc. Server maps to `regconfig` at the bound
     - **Deployment-time mismatch warning**: at startup, if any sovereignty trigger is configured (non-empty `AWARENESS_SOVEREIGNTY_STRICT_TAGS`, OR any existing entry has `data_sovereignty="strict"`) and no trust-anchor-B target is available, fire `report_alert(level="warning", alert_id="sovereignty-degraded-deployment")` — dismissable only via `acted_on`.
     - Document the framework in user docs (README section + deployment guide).
     - **Behavior change scope:** Phase 1 implements the framework with Ollama-local as the default provider. The routing helper is a no-op for today's awareness because all current providers are trust-anchor-B. The framework is in place, ready to activate when cloud providers are added in later phases.
-15. **`get_info` tool implementation** (#235, bundled into Phase 1 — see note below):
+16. **`get_info` tool implementation** (#235, bundled into Phase 1 — see note below):
     - New MCP tool returning version, uptime, node, transport mode, stateless flag, enabled features, recent changelog
     - Exposes extraction and embedding provider URL, classification (`B`/`C`/`U`), and any contract/trust-anchor reference the operator supplied
     - First-time-seen briefing notice plumbing: server detects new provider configuration at startup (compared against a persisted last-seen config), fires a one-shot `report_alert` that is dismissable via `acted_on`
     - Recurring briefing warning plumbing: server detects any `U`-classified provider and fires a persistent `report_alert` until resolved
     - Exposed via `get_info` so users can check the current state on demand without waiting for the briefing
-16. Test coverage: vector branch, FTS branch, fusion, language resolution, regconfig validation, alert firing, sovereignty helpers, trust-anchor classification (URL allowlist + env var overrides + deployment mismatch warning), `get_info` output
-17. Dogfooding regression test: the vision doc query surfaces the vision doc *and asserts the FTS branch is what rescued it* (not a false-positive rescue from vector)
+17. Test coverage: vector branch, FTS branch, fusion, language resolution, regconfig validation, alert firing, sovereignty helpers, trust-anchor classification (URL allowlist + env var overrides + deployment mismatch warning), `get_info` output
+18. Dogfooding regression test: the vision doc query surfaces the vision doc *and asserts the FTS branch is what rescued it* (not a false-positive rescue from vector)
 
 **Note on #235 bundling.** Issue #235 (`get_info` tool) was originally planned as an independent feature ("small, well-scoped, natural next pick"). Round-2 QA review identified that the Phase 1 sovereignty acceptance criteria depend on `get_info` being present as a consent surface. Rather than split sovereignty scaffolding across two phases, **#235 is bundled into Phase 1 scope** so the sovereignty framework ships with its consent surface intact. The bundled scope is still manageable: `get_info` is a small tool that reads already-available server state, and the sovereignty plumbing naturally fits alongside it.
 
@@ -671,14 +752,36 @@ API accepts `'en'`, `'ja'`, `'es'`, etc. Server maps to `regconfig` at the bound
 9. nomic remains a config fallback
 10. README + deployment guide updates
 
-### Phase 3 — pgroonga extension
+### Phase 3 — Non-Western language extension install (mechanism selected in Phase 1.05)
+
+Phase 3 installs whichever extension Phase 1.05 selects. The steps below are written for the three open options; only one branch executes.
+
+**If Phase 1.05 selects "per-language parser extensions":**
+
+1. Postgres base image swap (or install step) for zhparser (Chinese, verified in the design doc's Layer 1 section) + equivalents for Japanese, Korean, Hebrew once verified
+2. Alembic: `CREATE EXTENSION zhparser` (+ the others selected)
+3. `CREATE TEXT SEARCH CONFIGURATION chinese_fts (PARSER = zhparser)` with the ADD MAPPING call; equivalents for other languages
+4. LXC install docs for non-Docker production deploys (extension install sources per language)
+5. Test coverage with CJK/Hebrew sample content, one assertion per language
+6. **This phase can run in parallel with Phase 1 or Phase 2** — independent concern
+
+**If Phase 1.05 selects "pgroonga with branched query path":**
 
 1. Postgres base image swap: `groonga/pgroonga:latest-alpine-17`
 2. Alembic: `CREATE EXTENSION pgroonga`
-3. Create text search configurations for japanese, chinese_simplified, chinese_traditional, korean, hebrew
-4. LXC install docs for non-Docker production deploys (install pgroonga from Groonga apt repo)
-5. Test coverage with CJK sample content
-6. **This phase can run in parallel with Phase 1 or Phase 2** — independent concern
+3. Redesign Layer 1's lexical CTE arm to branch by language — standard FTS for stock regconfigs, pgroonga's `&@` operator for CJK + Hebrew rows
+4. Add pgroonga indexes alongside the `tsv` GIN indexes on searchable columns
+5. LXC install docs for non-Docker production deploys (install pgroonga from Groonga apt repo)
+6. Test coverage with CJK sample content covering the branched query path
+7. **Cannot run in parallel with Phase 1** under this option — the branched CTE is a Layer 1 design change that must land together
+
+**If Phase 1.05 selects "defer non-Western from Layer 1":**
+
+Phase 3 is a wiring-PR-follow-on, not blocked by it. Layer 1 ships with stock-language-only support. Add to Phase 3:
+
+1. Re-run the extension evaluation (per-language parser extensions vs pgroonga branched path) with measured data from the shipped Layer 1
+2. Pick a mechanism and apply the corresponding branch above
+3. Ship CJK + Hebrew support as a follow-up release
 
 ### Phase 4 — Layer 3: Proposition extraction (experimental)
 
@@ -743,9 +846,13 @@ API accepts `'en'`, `'ja'`, `'es'`, etc. Server maps to `regconfig` at the bound
 - Backfill is the most expensive one-time operation.
 - Extraction prompt is production code requiring maintenance.
 
-### pgroonga — Low
+### Non-Western FTS extension — Low-Medium (raised after #246 QA review)
 
-~150MB image-size increase. New operational dependency for CJK support. Extension install on non-Docker deploys (LXC production) needs documentation and a Groonga apt repo source configured.
+Extension choice is open pending Phase 1.05 (see "pgroonga regconfig integration is unverified" in the Layer 1 section). Risk level depends on which option Phase 1.05 selects:
+
+- **Per-language parser extensions (zhparser + equivalents):** Low per-language, but the number of extensions to install, package, and maintain scales with language count. Japanese / Korean / Hebrew parser extensions are not yet verified — if equivalents don't exist or aren't maintained, affected languages fall back to `'simple'`.
+- **pgroonga with branched CTE:** Medium. Branched query path adds real complexity to Layer 1's retrieval CTE and requires two indexes per searchable column. ~150MB image-size increase. New operational dependency. Branched CTE is harder to reason about and harder to benchmark than the single-path design.
+- **Defer from Layer 1:** Low. Zero operational cost on Layer 1 shipping; CJK + Hebrew become a follow-on release. The tradeoff is that Layer 1's language-support story has a visible hole.
 
 ## Deployment compatibility and interface localization
 
@@ -764,9 +871,11 @@ Most of this design runs unchanged on managed Postgres services. Specifically, t
 
 **Phase 1 and Phase 2 ship on managed Postgres with zero issues.** Anyone deploying awareness on AWS/GCP/Azure can use the managed service for Postgres and run awareness itself on EC2/EKS/Fargate/GKE/AKS/Cloud Run — standard modern cloud deployment.
 
-### Phase 3 (`pgroonga` CJK support) is incompatible with managed Postgres
+### Phase 3 (non-Western language support) is likely incompatible with managed Postgres
 
-**`pgroonga` is not available on AWS RDS, Aurora, GCP Cloud SQL, or Azure Database.** It is a third-party extension that the managed-database providers do not include in their supported extension lists as of this design's date. This is a managed-Postgres ecosystem limitation, not something we can resolve server-side.
+**Neither `pgroonga` nor `zhparser` is available on AWS RDS, Aurora, GCP Cloud SQL, or Azure Database.** Both are third-party extensions that the managed-database providers do not include in their supported extension lists as of this design's date. This is a managed-Postgres ecosystem limitation, not something we can resolve server-side — and it holds regardless of which mechanism Phase 1.05 selects. If Phase 1.05 chooses per-language parser extensions, Japanese / Korean / Hebrew equivalents are expected to have the same managed-Postgres gap once they're identified.
+
+The sections below are written against pgroonga as a concrete example; substitute the chosen extension(s) after Phase 1.05 and the analysis carries forward.
 
 **Deployment matrix for CJK language support:**
 
@@ -898,4 +1007,5 @@ These two hooks are tracked as **[#242](https://github.com/cmeans/mcp-awareness/
 - Postgres full-text search docs — https://www.postgresql.org/docs/current/textsearch.html
 - Postgres text search configurations — https://www.postgresql.org/docs/current/textsearch-configuration.html
 - pgroonga — https://pgroonga.github.io/
+- zhparser (Chinese FTS parser extension, verified counter-example for Phase 1.05) — https://github.com/amutu/zhparser
 - lingua-py — https://github.com/pemistahl/lingua-py
