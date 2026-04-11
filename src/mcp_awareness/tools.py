@@ -351,8 +351,12 @@ async def learn_pattern(
     NOT for general facts, project notes, or personal knowledge — use remember for those.
     Quick test: does it have a "when X happens, expect Y"? -> learn_pattern. Otherwise -> remember.
     Any agent can write; any agent can read. Knowledge is portable across platforms.
-    Returns JSON with status and entry id. If you receive an unstructured
-    error, the failure is in the transport or platform layer, not in awareness."""
+
+    Returns:
+        JSON: {"status": "ok", "id": "<uuid>"}
+
+    If you receive an unstructured error, the failure is in the transport
+    or platform layer, not in awareness."""
     now = now_utc()
     entry = Entry(
         id=make_id(),
@@ -370,7 +374,7 @@ async def learn_pattern(
     )
     _srv.store.add(_srv._owner_id(), entry)
     _srv._generate_embedding(entry)
-    return json.dumps({"status": "ok", "id": entry.id, "description": description})
+    return json.dumps({"status": "ok", "id": entry.id})
 
 
 @_srv.mcp.tool()
@@ -396,8 +400,16 @@ async def remember(
     same source + logical_key exists, it will be updated in place (with changelog
     tracking) instead of creating a duplicate. Use for living documents like
     project status notes.
-    Returns JSON with status and entry id. If you receive an unstructured
-    error, the failure is in the transport or platform layer, not in awareness."""
+
+    Returns:
+        JSON: {"status": "ok", "id": "<uuid>"} for normal calls.
+        When logical_key is provided, additionally includes
+        "action": "created" | "updated" — presence of the field signals
+        the upsert path was taken; "updated" means logical_key matched
+        an existing entry.
+
+    If you receive an unstructured error, the failure is in the transport
+    or platform layer, not in awareness."""
     now = now_utc()
     data: dict[str, Any] = {
         "description": description,
@@ -426,12 +438,10 @@ async def remember(
         )
         _srv._generate_embedding(result)
         action = "created" if created else "updated"
-        return json.dumps(
-            {"status": "ok", "id": result.id, "action": action, "description": description}
-        )
+        return json.dumps({"status": "ok", "id": result.id, "action": action})
     _srv.store.add(_srv._owner_id(), entry)
     _srv._generate_embedding(entry)
-    return json.dumps({"status": "ok", "id": entry.id, "description": description})
+    return json.dumps({"status": "ok", "id": entry.id})
 
 
 @_srv.mcp.tool()
@@ -606,15 +616,21 @@ async def set_preference(
     """Set a presentation preference. Portable across agent platforms.
     Use this for preferences like alert_verbosity='one_sentence_warnings'
     or check_frequency='first_turn_only'. These are portable —
-    any agent on any platform reads the same preferences."""
-    _srv.store.upsert_preference(
+    any agent on any platform reads the same preferences.
+
+    Returns:
+        JSON: {"status": "ok", "id": "<uuid>", "key": "<key>", "scope": "<scope>"}
+        key + scope form the compound upsert handle and are retained so
+        callers can confirm which preference was acted on. The stored
+        value is not echoed back."""
+    entry = _srv.store.upsert_preference(
         _srv._owner_id(),
         key=key,
         scope=scope,
         tags=[],
         data={"key": key, "value": value, "scope": scope},
     )
-    return json.dumps({"status": "ok", "key": key, "value": value, "scope": scope})
+    return json.dumps({"status": "ok", "id": entry.id, "key": key, "scope": scope})
 
 
 @_srv.mcp.tool()
@@ -787,8 +803,17 @@ async def acted_on(
     platform: your platform name (e.g., 'claude-code', 'claude.ai').
     detail: optional structured reference (PR URL, issue number, etc.).
     tags: optional — defaults to copying tags from the referenced entry.
-    This tool always returns structured JSON. If you receive an unstructured
-    error, the failure is in the transport or platform layer, not in awareness."""
+
+    Returns:
+        JSON: {"status": "ok", "id": "<action_record_id>",
+               "entry_id": "<source_entry_id>", "action": "<action_label>",
+               "timestamp": "<iso8601>"}
+        action is the caller-supplied effect label (the substance of the
+        action record, not echoed payload). entry_id is retained as the
+        primary handle linking the action back to its source entry.
+
+    If you receive an unstructured error, the failure is in the transport
+    or platform layer, not in awareness."""
     result = _srv.store.log_action(
         _srv._owner_id(),
         entry_id=entry_id,
@@ -799,7 +824,15 @@ async def acted_on(
     )
     if result.get("status") == "error":
         return json.dumps(result)
-    return json.dumps({"status": "ok", **result}, indent=2)
+    return json.dumps(
+        {
+            "status": "ok",
+            "id": result["id"],
+            "entry_id": result["entry_id"],
+            "action": result["action"],
+            "timestamp": result["timestamp"],
+        }
+    )
 
 
 @_srv.mcp.tool()
@@ -982,7 +1015,13 @@ async def update_intention(
     reason: optional explanation (e.g., 'completed at Mariano\\'s', 'not today').
     Use 'active' when you've started working on it, 'completed' when done,
     'snoozed' to defer, 'cancelled' to permanently dismiss.
-    This tool always returns structured JSON."""
+
+    Returns:
+        JSON: {"status": "ok", "id": "<entry_id>"}
+        id is the caller-supplied entry_id, retained as the lookup handle
+        (not a server-generated id). The new state is not echoed back —
+        the caller already knows what they sent, and validation errors
+        surface as structured errors before the store is touched."""
     from .schema import INTENTION_STATES
 
     _validate_enum(state, "state", INTENTION_STATES)
@@ -995,7 +1034,7 @@ async def update_intention(
             param="entry_id",
             value=entry_id,
         )
-    return json.dumps({"status": "ok", "id": entry_id, "state": state, "reason": reason}, indent=2)
+    return json.dumps({"status": "ok", "id": entry_id})
 
 
 @_srv.mcp.tool()

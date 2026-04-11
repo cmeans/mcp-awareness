@@ -21,6 +21,7 @@ from __future__ import annotations
 import json
 import os
 import threading
+from typing import ClassVar
 
 import psycopg
 import pytest
@@ -653,9 +654,11 @@ class TestLearnPatternTool:
         )
         data = json.loads(result)
         assert data["status"] == "ok"
-        assert data["description"] == "qBittorrent stops on Fridays"
+        assert "id" in data
+        assert "description" not in data
         patterns = _store().get_patterns(TEST_OWNER, "nas")
         assert len(patterns) == 1
+        assert patterns[0].data["description"] == "qBittorrent stops on Fridays"
         assert patterns[0].data["conditions"] == {"day_of_week": "friday"}
         assert patterns[0].data["learned_from"] == "conversation"
 
@@ -812,9 +815,15 @@ class TestSetPreferenceTool:
         )
         data = json.loads(result)
         assert data["status"] == "ok"
+        assert "id" in data
         assert data["key"] == "alert_verbosity"
-        assert data["value"] == "one_sentence"
         assert data["scope"] == "global"
+        assert "value" not in data
+        # The stored value lives in the entry, not the response
+        from mcp_awareness.schema import EntryType
+
+        entries = _store().get_entries(TEST_OWNER, entry_type=EntryType.PREFERENCE)
+        assert entries[0].data["value"] == "one_sentence"
 
     @pytest.mark.anyio
     async def test_set_preference_upserts(self) -> None:
@@ -842,7 +851,9 @@ class TestSetPreferenceTool:
             scope="nas",
         )
         data = json.loads(result)
+        assert data["status"] == "ok"
         assert data["scope"] == "nas"
+        assert "id" in data
 
 
 # ---------------------------------------------------------------------------
@@ -2231,8 +2242,20 @@ class TestReadActionTracking:
             )
         )
         assert result["status"] == "ok"
+        assert "id" in result
+        assert result["entry_id"] == entry.id
         assert result["action"] == "created issue #42"
-        assert result["tags"] == ["project"]  # copied from entry
+        assert "timestamp" in result
+        # Dropped echoes — no longer in the response shape
+        assert "platform" not in result
+        assert "detail" not in result
+        assert "tags" not in result
+        # Verify the action was still recorded with all metadata via get_actions
+        actions = json.loads(await server_mod.get_actions(entry_id=entry.id))["entries"]
+        assert len(actions) == 1
+        assert actions[0]["platform"] == "claude-code"
+        assert actions[0]["detail"] == "https://github.com/example/42"
+        assert actions[0]["tags"] == ["project"]
 
     @pytest.mark.anyio
     async def test_acted_on_invalid_entry(self) -> None:
@@ -2582,7 +2605,12 @@ class TestIntentionTools:
         # Fire it
         fired = json.loads(await server_mod.update_intention(entry_id=entry_id, state="fired"))
         assert fired["status"] == "ok"
-        assert fired["state"] == "fired"
+        assert fired["id"] == entry_id
+        assert "state" not in fired
+        assert "reason" not in fired
+        # Verify the state was actually applied via get_intentions
+        fired_list = json.loads(await server_mod.get_intentions(state="fired"))["entries"]
+        assert any(i["id"] == entry_id for i in fired_list)
         # Complete it
         completed = json.loads(
             await server_mod.update_intention(
@@ -2590,7 +2618,12 @@ class TestIntentionTools:
             )
         )
         assert completed["status"] == "ok"
-        assert completed["state"] == "completed"
+        assert completed["id"] == entry_id
+        assert "state" not in completed
+        assert "reason" not in completed
+        # Verify the completed state via get_intentions
+        completed_list = json.loads(await server_mod.get_intentions(state="completed"))["entries"]
+        assert any(i["id"] == entry_id for i in completed_list)
 
     @pytest.mark.anyio
     async def test_update_intention_invalid_state(self) -> None:
@@ -3533,12 +3566,19 @@ def test_fallback_user_on_getpass_failure(monkeypatch):
     """When getpass.getuser() fails, _fallback_user resolves to 'system'."""
     import importlib
 
+    from mcp_awareness import tools as tools_mod
+
     monkeypatch.setattr("getpass.getuser", lambda: (_ for _ in ()).throw(OSError("no tty")))
     monkeypatch.delenv("AWARENESS_DEFAULT_OWNER", raising=False)
     importlib.reload(server_mod)
     assert server_mod.DEFAULT_OWNER == "system"
-    # Restore
+    # Restore — reload server, then reload tools so the @mcp.tool() decorators
+    # re-bind to the fresh FastMCP instance. Without this, server_mod.mcp
+    # ends up with an empty tool registry and other tests that introspect it
+    # (e.g., TestWriteResponseShapes::test_exemption_registry_no_stale_entries)
+    # see no registered write tools and fail.
     importlib.reload(server_mod)
+    importlib.reload(tools_mod)
 
 
 # ---------------------------------------------------------------------------
@@ -3754,3 +3794,264 @@ class TestToolLevelInjectionSafety:
         # Should succeed with 0 deleted, not execute injection
         assert result["status"] == "ok"
         assert result["trashed"] == 0
+
+
+# ---------------------------------------------------------------------------
+# Write-tool response-shape regression tests (#243)
+# ---------------------------------------------------------------------------
+
+
+class TestWriteResponseShapes:
+    """Sentinel-scan regression tests for write-tool response payload echoes (#243).
+
+    Wraps caller-supplied STRING inputs in recognizable sentinels, walks each
+    write tool's response, and asserts no sentinel appears at any path that
+    does not terminate at an exempt key. ``ECHO_EXEMPTIONS`` is the executable
+    spec for what counts as a primary handle (allowed to round-trip) vs
+    payload echo (forbidden).
+
+    Limitation: only catches STRING echoes. If a future write tool ever
+    echoes a numeric or boolean payload field, this test will not detect it.
+    The current 13 write tools only echo strings; numeric inputs (TTLs,
+    counts) are not echoed back. A future contributor adding an echoed
+    numeric field must broaden the test machinery here.
+    """
+
+    # Per-tool exemption registry — the executable spec for what counts as
+    # a handle vs payload. Add new write tools here. The completeness tests
+    # below cross-check this against the FastMCP tool registry.
+    ECHO_EXEMPTIONS: ClassVar[dict[str, set[str]]] = {
+        "report_status": {"source"},  # upsert key
+        "report_alert": {"alert_id"},  # upsert key
+        "learn_pattern": set(),
+        "remember": set(),  # `action` (when present) is server-derived, not exempt-listed
+        "update_entry": set(),
+        "suppress_alert": set(),
+        "add_context": set(),
+        "set_preference": {"key", "scope"},  # compound upsert key
+        "delete_entry": {  # IDOR contract from #234 + bulk-mode confirmation UX
+            "entry_id",
+            "tags",
+            "source",
+            "entry_type",
+        },
+        "restore_entry": {"entry_id", "tags"},  # handles
+        "acted_on": {"entry_id", "action"},  # handle + caller-supplied effect label
+        "remind": set(),
+        # "id" here means the caller-supplied entry_id (lookup target),
+        # NOT a server-generated entry id like other tools' responses
+        "update_intention": {"id"},
+    }
+
+    # Tools registered on _srv.mcp that are NOT write tools — explicitly
+    # excluded so the completeness test passes. Updating this list is the
+    # only thing required when a new READ tool is added.
+    _NON_WRITE_TOOLS: ClassVar[set[str]] = {
+        "get_briefing",
+        "get_alerts",
+        "get_status",
+        "get_knowledge",
+        "get_suppressions",
+        "get_stats",
+        "get_tags",
+        "get_deleted",
+        "get_reads",
+        "get_actions",
+        "get_unread",
+        "get_activity",
+        "get_intentions",
+        "semantic_search",
+        "backfill_embeddings",
+        "get_related",
+    }
+
+    @staticmethod
+    def _sentinel(sentinels: set[str], label: str) -> str:
+        """Mint a unique sentinel string and register it for later scanning."""
+        import uuid
+
+        val = f"SNTL_{label}_{uuid.uuid4().hex[:8]}"
+        sentinels.add(val)
+        return val
+
+    @staticmethod
+    def _find_leaks(
+        obj: object,
+        sentinels: set[str],
+        exempt_keys: set[str],
+        containing_key: str | None = None,
+    ) -> list[tuple[str | None, str]]:
+        """Walk obj recursively; return [(containing_key, sentinel)] for
+        sentinel string values whose enclosing dict key is not in exempt_keys.
+
+        ``containing_key`` is the most recent dict key on the descent path.
+        Walking into a list preserves the containing key, so a sentinel value
+        inside ``response["tags"][0]`` is guarded by the ``tags`` exemption,
+        not by a synthetic list-index path element.
+        """
+        leaks: list[tuple[str | None, str]] = []
+        if isinstance(obj, str):
+            if obj in sentinels and containing_key not in exempt_keys:
+                leaks.append((containing_key, obj))
+        elif isinstance(obj, dict):
+            for k, v in obj.items():
+                leaks.extend(
+                    TestWriteResponseShapes._find_leaks(
+                        v, sentinels, exempt_keys, containing_key=str(k)
+                    )
+                )
+        elif isinstance(obj, list):
+            for v in obj:
+                # Preserve containing_key when descending into a list — the
+                # exemption applies to values nested inside an exempt field.
+                leaks.extend(
+                    TestWriteResponseShapes._find_leaks(
+                        v, sentinels, exempt_keys, containing_key=containing_key
+                    )
+                )
+        return leaks
+
+    async def _invoke_with_sentinels(self, tool_name: str, sentinels: set[str]) -> str:
+        """Per-tool sentinel-wrapped invocation. Each branch creates whatever
+        prerequisites the tool needs, sentinel-wraps every string payload field,
+        and returns the raw JSON response."""
+        s = self._sentinel
+        if tool_name == "report_status":
+            return await server_mod.report_status(
+                source=s(sentinels, "source"),
+                tags=[s(sentinels, "tag")],
+                metrics={"cpu": 50},
+            )
+        if tool_name == "report_alert":
+            return await server_mod.report_alert(
+                source=s(sentinels, "src"),
+                tags=[s(sentinels, "tag")],
+                alert_id=s(sentinels, "alert_id"),
+                level="warning",
+                alert_type="threshold",
+                message=s(sentinels, "msg"),
+            )
+        if tool_name == "learn_pattern":
+            return await server_mod.learn_pattern(
+                source=s(sentinels, "src"),
+                tags=[s(sentinels, "tag")],
+                description=s(sentinels, "desc"),
+                effect=s(sentinels, "effect"),
+            )
+        if tool_name == "remember":
+            return await server_mod.remember(
+                source=s(sentinels, "src"),
+                tags=[s(sentinels, "tag")],
+                description=s(sentinels, "desc"),
+            )
+        if tool_name == "update_entry":
+            created = await server_mod.remember(source="setup", tags=["setup"], description="setup")
+            eid = json.loads(created)["id"]
+            return await server_mod.update_entry(
+                entry_id=eid,
+                description=s(sentinels, "desc"),
+                tags=[s(sentinels, "tag")],
+            )
+        if tool_name == "suppress_alert":
+            return await server_mod.suppress_alert(
+                source=s(sentinels, "src"),
+                tags=[s(sentinels, "tag")],
+                metric=s(sentinels, "metric"),
+                reason=s(sentinels, "reason"),
+            )
+        if tool_name == "add_context":
+            return await server_mod.add_context(
+                source=s(sentinels, "src"),
+                tags=[s(sentinels, "tag")],
+                description=s(sentinels, "desc"),
+            )
+        if tool_name == "set_preference":
+            return await server_mod.set_preference(
+                key=s(sentinels, "key"),
+                value=s(sentinels, "value"),
+                scope=s(sentinels, "scope"),
+            )
+        if tool_name == "delete_entry":
+            # Bulk dry-run mode exercises the tags exemption (echoed for
+            # operator confirmation UX). The single-id mode's IDOR contract
+            # is verified by existing tests in TestDeleteEntryTool.
+            return await server_mod.delete_entry(tags=[s(sentinels, "tag")])
+        if tool_name == "restore_entry":
+            # Tags-mode restore exercises the tags exemption
+            tag = s(sentinels, "tag")
+            created = await server_mod.remember(source="setup", tags=[tag], description="setup")
+            eid = json.loads(created)["id"]
+            await server_mod.delete_entry(entry_id=eid)
+            return await server_mod.restore_entry(tags=[tag])
+        if tool_name == "acted_on":
+            created = await server_mod.remember(source="setup", tags=["setup"], description="setup")
+            eid = json.loads(created)["id"]
+            return await server_mod.acted_on(
+                entry_id=eid,
+                action=s(sentinels, "action"),
+                platform=s(sentinels, "platform"),
+                detail=s(sentinels, "detail"),
+                tags=[s(sentinels, "tag")],
+            )
+        if tool_name == "remind":
+            return await server_mod.remind(
+                goal=s(sentinels, "goal"),
+                source=s(sentinels, "src"),
+                tags=[s(sentinels, "tag")],
+                constraints=s(sentinels, "constraints"),
+            )
+        if tool_name == "update_intention":
+            created = await server_mod.remind(goal="setup", source="setup", tags=["setup"])
+            eid = json.loads(created)["id"]
+            # state must be a valid INTENTION_STATE — can't sentinel-wrap
+            return await server_mod.update_intention(
+                entry_id=eid,
+                state="fired",
+                reason=s(sentinels, "reason"),
+            )
+        raise ValueError(f"Unknown tool in registry: {tool_name}")
+
+    @pytest.mark.anyio
+    @pytest.mark.parametrize("tool_name", sorted(ECHO_EXEMPTIONS.keys()))
+    async def test_no_caller_input_echoed(self, tool_name: str) -> None:
+        """For each write tool, no caller-supplied string appears in the
+        response under a non-exempt key."""
+        sentinels: set[str] = set()
+        raw = await self._invoke_with_sentinels(tool_name, sentinels)
+        response = json.loads(raw)
+        exempt = self.ECHO_EXEMPTIONS[tool_name]
+        leaks = self._find_leaks(response, sentinels, exempt)
+        assert not leaks, (
+            f"{tool_name} echoed caller payload at non-exempt path(s): {leaks}. "
+            f"Either drop the echo or add the field name to ECHO_EXEMPTIONS"
+            f"['{tool_name}'] if it is a primary handle."
+        )
+
+    def test_write_tool_registry_complete(self) -> None:
+        """Every write tool registered on _srv.mcp must be in ECHO_EXEMPTIONS.
+
+        Catches the failure mode where a new write tool is added but its
+        response-shape contract is never declared.
+        """
+        registered = set(server_mod.mcp._tool_manager._tools.keys())
+        write_tools = registered - self._NON_WRITE_TOOLS
+        missing = write_tools - set(self.ECHO_EXEMPTIONS.keys())
+        assert not missing, (
+            f"Write tools missing from ECHO_EXEMPTIONS: {sorted(missing)}. "
+            f"Add each to ECHO_EXEMPTIONS (with its exempt handles, if any) "
+            f"and add a sentinel-wrapped invocation in _invoke_with_sentinels. "
+            f"If the new tool is a READ tool, add it to _NON_WRITE_TOOLS instead."
+        )
+
+    def test_exemption_registry_no_stale_entries(self) -> None:
+        """Every key in ECHO_EXEMPTIONS must correspond to a registered tool.
+
+        Catches stale entries when tools are renamed or removed.
+        """
+        registered = set(server_mod.mcp._tool_manager._tools.keys())
+        stale = set(self.ECHO_EXEMPTIONS.keys()) - registered
+        assert not stale, (
+            f"Stale ECHO_EXEMPTIONS entries (tool no longer registered): "
+            f"{sorted(stale)}. Remove from ECHO_EXEMPTIONS and from "
+            f"_invoke_with_sentinels."
+        )

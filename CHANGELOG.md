@@ -10,6 +10,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - **Design doc** — `docs/design/hybrid-retrieval-multilingual.md` — three-layer design for hybrid retrieval (vector + Postgres FTS + RRF), multilingual embeddings, and experimental proposition extraction. Closes the framing of [#195](https://github.com/cmeans/mcp-awareness/issues/195) in favor of a lower-blast-radius approach. Tracked by [#238](https://github.com/cmeans/mcp-awareness/issues/238), [#239](https://github.com/cmeans/mcp-awareness/issues/239), [#240](https://github.com/cmeans/mcp-awareness/issues/240). Amended 2026-04-10 after round-1 QA review and a sourcing audit.
+- **Design doc** — `docs/superpowers/specs/2026-04-10-trim-write-tool-responses-design.md` — pragmatic interpretation B (drop payload echoes, keep handles) for write-tool response shapes. Pre-cursor for Layer 1 of [#238](https://github.com/cmeans/mcp-awareness/issues/238). Tracks [#243](https://github.com/cmeans/mcp-awareness/issues/243).
+- **`TestWriteResponseShapes`** test class — sentinel-scan parametrized over every write tool plus two registry-completeness tests. Catches regressions when a future write tool echoes caller-supplied payload fields. The `ECHO_EXEMPTIONS` registry doubles as the executable spec for what counts as a primary handle vs a payload echo ([#243](https://github.com/cmeans/mcp-awareness/issues/243)).
+
+### Changed
+- **perf:** trim echoed input from write-tool responses to reduce token waste ([#243](https://github.com/cmeans/mcp-awareness/issues/243)). Five tools change; eight retain handles or server-derived fields only. Static `action` strings are dropped because they carry zero information on tools whose value is hard-coded.
+  - `learn_pattern` no longer echoes `description`; now returns `{status, id}`
+  - `remember` no longer echoes `description`; now returns `{status, id}` on the normal path, or `{status, id, action}` (`created`|`updated`) when `logical_key` is provided. Presence of `action` itself signals the upsert path was taken.
+  - `set_preference` no longer echoes `value`; now returns `{status, id, key, scope}`. The new `id` field is the entry id of the stored preference (captured from `upsert_preference`); `key`+`scope` are retained as the compound upsert handle.
+  - `acted_on` no longer echoes `platform`/`detail`/`tags`; now returns `{status, id, entry_id, action, timestamp}`. `action` is the caller-supplied effect label (the substance of the action record), kept as documentation of what the call recorded.
+  - `update_intention` no longer echoes `state` or `reason`; now returns `{status, id}`. Verified in code that `state` was a pure pass-through with no coercion or auto-advancement, making it textbook echoed input.
+  - **Breaking for clients that read these fields from write responses.** The data is trivially recoverable (caller already has it). The eight unchanged write tools (`report_status`, `report_alert`, `update_entry`, `suppress_alert`, `add_context`, `delete_entry`, `restore_entry`, `remind`) keep their existing shapes — handles or server-derived fields only.
 
 ## [0.16.2] - 2026-04-09
 
