@@ -66,12 +66,12 @@ SIMPLE: Final[str] = "simple"
 #: which are not part of ISO 639-1.  Postgres has no
 #: ``chinese_traditional`` regconfig either; pgroonga only ships
 #: ``chinese_simplified``.  Both Simplified and Traditional Chinese text
-#: therefore route to ``chinese_simplified``.  pgroonga's
-#: ``chinese_simplified`` analyzer uses character-based segmentation
-#: (MeCab-style), which operates on Han characters regardless of variant
-#: form, so tokenization should work for both — but this has not been
-#: verified end-to-end against real Traditional text and is tracked as a
-#: QA verification item for the wiring PR.
+#: therefore route to ``chinese_simplified``.  Whether pgroonga's
+#: ``chinese_simplified`` analyzer handles Traditional script consistently
+#: depends on which Groonga tokenizer it wraps and how that tokenizer
+#: treats Han variants — neither has been verified against this codebase.
+#: End-to-end verification against real Traditional Chinese text is
+#: tracked as a QA item for the wiring PR.
 ISO_639_1_TO_REGCONFIG: Final[dict[str, str]] = {
     # Built into stock Postgres
     "ar": "arabic",
