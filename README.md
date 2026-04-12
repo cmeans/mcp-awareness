@@ -405,6 +405,18 @@ For single-user deployments, secret path + WAF is sufficient. For multi-user, en
 - Request timing instrumentation and `/health` endpoint
 - Comprehensive test suite (all against real Postgres + Ollama in CI), strict type checking, CI pipeline with coverage, QA gate
 
+### Upgrading
+
+When upgrading to a release with hybrid retrieval (Layer 1), running `mcp-awareness-migrate upgrade head` applies two migrations:
+
+1. **Schema migration** — adds `language` (regconfig) and `tsv` (generated tsvector) columns to the entries table, plus GIN and partial indexes. Fast (DDL only).
+2. **Language backfill** — runs lingua-py detection on all existing entries and updates the `language` column where a known language is detected. This is a one-time data migration that may take longer than usual on the first deploy:
+   - lingua's first call loads ~300MB of n-gram models (multi-second startup cost)
+   - Each existing entry is processed for language detection
+   - If `lingua-language-detector` is not installed, the backfill is skipped and entries remain as `simple` (FTS still works, just without language-specific stemming)
+
+The `semantic_search` tool continues to work as a deprecated alias for the new `search` tool. Update your agent prompts to use `search` — the alias will be removed in a future release.
+
 ### Not yet implemented
 - Layer 2 (baseline) detection — rolling averages and deviation calculation
 
