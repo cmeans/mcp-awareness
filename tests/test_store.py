@@ -2547,6 +2547,37 @@ class TestHybridRetrieval:
         assert store._valid_regconfigs == {"simple"}
         store._pool = original  # restore
 
+    def test_update_entry_validates_regconfig(self, store):
+        """update_entry validates the language regconfig before writing."""
+        entry = Entry(
+            id=make_id(),
+            type=EntryType.NOTE,
+            source="test",
+            tags=["a"],
+            created=now_utc(),
+            data={"description": "test"},
+        )
+        store.add(TEST_OWNER, entry)
+        result = store.update_entry(TEST_OWNER, entry.id, {"language": "klingon"})
+        assert result is not None
+        assert result.language == "simple"
+
+    def test_upsert_by_logical_key_validates_regconfig(self, store):
+        """upsert_by_logical_key validates language on the INSERT path."""
+        entry = Entry(
+            id=make_id(),
+            type=EntryType.NOTE,
+            source="test",
+            tags=["a"],
+            created=now_utc(),
+            data={"description": "test"},
+            logical_key="regconfig-test",
+            language="klingon",
+        )
+        result, created = store.upsert_by_logical_key(TEST_OWNER, "test", "regconfig-test", entry)
+        assert created
+        assert result.language == "simple"
+
 
 class TestConcurrency:
     """Tests for concurrency patterns: connection pool, cleanup threading, concurrent writes."""

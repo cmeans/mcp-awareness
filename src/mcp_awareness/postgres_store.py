@@ -638,7 +638,7 @@ class PostgresStore:
                 setattr(entry, field, updates[field])
         if "language" in updates and updates["language"] != entry.language:
             changed["language"] = entry.language
-            entry.language = updates["language"]
+            entry.language = self.validate_regconfig(updates["language"])
         for field in ("description", "content", "content_type"):
             if field in updates and updates[field] != entry.data.get(field):
                 old_val = entry.data.get(field)
@@ -678,6 +678,7 @@ class PostgresStore:
         existing-row fetch, and conditional update all share one connection
         and transaction to avoid pool contention under concurrency.
         """
+        entry.language = self.validate_regconfig(entry.language)
         with self._pool.connection() as conn, conn.transaction(), conn.cursor() as cur:
             self._set_rls_context(cur, owner_id)
             # Attempt insert; on conflict, return inserted=false
