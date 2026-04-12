@@ -998,6 +998,20 @@ class TestGetKnowledgeTool:
         assert entries[0]["data"]["description"] == "personal pattern"
 
     @pytest.mark.anyio
+    async def test_get_knowledge_filtered_by_language(self) -> None:
+        await server_mod.remember(
+            source="test", tags=["lang"], description="English note", language="en"
+        )
+        await server_mod.remember(
+            source="test", tags=["lang"], description="French note", language="fr"
+        )
+        result = await server_mod.get_knowledge(language="fr")
+        entries = json.loads(result)["entries"]
+        assert len(entries) == 1
+        assert entries[0]["data"]["description"] == "French note"
+        assert entries[0]["language"] == "french"
+
+    @pytest.mark.anyio
     async def test_get_knowledge_filtered_by_entry_type(self) -> None:
         await server_mod.learn_pattern(source="nas", tags=["infra"], description="a pattern")
         await server_mod.add_context(source="nas", tags=["infra"], description="a context")

@@ -550,6 +550,7 @@ class PostgresStore:
         learned_from: str | None = None,
         created_after: datetime | None = None,
         created_before: datetime | None = None,
+        language: str | None = None,
         limit: int | None = None,
         offset: int | None = None,
     ) -> list[Entry]:
@@ -589,6 +590,9 @@ class PostgresStore:
         if created_before is not None:
             clauses.append(psql.SQL("created <= %s"))
             params.append(created_before)
+        if language is not None:
+            clauses.append(psql.SQL("language = %s::regconfig"))
+            params.append(language)
         where = psql.SQL(" AND ").join(clauses)
         # Push LIMIT/OFFSET to SQL unless include_history="only" (post-filter changes count)
         sql_limit = limit if include_history != "only" else None
