@@ -288,7 +288,7 @@ async def get_knowledge(
                         embedding=hint_vec[0],
                         model=provider.model_name,
                         query_text=hint,
-                        query_language="simple",
+                        query_language=SIMPLE,
                         source=source,
                         tags=tags,
                         entry_type=hint_et,
@@ -1157,7 +1157,7 @@ async def search(
     since_dt = _validate_timestamp(since, "since")
     until_dt = _validate_timestamp(until, "until")
     et = _parse_entry_type(entry_type)
-    query_language = iso_to_regconfig(language) if language else "simple"
+    query_language = iso_to_regconfig(language) if language else SIMPLE
     provider = _srv._get_embedding_provider()
     if not provider.is_available():
         _error_response(

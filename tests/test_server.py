@@ -30,6 +30,7 @@ from psycopg import sql as psql
 
 from mcp_awareness import server as server_mod
 from mcp_awareness.embeddings import OllamaEmbedding
+from mcp_awareness.language import SIMPLE
 from mcp_awareness.postgres_store import PostgresStore
 from mcp_awareness.schema import Entry, EntryType, make_id, now_utc
 from mcp_awareness.store import Store
@@ -1017,7 +1018,7 @@ class TestGetKnowledgeTool:
             source="test", tags=["lang"], description="English note", language="en"
         )
         await server_mod.remember(source="test", tags=["lang"], description="Simple note")
-        result = await server_mod.get_knowledge(language="simple")
+        result = await server_mod.get_knowledge(language=SIMPLE)
         entries = json.loads(result)["entries"]
         assert len(entries) == 1
         assert entries[0]["data"]["description"] == "Simple note"
@@ -1421,7 +1422,7 @@ class TestUpdateEntryTool:
         assert data["status"] == "ok"
         entries = json.loads(await server_mod.get_knowledge(include_history="true"))["entries"]
         assert entries[0].get("language") == "french"
-        assert entries[0]["data"]["changelog"][0]["changed"]["language"] == "simple"
+        assert entries[0]["data"]["changelog"][0]["changed"]["language"] == SIMPLE
 
     @pytest.mark.anyio
     async def test_update_noop_same_value(self) -> None:
@@ -1501,7 +1502,7 @@ class TestUnsupportedLanguageAlert:
         import mcp_awareness.tools as tools_mod
 
         # Mock resolve_language to return 'simple' (simulating unmapped detection)
-        monkeypatch.setattr(tools_mod, "resolve_language", lambda **kwargs: "simple")
+        monkeypatch.setattr(tools_mod, "resolve_language", lambda **kwargs: SIMPLE)
         # Mock detect_language_iso to return 'ja' (simulating Japanese detection)
         monkeypatch.setattr(tools_mod, "detect_language_iso", lambda text: "ja")
         await server_mod.remember(
@@ -1535,7 +1536,7 @@ class TestUnsupportedLanguageAlert:
         """If alert firing fails, the write still succeeds."""
         import mcp_awareness.tools as tools_mod
 
-        monkeypatch.setattr(tools_mod, "resolve_language", lambda **kwargs: "simple")
+        monkeypatch.setattr(tools_mod, "resolve_language", lambda **kwargs: SIMPLE)
         monkeypatch.setattr(tools_mod, "detect_language_iso", lambda text: "ja")
         original_upsert = _store().upsert_alert
         monkeypatch.setattr(

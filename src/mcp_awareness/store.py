@@ -25,6 +25,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Protocol, runtime_checkable
 
+from .language import SIMPLE
 from .schema import Entry, EntryType
 
 # How long soft-deleted entries remain recoverable before auto-purge
@@ -325,7 +326,7 @@ class Store(Protocol):
         embedding: list[float],
         model: str,
         query_text: str = "",
-        query_language: str = "simple",
+        query_language: str = SIMPLE,
         entry_type: EntryType | None = None,
         source: str | None = None,
         tags: list[str] | None = None,

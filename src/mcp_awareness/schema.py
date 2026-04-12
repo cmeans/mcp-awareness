@@ -24,6 +24,8 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
 
+from .language import SIMPLE
+
 
 class EntryType(str, Enum):
     STATUS = "status"
@@ -108,7 +110,7 @@ class Entry:
     expires: datetime | None = None
     data: dict[str, Any] = field(default_factory=dict)
     logical_key: str | None = None
-    language: str = "simple"
+    language: str = SIMPLE
 
     def to_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = {
@@ -123,7 +125,7 @@ class Entry:
         }
         if self.logical_key is not None:
             d["logical_key"] = self.logical_key
-        if self.language != "simple":
+        if self.language != SIMPLE:
             d["language"] = self.language
         return d
 
@@ -167,7 +169,7 @@ class Entry:
             expires=ensure_dt_optional(d.get("expires")),
             data=d.get("data", {}),
             logical_key=d.get("logical_key"),
-            language=d.get("language", "simple"),
+            language=d.get("language", SIMPLE),
         )
 
     def is_expired(self) -> bool:

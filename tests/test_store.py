@@ -22,10 +22,10 @@ import time
 
 import pytest
 
+from mcp_awareness.language import SIMPLE
 from mcp_awareness.schema import Entry, EntryType, make_id, now_utc
 
 TEST_OWNER = "test-owner"
-SIMPLE = "simple"
 
 # store fixture comes from conftest.py (testcontainers Postgres)
 
