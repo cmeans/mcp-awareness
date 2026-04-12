@@ -1531,6 +1531,27 @@ class TestUnsupportedLanguageAlert:
         assert len(lang_alerts) == 0
 
     @pytest.mark.anyio
+    async def test_alert_failure_does_not_break_write(self, monkeypatch) -> None:
+        """If alert firing fails, the write still succeeds."""
+        import mcp_awareness.tools as tools_mod
+
+        monkeypatch.setattr(tools_mod, "resolve_language", lambda **kwargs: "simple")
+        monkeypatch.setattr(tools_mod, "detect_language_iso", lambda text: "ja")
+        original_upsert = _store().upsert_alert
+        monkeypatch.setattr(
+            _store(), "upsert_alert", lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("boom"))
+        )
+        result = await server_mod.remember(
+            source="test",
+            tags=["lang"],
+            description="Long enough text for detection to trigger the alert path",
+        )
+        data = json.loads(result)
+        assert data["status"] == "ok"
+        # Restore for other tests
+        monkeypatch.setattr(_store(), "upsert_alert", original_upsert)
+
+    @pytest.mark.anyio
     async def test_no_alert_when_explicit_language_set(self) -> None:
         """When caller sets language explicitly, no alert fires even if text is foreign."""
         await server_mod.remember(

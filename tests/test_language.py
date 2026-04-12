@@ -338,3 +338,12 @@ class TestDetectLanguageIso:
                 "日本語のサンプルテキストです。これは十分に長いテストテキストです。"
             )
             assert iso == "ja"
+
+    def test_returns_none_when_detection_uncertain(self) -> None:
+        """When lingua returns None (uncertain), detect_language_iso returns None."""
+        mock_detector = type("MockDetector", (), {"detect_language_of": lambda self, t: None})()
+        with patch.object(lang_mod, "_get_detector", return_value=mock_detector):
+            assert (
+                lang_mod.detect_language_iso("Some ambiguous text that confuses the detector")
+                is None
+            )
