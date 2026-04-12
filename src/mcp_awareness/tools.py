@@ -199,9 +199,25 @@ async def get_knowledge(
     created_after_dt = _validate_timestamp(created_after, "created_after")
     created_before_dt = _validate_timestamp(created_before, "created_before")
     et = _parse_entry_type(entry_type)
-    from .language import iso_to_regconfig
+    from .language import ISO_639_1_TO_REGCONFIG, iso_to_regconfig
 
-    lang_regconfig = iso_to_regconfig(language) if language else None
+    lang_regconfig: str | None = None
+    if language:
+        normalized = language.strip().lower()
+        if normalized == "simple":
+            lang_regconfig = "simple"
+        elif normalized not in ISO_639_1_TO_REGCONFIG:
+            _error_response(
+                "invalid_parameter",
+                f"Unknown language code: '{language}'. Use ISO 639-1 codes "
+                f"(e.g., 'en', 'fr', 'de'). Use language='simple' to filter "
+                f"entries with no detected language.",
+                retryable=False,
+                param="language",
+                value=language,
+            )
+        else:
+            lang_regconfig = iso_to_regconfig(language)
     entries = _srv.store.get_knowledge(
         _srv._owner_id(),
         tags=tags,

@@ -1012,6 +1012,14 @@ class TestGetKnowledgeTool:
         assert entries[0]["language"] == "french"
 
     @pytest.mark.anyio
+    async def test_get_knowledge_language_unknown_code_errors(self) -> None:
+        with pytest.raises(ToolError) as exc_info:
+            await server_mod.get_knowledge(language="xx")
+        body = _parse_tool_error(exc_info)
+        assert body["error"]["code"] == "invalid_parameter"
+        assert "Unknown language code" in body["error"]["message"]
+
+    @pytest.mark.anyio
     async def test_get_knowledge_filtered_by_entry_type(self) -> None:
         await server_mod.learn_pattern(source="nas", tags=["infra"], description="a pattern")
         await server_mod.add_context(source="nas", tags=["infra"], description="a context")
