@@ -139,6 +139,7 @@ class PostgresStore:
             expires=ensure_dt_optional(row["expires"]),
             data=data,
             logical_key=row.get("logical_key"),
+            language=row.get("language", "simple"),
         )
 
     def _insert_entry(self, cur: psycopg.Cursor[Any], owner_id: str, entry: Entry) -> None:
@@ -155,6 +156,7 @@ class PostgresStore:
                 json.dumps(entry.tags),
                 json.dumps(entry.data),
                 entry.logical_key,
+                entry.language,
             ),
         )
 
@@ -604,6 +606,9 @@ class PostgresStore:
             if field in updates and updates[field] != getattr(entry, field):
                 changed[field] = getattr(entry, field)
                 setattr(entry, field, updates[field])
+        if "language" in updates and updates["language"] != entry.language:
+            changed["language"] = entry.language
+            entry.language = updates["language"]
         for field in ("description", "content", "content_type"):
             if field in updates and updates[field] != entry.data.get(field):
                 old_val = entry.data.get(field)
@@ -627,6 +632,7 @@ class PostgresStore:
                     entry.source,
                     json.dumps(entry.tags),
                     json.dumps(entry.data),
+                    entry.language,
                     entry.id,
                     owner_id,
                 ),
@@ -658,6 +664,7 @@ class PostgresStore:
                     json.dumps(entry.tags),
                     json.dumps(entry.data),
                     entry.logical_key,
+                    entry.language,
                 ),
             )
             row = cur.fetchone()
@@ -715,6 +722,7 @@ class PostgresStore:
                         old.source,
                         json.dumps(old.tags),
                         json.dumps(old.data),
+                        old.language,
                         old.id,
                         owner_id,
                     ),
@@ -1255,6 +1263,8 @@ class PostgresStore:
         owner_id: str,
         embedding: list[float],
         model: str,
+        query_text: str = "",
+        query_language: str = "simple",
         entry_type: EntryType | None = None,
         source: str | None = None,
         tags: list[str] | None = None,
@@ -1262,35 +1272,59 @@ class PostgresStore:
         until: datetime | None = None,
         limit: int = 10,
     ) -> list[tuple[Entry, float]]:
-        """Search entries by vector similarity, with optional filters.
+        """Hybrid search: vector + FTS fused via Reciprocal Rank Fusion.
 
-        Returns (entry, similarity_score) pairs sorted by relevance.
-        Similarity is 1 - cosine_distance (higher = more similar).
+        Returns (entry, rrf_score) pairs sorted by fused relevance.
+        Either branch may return zero rows — the CTE degrades gracefully.
         """
         vector_literal = "[" + ",".join(str(v) for v in embedding) + "]"
-        clauses: list[psql.SQL] = [psql.SQL("e.owner_id = %s"), psql.SQL("e.deleted IS NULL")]
-        params: list[Any] = [model, vector_literal, owner_id]
+
+        # Build WHERE clauses shared by both CTE branches
+        clauses: list[psql.SQL] = [
+            psql.SQL("e.owner_id = %s"),
+            psql.SQL("e.deleted IS NULL"),
+        ]
+        filter_params: list[Any] = [owner_id]
         if entry_type is not None:
             clauses.append(psql.SQL("e.type = %s"))
-            params.append(entry_type.value)
+            filter_params.append(entry_type.value)
         if source is not None:
             clauses.append(psql.SQL("e.source = %s"))
-            params.append(source)
+            filter_params.append(source)
         if tags:
             for t in tags:
                 clauses.append(psql.SQL("e.tags @> %s::jsonb"))
-                params.append(json.dumps([t]))
+                filter_params.append(json.dumps([t]))
         if since is not None:
             clauses.append(psql.SQL("COALESCE(e.updated, e.created) >= %s"))
-            params.append(since)
+            filter_params.append(since)
         if until is not None:
             clauses.append(psql.SQL("COALESCE(e.updated, e.created) <= %s"))
-            params.append(until)
+            filter_params.append(until)
         where = psql.SQL(" AND ").join(clauses)
-        params.append(limit)
+
         query = psql.SQL(_load_sql("semantic_search")).format(where=where)
-        # query_vector (similarity), model, ...filters, query_vector (ORDER BY), limit
-        ordered_params = [vector_literal, model, *params[2:-1], vector_literal, limit]
+
+        # Positional params match the SQL template after {where} expansion:
+        #   1: query_vector (vector_hits ROW_NUMBER window)
+        #   2: model (embeddings JOIN)
+        #   [filter_params for vector_hits WHERE]
+        #   3: query_vector (vector_hits ORDER BY — after WHERE)
+        #   4: query_language (plainto_tsquery regconfig)
+        #   5: query_text (plainto_tsquery input)
+        #   [filter_params for lexical_hits WHERE — duplicated]
+        #   6: limit
+        ordered_params: list[Any] = [
+            vector_literal,
+            model,
+            *filter_params,
+            vector_literal,
+            query_language,
+            query_text,
+            *filter_params,
+            limit,
+        ]
+
         with self._pool.connection() as conn, conn.transaction(), conn.cursor() as cur:
             self._set_rls_context(cur, owner_id)
             cur.execute(query, tuple(ordered_params))

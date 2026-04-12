@@ -1380,6 +1380,17 @@ class TestUpdateEntryTool:
         assert "No fields" in body["error"]["message"]
 
     @pytest.mark.anyio
+    async def test_update_language(self) -> None:
+        result = await server_mod.remember(source="personal", tags=["test"], description="bonjour")
+        entry_id = json.loads(result)["id"]
+        update_result = await server_mod.update_entry(entry_id=entry_id, language="fr")
+        data = json.loads(update_result)
+        assert data["status"] == "ok"
+        entries = json.loads(await server_mod.get_knowledge(include_history="true"))["entries"]
+        assert entries[0].get("language") == "french"
+        assert entries[0]["data"]["changelog"][0]["changed"]["language"] == "simple"
+
+    @pytest.mark.anyio
     async def test_update_noop_same_value(self) -> None:
         result = await server_mod.remember(source="personal", tags=["test"], description="same")
         entry_id = json.loads(result)["id"]
@@ -2876,7 +2887,9 @@ class TestSemanticSearchTool:
         assert len(result) >= 1
         assert result[0]["id"] == entry.id
         assert "similarity" in result[0]
-        assert result[0]["similarity"] > 0.99
+        # RRF score: 1/(60+rnk) per branch, summed. Exact value depends on
+        # how many branches match; just verify it's positive and reasonable.
+        assert result[0]["similarity"] > 0
 
     @pytest.mark.anyio
     async def test_search_list_mode(self, monkeypatch) -> None:

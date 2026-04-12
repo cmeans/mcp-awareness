@@ -5,12 +5,12 @@
    the insert becomes a no-op and returns inserted=false. The caller then
    computes a diff and calls update_entry if needed.
    Params: id, owner_id, type, source, created, updated, expires, tags (jsonb),
-           data (jsonb), logical_key
+           data (jsonb), logical_key, language (regconfig)
    Returns: inserted (boolean) — true if row was inserted, false if conflict
 */
 INSERT INTO entries
-   (id, owner_id, type, source, created, updated, expires, tags, data, logical_key)
-   VALUES (%s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s::jsonb, %s)
+   (id, owner_id, type, source, created, updated, expires, tags, data, logical_key, language)
+   VALUES (%s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s::jsonb, %s, %s::regconfig)
    ON CONFLICT (owner_id, source, logical_key)
        WHERE logical_key IS NOT NULL AND deleted IS NULL
    DO UPDATE SET id = entries.id

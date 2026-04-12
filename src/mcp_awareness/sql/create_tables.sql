@@ -41,7 +41,14 @@ CREATE TABLE IF NOT EXISTS entries (
     deleted  TIMESTAMPTZ,
     tags     JSONB NOT NULL DEFAULT '[]',
     data     JSONB NOT NULL DEFAULT '{{}}'::jsonb,
-    logical_key TEXT
+    logical_key TEXT,
+    language regconfig NOT NULL DEFAULT 'simple',
+    tsv      tsvector GENERATED ALWAYS AS (
+        setweight(to_tsvector(language, coalesce(data->>'description', '')), 'A') ||
+        setweight(to_tsvector(language, coalesce(data->>'content', '')), 'B') ||
+        setweight(to_tsvector(language, coalesce(data->>'goal', '')), 'B') ||
+        setweight(to_tsvector(language, coalesce(translate(tags::text, '[]"', '   '), '')), 'C')
+    ) STORED
 );
 CREATE INDEX IF NOT EXISTS idx_entries_owner
     ON entries(owner_id);
@@ -56,6 +63,10 @@ CREATE INDEX IF NOT EXISTS idx_entries_tags_gin
 CREATE UNIQUE INDEX IF NOT EXISTS idx_entries_source_logical_key
     ON entries(owner_id, source, logical_key)
     WHERE logical_key IS NOT NULL AND deleted IS NULL;
+CREATE INDEX IF NOT EXISTS idx_entries_tsv
+    ON entries USING GIN (tsv);
+CREATE INDEX IF NOT EXISTS idx_entries_language
+    ON entries(language) WHERE language != 'simple'::regconfig;
 
 CREATE TABLE IF NOT EXISTS reads (
     id       SERIAL PRIMARY KEY,

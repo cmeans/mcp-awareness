@@ -323,6 +323,8 @@ class Store(Protocol):
         owner_id: str,
         embedding: list[float],
         model: str,
+        query_text: str = "",
+        query_language: str = "simple",
         entry_type: EntryType | None = None,
         source: str | None = None,
         tags: list[str] | None = None,
@@ -330,7 +332,7 @@ class Store(Protocol):
         until: datetime | None = None,
         limit: int = 10,
     ) -> list[tuple[Entry, float]]:
-        """Search entries by vector similarity. Returns (entry, score) pairs sorted by relevance."""
+        """Hybrid search: vector + FTS fused via RRF. Returns (entry, score) pairs."""
         ...
 
     def get_referencing_entries(self, owner_id: str, entry_id: str) -> list[Entry]:
