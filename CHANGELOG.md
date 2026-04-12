@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Language backfill migration** — Alembic data migration detects language on existing entries via lingua-py and updates the `language` column. Processes in batches, idempotent, gracefully skips if lingua is not installed. Refs [#263](https://github.com/cmeans/mcp-awareness/issues/263), [#238](https://github.com/cmeans/mcp-awareness/issues/238).
 - **`get_knowledge` language filter** — optional `language` parameter (ISO 639-1) filters entries by their stored regconfig. Refs [#262](https://github.com/cmeans/mcp-awareness/issues/262), [#238](https://github.com/cmeans/mcp-awareness/issues/238).
 - **`search` tool** — renamed from `semantic_search` to reflect the hybrid vector + FTS nature. `semantic_search` remains as a deprecated alias (delegates to `search`) and will be removed in a future release. Refs [#261](https://github.com/cmeans/mcp-awareness/issues/261), [#238](https://github.com/cmeans/mcp-awareness/issues/238).
 - **Regconfig validation cache** — `PostgresStore` caches valid Postgres regconfig names from `pg_ts_config` at startup. Write-time validation falls back to `'simple'` for invalid regconfigs (with one cache-refresh retry in case an extension was installed after startup). Prevents INSERT failures from invalid `language` values reaching the generated `tsv` column. Refs [#260](https://github.com/cmeans/mcp-awareness/issues/260), [#238](https://github.com/cmeans/mcp-awareness/issues/238).
