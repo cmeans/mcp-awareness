@@ -204,7 +204,7 @@ The server is running on port 8420. Point any MCP client at `http://localhost:84
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `AWARENESS_EMBEDDING_PROVIDER` | _(none)_ | Set to `ollama` to enable semantic search. Without it, all features work except `semantic_search` and `backfill_embeddings`. |
+| `AWARENESS_EMBEDDING_PROVIDER` | _(none)_ | Set to `ollama` to enable the vector branch of hybrid search. Without it, `search` uses FTS only and `backfill_embeddings` is unavailable. |
 | `AWARENESS_EMBEDDING_MODEL` | `nomic-embed-text` | Ollama model name for embeddings. Must match the model pulled in the Ollama container. |
 | `AWARENESS_OLLAMA_URL` | `http://ollama:11434` | Ollama API endpoint. Default works with Docker Compose; change for external Ollama instances. |
 | `AWARENESS_EMBEDDING_DIMENSIONS` | `768` | Vector dimensions. Must match the model output. Only change if using a non-default model. |
@@ -301,7 +301,8 @@ The server exposes 29 MCP tools. Clients that support MCP resources also get 6 r
 | `get_unread` | Entries with zero reads. Cleanup candidates or missed knowledge. |
 | `get_activity` | Combined read + action feed, chronological. |
 | `get_related` | Bidirectional entry relationships — entries referenced via `related_ids` and entries that reference the given entry. |
-| `semantic_search` | Find entries by meaning using vector similarity (pgvector + Ollama). Combines with tag/source/type/date filters. Requires embedding provider. |
+| `search` | Hybrid search — finds entries by meaning (vector) and by exact terms (FTS), fused via Reciprocal Rank Fusion. Combines with tag/source/type/date/language filters. Requires embedding provider for vector branch; FTS works without it. |
+| `semantic_search` | Deprecated alias for `search`. Will be removed in a future release. |
 
 ### Write tools
 
@@ -350,7 +351,7 @@ For single-user deployments, secret path + WAF is sufficient. For multi-user, en
 ### Getting started
 - **One-line demo install** — `curl | bash` sets up Awareness + Postgres + Cloudflare quick tunnel with pre-loaded demo data and a `getting-started` prompt that personalizes your instance
 - **Published Docker images** — `ghcr.io/cmeans/mcp-awareness` (GHCR) and Docker Hub, auto-built on release tags
-- **Optional semantic search** — add `AWARENESS_EMBEDDING_PROVIDER=ollama` and `docker compose --profile embeddings up -d` for vector similarity search
+- **Optional embedding provider** — add `AWARENESS_EMBEDDING_PROVIDER=ollama` and `docker compose --profile embeddings up -d` to enable the vector branch of hybrid search. FTS works without it
 - **CLI tools** — `mcp-awareness-user` (user management), `mcp-awareness-token` (JWT generation), `mcp-awareness-secret` (signing secret generation)
 
 ### Knowledge store
