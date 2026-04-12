@@ -132,6 +132,7 @@ class Store(Protocol):
         learned_from: str | None = None,
         created_after: datetime | None = None,
         created_before: datetime | None = None,
+        language: str | None = None,
         limit: int | None = None,
         offset: int | None = None,
     ) -> list[Entry]:

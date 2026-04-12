@@ -148,6 +148,7 @@ async def get_knowledge(
     mode: str | None = None,
     limit: int | None = None,
     offset: int | None = None,
+    language: str | None = None,
 ) -> str:
     """Get knowledge entries: learned patterns, historical context, preferences, notes.
     Knowledge belongs to the system, not any specific agent. Call when you need
@@ -175,6 +176,9 @@ async def get_knowledge(
     description, tags, created, updated — no content or changelog). Use 'list'
     to orient before pulling full entries.
     Use limit/offset for pagination (e.g., limit=10, offset=0 for first page).
+    language: optional ISO 639-1 code to filter entries by their stored language
+    (e.g., language='fr' returns only French entries). Useful for "show me all
+    entries in language X" queries.
     Results are sorted by most recently updated first (or by relevance if hint is set).
     This tool always returns JSON with a status field or an entry list.
     If you receive an unstructured error, the failure is in the transport
@@ -195,6 +199,25 @@ async def get_knowledge(
     created_after_dt = _validate_timestamp(created_after, "created_after")
     created_before_dt = _validate_timestamp(created_before, "created_before")
     et = _parse_entry_type(entry_type)
+    from .language import ISO_639_1_TO_REGCONFIG, SIMPLE, iso_to_regconfig
+
+    lang_regconfig: str | None = None
+    if language:
+        normalized = language.strip().lower()
+        if normalized == SIMPLE:
+            lang_regconfig = SIMPLE
+        elif normalized not in ISO_639_1_TO_REGCONFIG:
+            _error_response(
+                "invalid_parameter",
+                f"Unknown language code: '{language}'. Use ISO 639-1 codes "
+                f"(e.g., 'en', 'fr', 'de'). Use language='simple' to filter "
+                f"entries with no detected language.",
+                retryable=False,
+                param="language",
+                value=language,
+            )
+        else:
+            lang_regconfig = iso_to_regconfig(language)
     entries = _srv.store.get_knowledge(
         _srv._owner_id(),
         tags=tags,
@@ -206,6 +229,7 @@ async def get_knowledge(
         learned_from=learned_from,
         created_after=created_after_dt,
         created_before=created_before_dt,
+        language=lang_regconfig,
         limit=limit + 1,
         offset=offset,
     )
