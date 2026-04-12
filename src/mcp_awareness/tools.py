@@ -60,6 +60,12 @@ def _check_unsupported_language(text: str, resolved: str) -> None:
     Only fires when: resolved == 'simple' (fallback) AND lingua detected a specific
     language that has no regconfig. This signals demand for a language the server
     doesn't support, informing the Phase 3 reactivation decision.
+
+    Note: this re-runs lingua detection via detect_language_iso() after
+    resolve_language() already ran it. The double call is intentional —
+    lingua caches internally, the cost is negligible, and threading the
+    raw ISO code through resolve_language would complicate its API for
+    a rare-path optimization.
     """
     if resolved != "simple":
         return
