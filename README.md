@@ -282,7 +282,7 @@ Results from the initial run (2026-03-27): HNSW query P50 stays under 4ms from 5
 
 ## Tools
 
-The server exposes 29 MCP tools. Clients that support MCP resources also get 6 read-only resources, but since not all clients surface resources, every resource has a tool mirror.
+The server exposes 30 MCP tools. Clients that support MCP resources also get 6 read-only resources, but since not all clients surface resources, every resource has a tool mirror.
 
 ### Read tools
 
