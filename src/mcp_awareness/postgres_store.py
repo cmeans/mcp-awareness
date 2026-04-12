@@ -84,7 +84,9 @@ class PostgresStore:
         self._last_cleanup: float = 0.0
         self._cleanup_interval: float = 10.0
         self._cleanup_thread: threading.Thread | None = None
+        self._valid_regconfigs: set[str] = set()
         self._create_tables()
+        self._load_regconfigs()
 
     def _create_tables(self) -> None:
         ddl = psql.SQL(_load_sql("create_tables")).format(
@@ -95,6 +97,33 @@ class PostgresStore:
             cur.execute(ddl)
         # Note: schema migrations are managed by Alembic (see alembic/ directory).
         # Run `alembic upgrade head` before starting the server on a new database.
+
+    def _load_regconfigs(self) -> None:
+        """Cache valid Postgres regconfig names from pg_ts_config."""
+        try:
+            with self._pool.connection() as conn, conn.cursor() as cur:
+                cur.execute("SELECT cfgname FROM pg_ts_config")
+                self._valid_regconfigs = {row["cfgname"] for row in cur.fetchall()}
+            logger.debug("Loaded %d regconfigs from pg_ts_config", len(self._valid_regconfigs))
+        except Exception:
+            logger.warning("Failed to load regconfigs from pg_ts_config", exc_info=True)
+            self._valid_regconfigs = {"simple"}
+
+    def validate_regconfig(self, regconfig: str) -> str:
+        """Validate a regconfig name against the cached pg_ts_config set.
+
+        Returns the regconfig if valid, or ``'simple'`` if not. On a cache
+        miss, reloads from pg_ts_config once (an extension may have been
+        installed after startup) before falling back.
+        """
+        if regconfig in self._valid_regconfigs:
+            return regconfig
+        # Reload once in case an extension was installed after startup
+        self._load_regconfigs()
+        if regconfig in self._valid_regconfigs:
+            return regconfig
+        logger.warning("Regconfig %r not in pg_ts_config, falling back to 'simple'", regconfig)
+        return "simple"
 
     # ------------------------------------------------------------------
     # RLS context helper
@@ -143,6 +172,7 @@ class PostgresStore:
         )
 
     def _insert_entry(self, cur: psycopg.Cursor[Any], owner_id: str, entry: Entry) -> None:
+        entry.language = self.validate_regconfig(entry.language)
         cur.execute(
             _load_sql("insert_entry"),
             (

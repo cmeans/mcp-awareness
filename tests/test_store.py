@@ -2502,6 +2502,37 @@ class TestHybridRetrieval:
         d = entry.to_dict()
         assert "language" not in d
 
+    def test_validate_regconfig_valid(self, store):
+        """Valid regconfig names pass through validation."""
+        assert store.validate_regconfig("english") == "english"
+        assert store.validate_regconfig("simple") == "simple"
+        assert store.validate_regconfig("french") == "french"
+
+    def test_validate_regconfig_invalid_falls_back(self, store):
+        """Invalid regconfig names fall back to 'simple'."""
+        assert store.validate_regconfig("klingon") == "simple"
+        assert store.validate_regconfig("japanese") == "simple"
+
+    def test_insert_with_invalid_regconfig_falls_back(self, store):
+        """Inserting an entry with an invalid regconfig silently falls back to 'simple'."""
+        entry = Entry(
+            id=make_id(),
+            type=EntryType.NOTE,
+            source="test",
+            tags=["regconfig"],
+            created=now_utc(),
+            data={"description": "test with bad regconfig"},
+            language="nonexistent_language",
+        )
+        store.add(TEST_OWNER, entry)
+        found = store.get_entry_by_id(TEST_OWNER, entry.id)
+        assert found is not None
+        assert found.language == "simple"
+
+    def test_regconfigs_loaded_at_init(self, store):
+        """The regconfig cache is populated at store initialization."""
+        assert len(store._valid_regconfigs) >= 29  # 28 snowball + simple
+
 
 class TestConcurrency:
     """Tests for concurrency patterns: connection pool, cleanup threading, concurrent writes."""
