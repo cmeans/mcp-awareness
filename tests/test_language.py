@@ -300,3 +300,41 @@ class TestDetectorCaching:
         with patch.object(lang_mod, "_get_detector", return_value=None):
             text = "The quick brown fox jumps over the lazy dog and runs."
             assert lang_mod.detect_language(text) is None
+
+
+class TestDetectLanguageIso:
+    """Tests for detect_language_iso — raw ISO code detection."""
+
+    def test_returns_none_for_short_text(self) -> None:
+        assert lang_mod.detect_language_iso("hi") is None
+
+    def test_returns_none_for_empty_text(self) -> None:
+        assert lang_mod.detect_language_iso("") is None
+
+    def test_returns_none_when_detector_unavailable(self) -> None:
+        with patch.object(lang_mod, "_get_detector", return_value=None):
+            assert lang_mod.detect_language_iso("A long enough text for detection") is None
+
+    def test_returns_iso_for_mapped_language(self) -> None:
+        """When lingua detects a mapped language, returns its ISO code."""
+        mock_result = type("MockLang", (), {"iso_code_639_1": type("Code", (), {"name": "EN"})()})()
+        mock_detector = type(
+            "MockDetector", (), {"detect_language_of": lambda self, t: mock_result}
+        )()
+        with patch.object(lang_mod, "_get_detector", return_value=mock_detector):
+            assert (
+                lang_mod.detect_language_iso("A sufficiently long English text for detection")
+                == "en"
+            )
+
+    def test_returns_iso_for_unmapped_language(self) -> None:
+        """When lingua detects an unmapped language (e.g., Japanese), still returns its ISO code."""
+        mock_result = type("MockLang", (), {"iso_code_639_1": type("Code", (), {"name": "JA"})()})()
+        mock_detector = type(
+            "MockDetector", (), {"detect_language_of": lambda self, t: mock_result}
+        )()
+        with patch.object(lang_mod, "_get_detector", return_value=mock_detector):
+            iso = lang_mod.detect_language_iso(
+                "日本語のサンプルテキストです。これは十分に長いテストテキストです。"
+            )
+            assert iso == "ja"

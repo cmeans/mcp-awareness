@@ -1494,6 +1494,56 @@ class TestUpdateEntryTool:
         assert changelog[1]["changed"]["description"] == "v2"
 
 
+class TestUnsupportedLanguageAlert:
+    @pytest.mark.anyio
+    async def test_fires_alert_for_unmapped_language(self, monkeypatch) -> None:
+        """When lingua detects a language not in the mapping, an alert is fired."""
+        import mcp_awareness.tools as tools_mod
+
+        # Mock resolve_language to return 'simple' (simulating unmapped detection)
+        monkeypatch.setattr(tools_mod, "resolve_language", lambda **kwargs: "simple")
+        # Mock detect_language_iso to return 'ja' (simulating Japanese detection)
+        monkeypatch.setattr(tools_mod, "detect_language_iso", lambda text: "ja")
+        await server_mod.remember(
+            source="test",
+            tags=["lang"],
+            description="This is a long enough test sentence for language detection to trigger",
+        )
+        alerts = _store().get_active_alerts(TEST_OWNER)
+        lang_alerts = [a for a in alerts if "unsupported-language" in a.data.get("alert_id", "")]
+        assert len(lang_alerts) == 1
+        assert lang_alerts[0].data["detected_iso"] == "ja"
+        assert lang_alerts[0].data["level"] == "info"
+
+    @pytest.mark.anyio
+    async def test_no_alert_when_language_is_mapped(self, monkeypatch) -> None:
+        """When lingua detects a mapped language, no alert is fired."""
+        import mcp_awareness.tools as tools_mod
+
+        monkeypatch.setattr(tools_mod, "detect_language_iso", lambda text: "en")
+        await server_mod.remember(
+            source="test",
+            tags=["lang"],
+            description="This is a long enough English test sentence for detection",
+        )
+        alerts = _store().get_active_alerts(TEST_OWNER)
+        lang_alerts = [a for a in alerts if "unsupported-language" in a.data.get("alert_id", "")]
+        assert len(lang_alerts) == 0
+
+    @pytest.mark.anyio
+    async def test_no_alert_when_explicit_language_set(self) -> None:
+        """When caller sets language explicitly, no alert fires even if text is foreign."""
+        await server_mod.remember(
+            source="test",
+            tags=["lang"],
+            description="日本語のテキスト。これは十分に長いテストです。",
+            language="en",
+        )
+        alerts = _store().get_active_alerts(TEST_OWNER)
+        lang_alerts = [a for a in alerts if "unsupported-language" in a.data.get("alert_id", "")]
+        assert len(lang_alerts) == 0
+
+
 class TestGetKnowledgeHistory:
     @pytest.mark.anyio
     async def test_history_stripped_by_default(self) -> None:
