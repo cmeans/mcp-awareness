@@ -41,6 +41,7 @@ from psycopg import sql as psql
 from psycopg.rows import dict_row
 from psycopg_pool import ConnectionPool
 
+from .language import SIMPLE
 from .schema import Entry, EntryType, ensure_dt, ensure_dt_optional, make_id, now_utc, to_iso
 
 # Default owner for backward compatibility — used as column DEFAULT in DDL
@@ -107,7 +108,7 @@ class PostgresStore:
             logger.debug("Loaded %d regconfigs from pg_ts_config", len(self._valid_regconfigs))
         except Exception:
             logger.warning("Failed to load regconfigs from pg_ts_config", exc_info=True)
-            self._valid_regconfigs = {"simple"}
+            self._valid_regconfigs = {SIMPLE}
 
     def validate_regconfig(self, regconfig: str) -> str:
         """Validate a regconfig name against the cached pg_ts_config set.
@@ -122,8 +123,8 @@ class PostgresStore:
         self._load_regconfigs()
         if regconfig in self._valid_regconfigs:
             return regconfig
-        logger.warning("Regconfig %r not in pg_ts_config, falling back to 'simple'", regconfig)
-        return "simple"
+        logger.warning("Regconfig %r not in pg_ts_config, falling back to %r", regconfig, SIMPLE)
+        return SIMPLE
 
     # ------------------------------------------------------------------
     # RLS context helper
@@ -168,7 +169,7 @@ class PostgresStore:
             expires=ensure_dt_optional(row["expires"]),
             data=data,
             logical_key=row.get("logical_key"),
-            language=row.get("language", "simple"),
+            language=row.get("language", SIMPLE),
         )
 
     def _insert_entry(self, cur: psycopg.Cursor[Any], owner_id: str, entry: Entry) -> None:
@@ -1295,7 +1296,7 @@ class PostgresStore:
         embedding: list[float],
         model: str,
         query_text: str = "",
-        query_language: str = "simple",
+        query_language: str = SIMPLE,
         entry_type: EntryType | None = None,
         source: str | None = None,
         tags: list[str] | None = None,
