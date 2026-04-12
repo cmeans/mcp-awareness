@@ -48,10 +48,50 @@ from .helpers import (
     _validate_pagination,
     _validate_timestamp,
 )
-from .language import resolve_language
+from .language import ISO_639_1_TO_REGCONFIG, SIMPLE, detect_language_iso, resolve_language
 from .schema import Entry, EntryType, make_id, now_utc, to_iso
 
 logger = logging.getLogger(__name__)
+
+
+def _check_unsupported_language(text: str, resolved: str) -> None:
+    """Fire an info alert when lingua detects a language not in the regconfig mapping.
+
+    Only fires when: resolved == 'simple' (fallback) AND lingua detected a specific
+    language that has no regconfig. This signals demand for a language the server
+    doesn't support, informing the Phase 3 reactivation decision.
+
+    Note: this re-runs lingua detection via detect_language_iso() after
+    resolve_language() already ran it. The double call is intentional —
+    lingua caches internally, the cost is negligible, and threading the
+    raw ISO code through resolve_language would complicate its API for
+    a rare-path optimization.
+    """
+    if resolved != SIMPLE:
+        return
+    iso = detect_language_iso(text)
+    if iso is None or iso in ISO_639_1_TO_REGCONFIG:
+        return
+    alert_id = f"unsupported-language-{iso}"
+    try:
+        _srv.store.upsert_alert(
+            _srv._owner_id(),
+            source="mcp-awareness",
+            tags=["language", "unsupported"],
+            alert_id=alert_id,
+            data={
+                "alert_id": alert_id,
+                "level": "info",
+                "alert_type": "structural",
+                "message": f"Detected language '{iso}' has no Postgres regconfig — "
+                f"entry stored with 'simple' fallback. If this language appears "
+                f"frequently, consider adding support in a future release.",
+                "resolved": False,
+                "detected_iso": iso,
+            },
+        )
+    except Exception:
+        logger.debug("Failed to fire unsupported-language alert for %s", iso, exc_info=True)
 
 
 # ---------------------------------------------------------------------------
@@ -248,7 +288,7 @@ async def get_knowledge(
                         embedding=hint_vec[0],
                         model=provider.model_name,
                         query_text=hint,
-                        query_language="simple",
+                        query_language=SIMPLE,
                         source=source,
                         tags=tags,
                         entry_type=hint_et,
@@ -388,6 +428,7 @@ async def learn_pattern(
     now = now_utc()
     text_for_detect = f"{description} {effect or ''}"
     resolved_lang = resolve_language(explicit=language, text_for_detection=text_for_detect)
+    _check_unsupported_language(text_for_detect, resolved_lang)
     entry = Entry(
         id=make_id(),
         type=EntryType.PATTERN,
@@ -456,6 +497,7 @@ async def remember(
         data["content_type"] = content_type
     text_for_detect = f"{description} {content or ''}"
     resolved_lang = resolve_language(explicit=language, text_for_detection=text_for_detect)
+    _check_unsupported_language(text_for_detect, resolved_lang)
     entry = Entry(
         id=make_id(),
         type=EntryType.NOTE,
@@ -634,6 +676,7 @@ async def add_context(
     now = now_utc()
     expires = now + timedelta(days=expires_days)
     resolved_lang = resolve_language(explicit=language, text_for_detection=description)
+    _check_unsupported_language(description, resolved_lang)
     entry = Entry(
         id=make_id(),
         type=EntryType.CONTEXT,
@@ -1002,6 +1045,7 @@ async def remind(
     now = now_utc()
     deliver_at_dt = _validate_timestamp(deliver_at, "deliver_at")
     resolved_lang = resolve_language(explicit=language, text_for_detection=goal)
+    _check_unsupported_language(goal, resolved_lang)
     entry = Entry(
         id=make_id(),
         type=EntryType.INTENTION,
@@ -1113,7 +1157,7 @@ async def search(
     since_dt = _validate_timestamp(since, "since")
     until_dt = _validate_timestamp(until, "until")
     et = _parse_entry_type(entry_type)
-    query_language = iso_to_regconfig(language) if language else "simple"
+    query_language = iso_to_regconfig(language) if language else SIMPLE
     provider = _srv._get_embedding_provider()
     if not provider.is_available():
         _error_response(

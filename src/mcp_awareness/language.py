@@ -334,6 +334,25 @@ def detect_language(text: str) -> str | None:
     return ISO_639_1_TO_REGCONFIG.get(iso)
 
 
+def detect_language_iso(text: str) -> str | None:
+    """Detect the language of text and return the raw ISO 639-1 code.
+
+    Unlike :func:`detect_language`, this returns the ISO code even when
+    it's not in :data:`ISO_639_1_TO_REGCONFIG`.  Returns ``None`` when
+    detection fails or text is too short.  Used by the unsupported-language
+    alert infrastructure to identify *which* unsupported language was detected.
+    """
+    if not text or len(text.strip()) < _MIN_DETECTION_LENGTH:
+        return None
+    detector = _get_detector()
+    if detector is None:
+        return None
+    detected = detector.detect_language_of(text)
+    if detected is None:
+        return None
+    return detected.iso_code_639_1.name.lower()
+
+
 def resolve_language(
     explicit: str | None = None,
     user_preference: str | None = None,
