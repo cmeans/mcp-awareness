@@ -2533,6 +2533,20 @@ class TestHybridRetrieval:
         """The regconfig cache is populated at store initialization."""
         assert len(store._valid_regconfigs) >= 29  # 28 snowball + simple
 
+    def test_validate_regconfig_reload_finds_after_cache_clear(self, store):
+        """After clearing cache, validate_regconfig reloads and finds valid configs."""
+        store._valid_regconfigs = set()  # simulate empty cache
+        assert store.validate_regconfig("english") == "english"
+        assert "english" in store._valid_regconfigs
+
+    def test_load_regconfigs_handles_error(self, store):
+        """_load_regconfigs falls back to {'simple'} on error."""
+        original = store._pool
+        store._pool = None  # force an error
+        store._load_regconfigs()
+        assert store._valid_regconfigs == {"simple"}
+        store._pool = original  # restore
+
 
 class TestConcurrency:
     """Tests for concurrency patterns: connection pool, cleanup threading, concurrent writes."""
