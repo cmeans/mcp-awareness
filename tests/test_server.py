@@ -1012,6 +1012,17 @@ class TestGetKnowledgeTool:
         assert entries[0]["language"] == "french"
 
     @pytest.mark.anyio
+    async def test_get_knowledge_language_simple_filter(self) -> None:
+        await server_mod.remember(
+            source="test", tags=["lang"], description="English note", language="en"
+        )
+        await server_mod.remember(source="test", tags=["lang"], description="Simple note")
+        result = await server_mod.get_knowledge(language="simple")
+        entries = json.loads(result)["entries"]
+        assert len(entries) == 1
+        assert entries[0]["data"]["description"] == "Simple note"
+
+    @pytest.mark.anyio
     async def test_get_knowledge_language_unknown_code_errors(self) -> None:
         with pytest.raises(ToolError) as exc_info:
             await server_mod.get_knowledge(language="xx")

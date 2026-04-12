@@ -199,13 +199,13 @@ async def get_knowledge(
     created_after_dt = _validate_timestamp(created_after, "created_after")
     created_before_dt = _validate_timestamp(created_before, "created_before")
     et = _parse_entry_type(entry_type)
-    from .language import ISO_639_1_TO_REGCONFIG, iso_to_regconfig
+    from .language import ISO_639_1_TO_REGCONFIG, SIMPLE, iso_to_regconfig
 
     lang_regconfig: str | None = None
     if language:
         normalized = language.strip().lower()
-        if normalized == "simple":
-            lang_regconfig = "simple"
+        if normalized == SIMPLE:
+            lang_regconfig = SIMPLE
         elif normalized not in ISO_639_1_TO_REGCONFIG:
             _error_response(
                 "invalid_parameter",
