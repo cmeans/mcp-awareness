@@ -677,23 +677,35 @@ Before defaulting to any alternative model, run `benchmarks/semantic_search_benc
 
 arabic, armenian, basque, catalan, danish, dutch, english, finnish, french, german, greek, hindi, hungarian, indonesian, irish, italian, lithuanian, nepali, norwegian, portuguese, romanian, russian, serbian, spanish, swedish, tamil, turkish, yiddish, plus `simple`.
 
-### Non-Western language support — extension choice is OPEN
+### Non-Western language support *(deferred from Layer 1, 2026-04-11)*
 
-The original design assumed pgroonga registers `japanese`, `chinese_simplified`, `chinese_traditional`, `korean`, and `hebrew` as standard Postgres regconfigs. **This assumption is unverified and likely wrong** — pgroonga's documented integration model is its own PostgreSQL index access method (`USING pgroonga`), not the standard `regconfig` registry. See "pgroonga regconfig integration is unverified" in the Layer 1 section above for the full finding.
+The original design assumed pgroonga registers `japanese`, `chinese_simplified`, `chinese_traditional`, `korean`, and `hebrew` as standard Postgres regconfigs. **This assumption was empirically disproved** on 2026-04-11 — see Substantive 3 and the "Verification results" subsection in the Layer 1 section above. pgroonga's documented integration model is its own PostgreSQL index access method (`USING pgroonga`), not the standard `regconfig` registry, and `pg_ts_config` is identical before and after `CREATE EXTENSION pgroonga`.
 
-The wiring PR's PG17 verification (Step 0 in the schema verification task) must answer this before non-Western language support can be implemented. Three options are open, all gated on that verification:
+**Phase 1.05 closed 2026-04-11 with option 3 — defer non-Western support from Layer 1.** Layer 1 ships with the 28 stock snowball regconfigs and `simple` as the fallback for everything else. CJK + Hebrew + Thai + Khmer become a deliberate follow-up release when actual demand surfaces. Rationale: at 1 month into development with no public users and no real signal on multilingual demand, the pragmatic choice is to ship Layer 1 fast on the verified pattern and revisit non-Western support as its own design pass.
 
-| Option | Extensions to install | Coverage | Query CTE complexity |
-|---|---|---|---|
-| Per-language parser extensions | zhparser (Chinese) + N more for Japanese / Korean / Hebrew | One extension per language; some may not exist | Low — fits the design's existing CTE pattern |
-| pgroonga with branched query path | 1 (pgroonga) | All CJK + Hebrew + more | High — branched lexical arm, two indexes per searchable column |
-| Defer non-Western support from Layer 1 | 0 (use `simple` for everything non-Western) | None until wiring-PR follow-on | Zero — Layer 1 ships with stock-language-only support |
+The decision tree was:
 
-**Verified counter-example for the per-language parser approach:** zhparser (`/amutu/zhparser`) does exactly what the design wants, for Chinese. After `CREATE EXTENSION zhparser` and `CREATE TEXT SEARCH CONFIGURATION chinese_fts (PARSER = zhparser)`, the operator gets a regconfig that works with `to_tsvector('chinese_fts', text)`, `tsvector` columns, GIN indexes, `@@`, `to_tsquery`, `ts_rank`, and `ts_headline`. The full standard FTS surface. This proves the design pattern works with parser extensions; pgroonga is just the wrong tool for this specific pattern.
+| Option | Extensions to install | Coverage | Query CTE complexity | Status |
+|---|---|---|---|---|
+| Per-language parser extensions | zhparser (Chinese, verified via context7) + N more for Japanese / Korean / Hebrew | One extension per language; Japanese parser equivalent not found in context7's index | Low — fits the design's existing CTE pattern | Available for future reconsideration |
+| pgroonga with branched query path | 1 (pgroonga) | All CJK + Hebrew + more | High — branched lexical arm, two indexes per searchable column | Available for future reconsideration |
+| **Defer non-Western support from Layer 1** | 0 (use `simple` for everything non-Western) | None until follow-up release | Zero — Layer 1 ships with stock-language-only support | **SELECTED 2026-04-11** |
+| External search index — Typesense | 0 Postgres extensions; new standalone search service | All CJK + Hebrew + many more, with per-language `locale`-tagged fields | Replaces the entire Layer 1 hybrid CTE | Available for future reconsideration; empirically tested in a 20-operation spike on 2026-04-11 (see awareness `typesense-spike-2026-04-11` and `~/.local/state/mcp-awareness-typesense-spike/test-results-2026-04-11.md` for the full test matrix and outputs) |
+| External search index — Meilisearch | 0 Postgres extensions; new standalone search service | Documented multilingual support per Meilisearch's official documentation (queried via context7 against `/meilisearch/documentation` 2026-04-11) | Replaces the entire Layer 1 hybrid CTE | Available for future reconsideration; **not empirically tested** across PRs #246/#251/#257/#258 — only the published documentation was reviewed |
 
-Japanese, Korean, and Hebrew parser extensions need verification as part of Step 0. The prior context7 query for Japanese (`"textsearch_ja PostgreSQL Japanese"`, run during PR #246's design-doc-edit work) returned only `/takuyaa/ja-law-parser` — a Japanese law-text parser, not a PostgreSQL FTS extension — so no high-confidence parallel to zhparser was found. Korean and Hebrew were not exhaustively searched. Even if the per-language path is chosen, Japanese and Korean (and likely Hebrew) may need additional research beyond context7's index. See Substantive 3 above for the full finding.
+**Verified empirical results for future reference** (recorded so the next time this is revisited, the starting point is data, not speculation):
 
-The 4 pgroonga-listed entries that had been in `src/mcp_awareness/language.py:ISO_639_1_TO_REGCONFIG` at design time (`ja → japanese`, `zh → chinese_simplified`, `ko → korean`, `he → hebrew`) were removed preemptively by #246 round 5 in response to this finding. The current state of `language.py` on main contains only the 28 stock snowball entries, with a docstring section ("CJK and Hebrew are intentionally NOT in this mapping") that cites this finding and points at #249. The Step 0 verification (see "Schema verification task" in the Layer 1 section above) determines whether the entries should be added back and by what mechanism. The wiring PR's Phase 1.05 selects between the three options above and updates `ISO_639_1_TO_REGCONFIG` accordingly.
+- **zhparser (`/amutu/zhparser`) on context7**: confirmed working as a regconfig-compatible Chinese parser. `CREATE EXTENSION zhparser` + `CREATE TEXT SEARCH CONFIGURATION chinese_fts (PARSER = zhparser)` produces a regconfig that integrates with `to_tsvector`, `tsvector` columns, GIN indexes, and the full standard FTS operator surface. Confirmed via context7 documentation review.
+- **Japanese parser extensions**: the prior context7 query (`"textsearch_ja PostgreSQL Japanese"`, run during PR #246's design-doc-edit work) returned only `/takuyaa/ja-law-parser` — a Japanese law-text parser, not a PostgreSQL FTS extension. No high-confidence parallel to zhparser was found. Korean and Hebrew were not exhaustively searched.
+- **pgroonga 4.0.6 on PG17.9**: extension installs cleanly, `USING pgroonga` index access method works correctly for both Japanese and Chinese content via the `&@` operator, but does not register *any* regconfigs in `pg_ts_config`. Confirmed empirically on 2026-04-11.
+- **Typesense 29.0**: empirically verified in a 20-operation spike on 2026-04-11. Full test matrix and outputs are preserved at:
+  - **Awareness:** `get_knowledge(logical_key="typesense-spike-2026-04-11")` — the canonical reference, includes the full test list with results, the schema iterations (initial schema with `locale: "auto"` was rejected; workable schema uses per-language content fields), and the architecture-level findings
+  - **Filesystem:** `~/.local/state/mcp-awareness-typesense-spike/test-results-2026-04-11.md` — human-readable test report with the same content; reproducible by re-running the documented commands
+
+  Headline findings: built-in vector + lexical hybrid via `multi_search` with `vector_query` works (returns both `text_match` fusion score and `vector_distance` per hit in one HTTP call). Multilingual lexical tokenization works for Japanese and Chinese **only with per-language `locale="ja"`/`"zh"`/`"ko"` fields** — the default whitespace tokenizer fails on Japanese / Chinese (no whitespace boundaries) but works "by accident" on Korean (which has spaces between words). Multi-tenant filtering, tag intersection / NOT-tag, faceting, upsert, phrase search, nested JSON with explicit child-field declarations all work as expected. Critical caveats: requires per-language fields for non-Western languages (cannot have one universal `content` field that handles all languages with proper tokenization); lacks ACID transactions across documents (each HTTP call is its own atomic unit, no BEGIN/COMMIT); lacks DB-enforced RLS (multi-tenant isolation is application-level via `filter_by=owner_id:=...` on every query — bug in any read path that forgets the filter = cross-tenant leak). Optional fields are not indexed until at least one document has a value, so the `deleted_at:=null` filter pattern requires a sentinel-value workaround.
+- **Meilisearch**: **not empirically tested** across PRs #246/#251/#257/#258 — only the published documentation was reviewed via context7 against `/meilisearch/documentation` on 2026-04-11. The documentation lists Chinese, Hebrew, Japanese, Khmer, Korean, Swedish, and Thai as languages with optimized tokenization, and explicitly recommends one index per non-Western language because automatic distinction between Chinese and Japanese is hard. That recommendation is functionally similar to Typesense's per-language-field constraint, applied at index granularity instead of field granularity. The documented behavior is plausible but has not been verified against awareness's specific constraints (multi-tenant filtering, hybrid vector + lexical, the operations from the Typesense spike). Future evaluation should run the equivalent spike against Meilisearch.
+
+`src/mcp_awareness/language.py:ISO_639_1_TO_REGCONFIG` contains only the 28 stock snowball entries. The 4 pgroonga-listed entries that were in the mapping at design time (`ja → japanese`, `zh → chinese_simplified`, `ko → korean`, `he → hebrew`) were removed preemptively by #246 round 5 in response to the Substantive 3 finding; with Phase 1.05 now closed in favor of deferral, those entries stay removed. The "CJK and Hebrew are intentionally NOT in this mapping" docstring section in `language.py` is the canonical statement of the current state.
 
 ### Detection
 
@@ -716,7 +728,7 @@ API accepts `'en'`, `'ja'`, `'es'`, etc. Server maps to `regconfig` at the bound
 ### Phase 1 — Layer 1: Hybrid retrieval + language column
 
 1. **Phase 1.0 — PG17 verification pass** (Substantive 2 + Substantive 3): answer the gating question — does pgroonga register the assumed regconfigs in `pg_ts_config`? — then prove the `to_tsvector(regconfig-from-other-column, text)` generated column pattern works on a fresh PG17 database, then measure server-side memory cost. Trigger-based fallback documented if the generated-column approach fails. If pgroonga regconfigs do not exist, this phase also selects the alternative non-Western FTS mechanism (per-language parser extensions like zhparser, branched pgroonga path, or deferral from Layer 1) and updates the language mapping accordingly. See "Schema verification task" in the Layer 1 section above.
-2. **Phase 1.05 — Extension selection** (gated on Phase 1.0's outcome): The design as originally written assumed `CREATE EXTENSION pgroonga` and a base image swap to `groonga/pgroonga:latest-alpine-17`. If Phase 1.0 confirms pgroonga registers regconfigs, that plan stands. If it does not, this phase selects between (1) per-language parser extensions (zhparser confirmed for Chinese; Japanese / Korean / Hebrew equivalents need verification), (2) keeping pgroonga and accepting a branched query path in the Layer 1 retrieval CTE, or (3) deferring CJK + Hebrew from Layer 1 entirely. Whichever option is chosen, update `src/mcp_awareness/language.py:ISO_639_1_TO_REGCONFIG`, `docker-compose.yaml`, and this design doc accordingly before proceeding to Phase 1.1.
+2. **Phase 1.05 — Extension selection** *(RESOLVED 2026-04-11: option 3 — defer non-Western from Layer 1)*: Phase 1.0's verification (recorded in this doc's "Verification results" subsection) returned a definitive negative on pgroonga regconfig integration, ruling out the original design assumption. The trilemma was resolved on 2026-04-11 in favor of **option 3 (defer non-Western from Layer 1)** — Layer 1 ships with the 28 stock snowball regconfigs and `simple` as the fallback for everything else. Rationale: at 1 month into mcp-awareness development with no public users and no real signal on multilingual demand, the pragmatic choice is to ship Layer 1 fast on the verified pattern and revisit non-Western support as a deliberate follow-up release when actual demand surfaces. The decision tree (per-language parser extensions like zhparser, branched-pgroonga path, or external search index like Typesense / Meilisearch — all empirically tested in this session) is preserved in the verification artifacts and awareness records for the future evaluation. `src/mcp_awareness/language.py:ISO_639_1_TO_REGCONFIG` already contains only the 28 stock snowball entries (CJK + Hebrew were removed preemptively in #246 round 5); no further `language.py` changes are needed for this phase. `docker-compose.yaml` does not need a base-image swap. The wiring PR proceeds directly from this point.
 3. Alembic: add `language regconfig NOT NULL DEFAULT 'simple'` + `tsv` generated column + GIN index + partial index on language
 4. Language resolution helpers in `src/mcp_awareness/language.py` *(already landed as foundation)*
 5. `lingua-language-detector>=2.0` runtime dependency *(already landed as foundation)*
@@ -770,36 +782,18 @@ API accepts `'en'`, `'ja'`, `'es'`, etc. Server maps to `regconfig` at the bound
 9. nomic remains a config fallback
 10. README + deployment guide updates
 
-### Phase 3 — Non-Western language extension install (mechanism selected in Phase 1.05)
+### Phase 3 — Non-Western language support *(deferred 2026-04-11 — wiring-PR follow-on, on demand)*
 
-Phase 3 installs whichever extension Phase 1.05 selects. The steps below are written for the three open options; only one branch executes.
+Phase 1.05 selected option 3 (defer non-Western from Layer 1). Layer 1 ships with stock-language-only support. Phase 3 is a wiring-PR follow-on that activates only when there is actual demand for non-Western language support — no current users, no current signal. When Phase 3 is reactivated:
 
-**If Phase 1.05 selects "per-language parser extensions":**
+1. Survey the awareness corpus for non-Western language entries — has demand actually materialized? If no, defer further.
+2. Re-evaluate the architecture options against the data of the day. Three were on the table when Phase 1.05 closed:
+   - **Per-language parser extensions** (zhparser confirmed for Chinese via context7; Japanese / Korean / Hebrew equivalents need verification — `/takuyaa/ja-law-parser` is not a Postgres FTS extension)
+   - **pgroonga with branched query path** (single extension, branched lexical CTE arm, two indexes per searchable column — adds real complexity to Layer 1's retrieval CTE)
+   - **External search index** (Typesense — empirically verified to handle CJK with `locale`-tagged content fields in a 20-operation spike on 2026-04-11, see awareness `typesense-spike-2026-04-11` for the full test matrix; or Meilisearch — documented to handle CJK natively per its official documentation reviewed via context7 on 2026-04-11, but not empirically tested across PRs #246/#251/#257/#258. Both trade the Postgres-only data layer for a two-system topology with sync, and both unblock managed-Postgres compatibility since they're independent of Postgres extension support)
+3. Pick a mechanism and ship CJK + Hebrew (and any other relevant languages) as a deliberate follow-up release with its own design pass.
 
-1. Postgres base image swap (or install step) for zhparser (Chinese, verified in the design doc's Layer 1 section) + equivalents for Japanese, Korean, Hebrew once verified
-2. Alembic: `CREATE EXTENSION zhparser` (+ the others selected)
-3. `CREATE TEXT SEARCH CONFIGURATION chinese_fts (PARSER = zhparser)` with the ADD MAPPING call; equivalents for other languages
-4. LXC install docs for non-Docker production deploys (extension install sources per language)
-5. Test coverage with CJK/Hebrew sample content, one assertion per language
-6. **This phase can run in parallel with Phase 1 or Phase 2** — independent concern
-
-**If Phase 1.05 selects "pgroonga with branched query path":**
-
-1. Postgres base image swap: `groonga/pgroonga:latest-alpine-17`
-2. Alembic: `CREATE EXTENSION pgroonga`
-3. Redesign Layer 1's lexical CTE arm to branch by language — standard FTS for stock regconfigs, pgroonga's `&@` operator for CJK + Hebrew rows
-4. Add pgroonga indexes alongside the `tsv` GIN indexes on searchable columns
-5. LXC install docs for non-Docker production deploys (install pgroonga from Groonga apt repo)
-6. Test coverage with CJK sample content covering the branched query path
-7. **Cannot run in parallel with Phase 1** under this option — the branched CTE is a Layer 1 design change that must land together
-
-**If Phase 1.05 selects "defer non-Western from Layer 1":**
-
-Phase 3 is a wiring-PR-follow-on, not blocked by it. Layer 1 ships with stock-language-only support. Add to Phase 3:
-
-1. Re-run the extension evaluation (per-language parser extensions vs pgroonga branched path) with measured data from the shipped Layer 1
-2. Pick a mechanism and apply the corresponding branch above
-3. Ship CJK + Hebrew support as a follow-up release
+The Phase 1.0 verification artifacts (PG17.9 + pgroonga 4.0.6 baseline, Step 0 negative result, Step 1 positive result for the generated-column pattern) remain valid as the starting point for any future non-Western FTS work; they are reproducible from the SQL in the "Verification results" subsection above.
 
 ### Phase 4 — Layer 3: Proposition extraction (experimental)
 
@@ -889,9 +883,11 @@ Most of this design runs unchanged on managed Postgres services. Specifically, t
 
 **Phase 1 and Phase 2 ship on managed Postgres with zero issues.** Anyone deploying awareness on AWS/GCP/Azure can use the managed service for Postgres and run awareness itself on EC2/EKS/Fargate/GKE/AKS/Cloud Run — standard modern cloud deployment.
 
-### Phase 3 (non-Western language support) is likely incompatible with managed Postgres
+### Phase 3 (non-Western language support) is likely incompatible with managed Postgres *(deferred — see Phase 1.05 closure above)*
 
-**Neither `pgroonga` nor `zhparser` is available on AWS RDS, Aurora, GCP Cloud SQL, or Azure Database.** Both are third-party extensions that the managed-database providers do not include in their supported extension lists as of this design's date. This is a managed-Postgres ecosystem limitation, not something we can resolve server-side — and it holds regardless of which mechanism Phase 1.05 selects. If Phase 1.05 chooses per-language parser extensions, Japanese / Korean / Hebrew equivalents are expected to have the same managed-Postgres gap once they're identified.
+**With Phase 1.05 closed in favor of deferral (2026-04-11), this section becomes contingent on Phase 3 reactivation** when demand for non-Western language support surfaces. The analysis is preserved below as the starting point for that future evaluation. The managed-Postgres compatibility gap is the *strongest* argument for the external-search-index path (Typesense / Meilisearch) when that future evaluation happens — those engines are independent of Postgres extension support and would unblock managed-Postgres deployments entirely.
+
+**Neither `pgroonga` nor `zhparser` is available on AWS RDS, Aurora, GCP Cloud SQL, or Azure Database.** Both are third-party extensions that the managed-database providers do not include in their supported extension lists as of this design's date. This is a managed-Postgres ecosystem limitation, not something we can resolve server-side — and it holds regardless of which Postgres-side mechanism a future Phase 3 reactivation selects. If reactivation chooses per-language parser extensions, Japanese / Korean / Hebrew equivalents are expected to have the same managed-Postgres gap once they're identified.
 
 The sections below are written against pgroonga as a concrete example; substitute the chosen extension(s) after Phase 1.05 and the analysis carries forward.
 
