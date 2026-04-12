@@ -48,7 +48,7 @@ from .helpers import (
     _validate_pagination,
     _validate_timestamp,
 )
-from .language import ISO_639_1_TO_REGCONFIG, detect_language_iso, resolve_language
+from .language import ISO_639_1_TO_REGCONFIG, SIMPLE, detect_language_iso, resolve_language
 from .schema import Entry, EntryType, make_id, now_utc, to_iso
 
 logger = logging.getLogger(__name__)
@@ -67,7 +67,7 @@ def _check_unsupported_language(text: str, resolved: str) -> None:
     raw ISO code through resolve_language would complicate its API for
     a rare-path optimization.
     """
-    if resolved != "simple":
+    if resolved != SIMPLE:
         return
     iso = detect_language_iso(text)
     if iso is None or iso in ISO_639_1_TO_REGCONFIG:
