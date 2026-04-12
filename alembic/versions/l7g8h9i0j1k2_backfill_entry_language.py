@@ -79,36 +79,41 @@ def upgrade() -> None:
         return
 
     conn = op.get_bind()
+    sa_text = __import__("sqlalchemy").text
     updated = 0
-    offset = 0
     while True:
+        # Always OFFSET 0: updated rows leave the WHERE clause naturally,
+        # so the window advances without an explicit offset.
         rows = (
             conn.execute(
-                __import__("sqlalchemy").text(
+                sa_text(
                     "SELECT id, data FROM entries "
                     "WHERE language = 'simple'::regconfig AND deleted IS NULL "
                     "ORDER BY created "
-                    "LIMIT :limit OFFSET :offset"
+                    "LIMIT :limit"
                 ),
-                {"limit": BATCH_SIZE, "offset": offset},
+                {"limit": BATCH_SIZE},
             )
             .mappings()
             .all()
         )
         if not rows:
             break
+        batch_updated = 0
         for row in rows:
             text = _compose_text(row)
             lang = resolve_language(text_for_detection=text)
             if lang != "simple":
                 conn.execute(
-                    __import__("sqlalchemy").text(
-                        "UPDATE entries SET language = :lang::regconfig WHERE id = :id"
-                    ),
+                    sa_text("UPDATE entries SET language = :lang::regconfig WHERE id = :id"),
                     {"lang": lang, "id": row["id"]},
                 )
-                updated += 1
-        offset += BATCH_SIZE
+                batch_updated += 1
+        updated += batch_updated
+        # If nothing in this batch was updated, all remaining entries
+        # genuinely detect as 'simple' — stop to avoid infinite loop.
+        if batch_updated == 0:
+            break
     if updated:
         logger.info("Language backfill: updated %d entries", updated)
 
