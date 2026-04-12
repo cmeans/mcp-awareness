@@ -358,20 +358,26 @@ For single-user deployments, secret path + WAF is sufficient. For multi-user, en
 - Idempotent upserts via `logical_key` — same source + key updates in place with changelog tracking
 - In-place updates with changelog tracking (`update_entry` + `include_history`)
 - General-purpose notes with optional content payload and MIME type
+- Per-entry language support — optional `language` parameter (ISO 639-1) on write tools, auto-detection via lingua-py, `simple` fallback for unsupported languages
+- `get_knowledge` language filter — query entries by their detected language
+- Unsupported-language alerts — info-level alerts fire when lingua detects a language without a Postgres regconfig, signaling demand for future language support
 - Store introspection: `get_stats` for entry counts, `get_tags` for tag discovery
 - Soft delete with 30-day trash, dry-run confirmation for bulk operations
 - Delete and restore by tags with AND logic
 - Pagination (`limit`/`offset`) on all list queries
 - Entry relationships via `related_ids` convention + `get_related` bidirectional traversal
 
-### Semantic search
-- `semantic_search` tool — find entries by meaning using pgvector cosine similarity
+### Hybrid search
+- `search` tool — hybrid vector + full-text search fused via Reciprocal Rank Fusion (RRF, k=60). Finds entries by meaning *and* by exact terms — long documents are rescued by lexical matches, rare identifiers are found by FTS, semantic queries still use vector similarity
+- `semantic_search` — deprecated alias for `search`, will be removed in a future release
 - `backfill_embeddings` tool — embed pre-existing entries and re-embed stale ones
-- `hint` parameter on `get_knowledge` — re-rank tag-filtered results by semantic similarity
+- `hint` parameter on `get_knowledge` — re-rank tag-filtered results by hybrid similarity
+- Per-entry language-aware FTS — generated `tsvector` column with weighted fields (description=A, content/goal=B, tags=C) and language-specific stemming via Postgres regconfigs (28 stock snowball languages)
+- Regconfig validation — valid configs cached from `pg_ts_config` at startup, invalid values fall back to `simple` with cache-refresh retry
 - Background embedding generation via thread pool (non-blocking writes)
 - Stale embedding detection via `text_hash` comparison
 - Powered by Ollama (`nomic-embed-text`, 768 dimensions) — optional, self-hosted, zero cost
-- Graceful degradation: everything works without an embedding provider
+- Graceful degradation: FTS works without embeddings, vector search works without FTS matches, everything works without an embedding provider
 
 ### Awareness engine
 - Ambient awareness: status reporting, alert detection, suppression, briefing generation
@@ -387,7 +393,7 @@ For single-user deployments, secret path + WAF is sufficient. For multi-user, en
 - Streamable HTTP + stdio transports
 
 ### Infrastructure
-- PostgreSQL 17 with pgvector, GIN-indexed tag queries, HNSW-indexed embeddings, Debezium CDC-ready
+- PostgreSQL 17 with pgvector, GIN-indexed tag queries, HNSW-indexed embeddings, GIN-indexed tsvector for full-text search, Debezium CDC-ready
 - Connection pooling (psycopg_pool, min 2 / max 5) with automatic health checks and reconnection
 - List mode and since/until/created_after/created_before filters for lightweight queries
 - Storage abstraction: `Store` protocol — backends are swappable without changing server or collator logic
