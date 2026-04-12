@@ -381,7 +381,7 @@ For single-user deployments, secret path + WAF is sufficient. For multi-user, en
 - Read/action tracking for audit and activity feeds
 
 ### MCP interface
-- Full MCP API: 6 resources + 29 tools + 5 prompts
+- Full MCP API: 6 resources + 30 tools + 5 prompts
 - Read tool mirrors for tools-only clients
 - User-defined custom prompts from store entries with `{{var}}` templates
 - Streamable HTTP + stdio transports

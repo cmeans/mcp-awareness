@@ -80,7 +80,7 @@ src/mcp_awareness/
 ├── embeddings.py      # Embedding provider abstraction (Ollama, Null), text composition, hashing
 ├── collator.py        # Briefing generation: applies suppressions + patterns, composes summary/mention
 ├── server.py          # FastMCP server wiring — initialization, owner context (contextvars), custom prompt sync
-├── tools.py           # MCP tool handlers (29 tools: CRUD, search, lifecycle, analytics)
+├── tools.py           # MCP tool handlers (30 tools: CRUD, search, lifecycle, analytics)
 ├── resources.py       # MCP resource handlers (briefing, status, knowledge, alerts, intentions, activity)
 ├── prompts.py         # MCP prompt handlers (briefing, catchup, diagnostics, knowledge-audit, onboarding)
 ├── middleware.py      # ASGI middleware: SecretPath, Health, WellKnown, AuthMiddleware (JWT + OAuth)

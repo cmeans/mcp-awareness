@@ -1061,7 +1061,7 @@ async def update_intention(
 
 @_srv.mcp.tool()
 @_timed
-async def semantic_search(
+async def search(
     query: str,
     source: str | None = None,
     tags: list[str] | None = None,
@@ -1075,7 +1075,7 @@ async def semantic_search(
     """Search knowledge by meaning — hybrid vector + full-text search with RRF fusion.
     Use when tag-based filtering (get_knowledge) isn't specific enough,
     or when you need to find entries related to a concept without knowing exact tags.
-    Example: semantic_search(query="retirement planning") finds entries
+    Example: search(query="retirement planning") finds entries
     about 401k, pension, financial goals — even if not tagged that way.
     Combines with filters: source, tags, entry_type, since, until.
     Returns entries sorted by relevance with similarity scores.
@@ -1119,7 +1119,7 @@ async def semantic_search(
         until=until_dt,
         limit=limit + 1,
     )
-    _srv._log_reads([e for e, _ in results[:limit]], "semantic_search")
+    _srv._log_reads([e for e, _ in results[:limit]], "search")
     if mode == "list":
         items = []
         for entry, score in results:
@@ -1135,6 +1135,35 @@ async def semantic_search(
         items.append(d)
     page = _paginate(items, limit, None)
     return json.dumps(page, indent=2)
+
+
+@_srv.mcp.tool()
+@_timed
+async def semantic_search(
+    query: str,
+    source: str | None = None,
+    tags: list[str] | None = None,
+    entry_type: str | None = None,
+    since: str | None = None,
+    until: str | None = None,
+    limit: int = 10,
+    mode: str | None = None,
+    language: str | None = None,
+) -> str:
+    """Deprecated alias for search. Use search() instead.
+    This tool will be removed in a future release."""
+    result: str = await search(
+        query=query,
+        source=source,
+        tags=tags,
+        entry_type=entry_type,
+        since=since,
+        until=until,
+        limit=limit,
+        mode=mode,
+        language=language,
+    )
+    return result
 
 
 @_srv.mcp.tool()

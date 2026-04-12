@@ -3873,6 +3873,7 @@ class TestWriteResponseShapes:
         "get_unread",
         "get_activity",
         "get_intentions",
+        "search",
         "semantic_search",
         "backfill_embeddings",
         "get_related",
