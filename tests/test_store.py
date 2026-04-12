@@ -25,6 +25,7 @@ import pytest
 from mcp_awareness.schema import Entry, EntryType, make_id, now_utc
 
 TEST_OWNER = "test-owner"
+SIMPLE = "simple"
 
 # store fixture comes from conftest.py (testcontainers Postgres)
 
@@ -2343,7 +2344,7 @@ class TestHybridRetrieval:
         store.add(TEST_OWNER, entry)
         found = store.get_entry_by_id(TEST_OWNER, entry.id)
         assert found is not None
-        assert found.language == "simple"
+        assert found.language == SIMPLE
 
     def test_entry_language_stored_and_retrieved(self, store):
         """Entries with explicit language are persisted and retrieved correctly."""
@@ -2370,7 +2371,7 @@ class TestHybridRetrieval:
             tags=["a"],
             created=now_utc(),
             data={"description": "bonjour le monde"},
-            language="simple",
+            language=SIMPLE,
         )
         store.add(TEST_OWNER, entry)
         result = store.update_entry(TEST_OWNER, entry.id, {"language": "french"})
@@ -2468,7 +2469,7 @@ class TestHybridRetrieval:
             embedding=vec,
             model="m",
             query_text="",
-            query_language="simple",
+            query_language=SIMPLE,
             limit=5,
         )
         assert len(results) >= 1
@@ -2497,10 +2498,86 @@ class TestHybridRetrieval:
             tags=[],
             created=now_utc(),
             data={"description": "test"},
-            language="simple",
+            language=SIMPLE,
         )
         d = entry.to_dict()
         assert "language" not in d
+
+    def test_validate_regconfig_valid(self, store):
+        """Valid regconfig names pass through validation."""
+        assert store.validate_regconfig("english") == "english"
+        assert store.validate_regconfig(SIMPLE) == SIMPLE
+        assert store.validate_regconfig("french") == "french"
+
+    def test_validate_regconfig_invalid_falls_back(self, store):
+        """Invalid regconfig names fall back to 'simple'."""
+        assert store.validate_regconfig("klingon") == SIMPLE
+        assert store.validate_regconfig("japanese") == SIMPLE
+
+    def test_insert_with_invalid_regconfig_falls_back(self, store):
+        """Inserting an entry with an invalid regconfig silently falls back to 'simple'."""
+        entry = Entry(
+            id=make_id(),
+            type=EntryType.NOTE,
+            source="test",
+            tags=["regconfig"],
+            created=now_utc(),
+            data={"description": "test with bad regconfig"},
+            language="nonexistent_language",
+        )
+        store.add(TEST_OWNER, entry)
+        found = store.get_entry_by_id(TEST_OWNER, entry.id)
+        assert found is not None
+        assert found.language == SIMPLE
+
+    def test_regconfigs_loaded_at_init(self, store):
+        """The regconfig cache is populated at store initialization."""
+        assert len(store._valid_regconfigs) >= 29  # 28 snowball + simple
+
+    def test_validate_regconfig_reload_finds_after_cache_clear(self, store):
+        """After clearing cache, validate_regconfig reloads and finds valid configs."""
+        store._valid_regconfigs = set()  # simulate empty cache
+        assert store.validate_regconfig("english") == "english"
+        assert "english" in store._valid_regconfigs
+
+    def test_load_regconfigs_handles_error(self, store):
+        """_load_regconfigs falls back to {'simple'} on error."""
+        original = store._pool
+        store._pool = None  # force an error
+        store._load_regconfigs()
+        assert store._valid_regconfigs == {SIMPLE}
+        store._pool = original  # restore
+
+    def test_update_entry_validates_regconfig(self, store):
+        """update_entry validates the language regconfig before writing."""
+        entry = Entry(
+            id=make_id(),
+            type=EntryType.NOTE,
+            source="test",
+            tags=["a"],
+            created=now_utc(),
+            data={"description": "test"},
+        )
+        store.add(TEST_OWNER, entry)
+        result = store.update_entry(TEST_OWNER, entry.id, {"language": "klingon"})
+        assert result is not None
+        assert result.language == SIMPLE
+
+    def test_upsert_by_logical_key_validates_regconfig(self, store):
+        """upsert_by_logical_key validates language on the INSERT path."""
+        entry = Entry(
+            id=make_id(),
+            type=EntryType.NOTE,
+            source="test",
+            tags=["a"],
+            created=now_utc(),
+            data={"description": "test"},
+            logical_key="regconfig-test",
+            language="klingon",
+        )
+        result, created = store.upsert_by_logical_key(TEST_OWNER, "test", "regconfig-test", entry)
+        assert created
+        assert result.language == SIMPLE
 
 
 class TestConcurrency:

@@ -41,6 +41,7 @@ from psycopg import sql as psql
 from psycopg.rows import dict_row
 from psycopg_pool import ConnectionPool
 
+from .language import SIMPLE
 from .schema import Entry, EntryType, ensure_dt, ensure_dt_optional, make_id, now_utc, to_iso
 
 # Default owner for backward compatibility — used as column DEFAULT in DDL
@@ -84,7 +85,9 @@ class PostgresStore:
         self._last_cleanup: float = 0.0
         self._cleanup_interval: float = 10.0
         self._cleanup_thread: threading.Thread | None = None
+        self._valid_regconfigs: set[str] = set()
         self._create_tables()
+        self._load_regconfigs()
 
     def _create_tables(self) -> None:
         ddl = psql.SQL(_load_sql("create_tables")).format(
@@ -95,6 +98,33 @@ class PostgresStore:
             cur.execute(ddl)
         # Note: schema migrations are managed by Alembic (see alembic/ directory).
         # Run `alembic upgrade head` before starting the server on a new database.
+
+    def _load_regconfigs(self) -> None:
+        """Cache valid Postgres regconfig names from pg_ts_config."""
+        try:
+            with self._pool.connection() as conn, conn.cursor() as cur:
+                cur.execute("SELECT cfgname FROM pg_ts_config")
+                self._valid_regconfigs = {row["cfgname"] for row in cur.fetchall()}
+            logger.debug("Loaded %d regconfigs from pg_ts_config", len(self._valid_regconfigs))
+        except Exception:
+            logger.warning("Failed to load regconfigs from pg_ts_config", exc_info=True)
+            self._valid_regconfigs = {SIMPLE}
+
+    def validate_regconfig(self, regconfig: str) -> str:
+        """Validate a regconfig name against the cached pg_ts_config set.
+
+        Returns the regconfig if valid, or ``'simple'`` if not. On a cache
+        miss, reloads from pg_ts_config once (an extension may have been
+        installed after startup) before falling back.
+        """
+        if regconfig in self._valid_regconfigs:
+            return regconfig
+        # Reload once in case an extension was installed after startup
+        self._load_regconfigs()
+        if regconfig in self._valid_regconfigs:
+            return regconfig
+        logger.warning("Regconfig %r not in pg_ts_config, falling back to %r", regconfig, SIMPLE)
+        return SIMPLE
 
     # ------------------------------------------------------------------
     # RLS context helper
@@ -139,10 +169,11 @@ class PostgresStore:
             expires=ensure_dt_optional(row["expires"]),
             data=data,
             logical_key=row.get("logical_key"),
-            language=row.get("language", "simple"),
+            language=row.get("language", SIMPLE),
         )
 
     def _insert_entry(self, cur: psycopg.Cursor[Any], owner_id: str, entry: Entry) -> None:
+        entry.language = self.validate_regconfig(entry.language)
         cur.execute(
             _load_sql("insert_entry"),
             (
@@ -608,7 +639,7 @@ class PostgresStore:
                 setattr(entry, field, updates[field])
         if "language" in updates and updates["language"] != entry.language:
             changed["language"] = entry.language
-            entry.language = updates["language"]
+            entry.language = self.validate_regconfig(updates["language"])
         for field in ("description", "content", "content_type"):
             if field in updates and updates[field] != entry.data.get(field):
                 old_val = entry.data.get(field)
@@ -648,6 +679,7 @@ class PostgresStore:
         existing-row fetch, and conditional update all share one connection
         and transaction to avoid pool contention under concurrency.
         """
+        entry.language = self.validate_regconfig(entry.language)
         with self._pool.connection() as conn, conn.transaction(), conn.cursor() as cur:
             self._set_rls_context(cur, owner_id)
             # Attempt insert; on conflict, return inserted=false
@@ -1264,7 +1296,7 @@ class PostgresStore:
         embedding: list[float],
         model: str,
         query_text: str = "",
-        query_language: str = "simple",
+        query_language: str = SIMPLE,
         entry_type: EntryType | None = None,
         source: str | None = None,
         tags: list[str] | None = None,
