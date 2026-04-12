@@ -1386,9 +1386,7 @@ class TestUpdateEntryTool:
         update_result = await server_mod.update_entry(entry_id=entry_id, language="fr")
         data = json.loads(update_result)
         assert data["status"] == "ok"
-        entries = json.loads(
-            await server_mod.get_knowledge(include_history="true")
-        )["entries"]
+        entries = json.loads(await server_mod.get_knowledge(include_history="true"))["entries"]
         assert entries[0].get("language") == "french"
         assert entries[0]["data"]["changelog"][0]["changed"]["language"] == "simple"
 
