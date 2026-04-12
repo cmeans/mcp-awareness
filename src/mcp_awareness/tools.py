@@ -48,6 +48,7 @@ from .helpers import (
     _validate_pagination,
     _validate_timestamp,
 )
+from .language import resolve_language
 from .schema import Entry, EntryType, make_id, now_utc, to_iso
 
 logger = logging.getLogger(__name__)
@@ -222,6 +223,8 @@ async def get_knowledge(
                         _srv._owner_id(),
                         embedding=hint_vec[0],
                         model=provider.model_name,
+                        query_text=hint,
+                        query_language="simple",
                         source=source,
                         tags=tags,
                         entry_type=hint_et,
@@ -342,6 +345,7 @@ async def learn_pattern(
     conditions: dict[str, Any] | None = None,
     effect: str | None = None,
     learned_from: str = "conversation",
+    language: str | None = None,
 ) -> str:
     """Record an if/then operational rule that the alert collator uses for matching.
     Use ONLY when there is a clear condition -> effect relationship:
@@ -358,6 +362,8 @@ async def learn_pattern(
     If you receive an unstructured error, the failure is in the transport
     or platform layer, not in awareness."""
     now = now_utc()
+    text_for_detect = f"{description} {effect or ''}"
+    resolved_lang = resolve_language(explicit=language, text_for_detection=text_for_detect)
     entry = Entry(
         id=make_id(),
         type=EntryType.PATTERN,
@@ -371,6 +377,7 @@ async def learn_pattern(
             "effect": effect or "",
             "learned_from": learned_from,
         },
+        language=resolved_lang,
     )
     _srv.store.add(_srv._owner_id(), entry)
     _srv._generate_embedding(entry)
@@ -387,6 +394,7 @@ async def remember(
     content_type: str = "text/plain",
     learned_from: str = "conversation",
     logical_key: str | None = None,
+    language: str | None = None,
 ) -> str:
     """Store permanent knowledge — facts that will still be true in 30 days.
     This is the default tool for recording what you learn. Use it for personal facts,
@@ -422,6 +430,8 @@ async def remember(
             content = json.dumps(content)
         data["content"] = content
         data["content_type"] = content_type
+    text_for_detect = f"{description} {content or ''}"
+    resolved_lang = resolve_language(explicit=language, text_for_detection=text_for_detect)
     entry = Entry(
         id=make_id(),
         type=EntryType.NOTE,
@@ -431,6 +441,7 @@ async def remember(
         expires=None,
         data=data,
         logical_key=logical_key,
+        language=resolved_lang,
     )
     if logical_key:
         result, created = _srv.store.upsert_by_logical_key(
@@ -453,6 +464,7 @@ async def update_entry(
     source: str | None = None,
     content: str | dict[str, Any] | list[Any] | None = None,
     content_type: str | None = None,
+    language: str | None = None,
 ) -> str:
     """Update an existing entry in place, preserving its ID and creation timestamp.
     Only works on knowledge types: note, pattern, context, preference.
@@ -475,11 +487,15 @@ async def update_entry(
         updates["content"] = content
     if content_type is not None:
         updates["content_type"] = content_type
+    if language is not None:
+        from .language import iso_to_regconfig
+
+        updates["language"] = iso_to_regconfig(language)
     if not updates:
         _error_response(
             "invalid_parameter",
             "No fields to update — provide at least one of: "
-            "description, tags, source, content, content_type",
+            "description, tags, source, content, content_type, language",
             retryable=False,
             param="content",
         )
@@ -574,6 +590,7 @@ async def add_context(
     tags: list[str],
     description: str,
     expires_days: int = 30,
+    language: str | None = None,
 ) -> str:
     """Record something happening now that will become stale — auto-expires
     after the specified duration (default 30 days).
@@ -592,6 +609,7 @@ async def add_context(
         )
     now = now_utc()
     expires = now + timedelta(days=expires_days)
+    resolved_lang = resolve_language(explicit=language, text_for_detection=description)
     entry = Entry(
         id=make_id(),
         type=EntryType.CONTEXT,
@@ -600,6 +618,7 @@ async def add_context(
         created=now,
         expires=expires,
         data={"description": description},
+        language=resolved_lang,
     )
     _srv.store.add(_srv._owner_id(), entry)
     _srv._generate_embedding(entry)
@@ -942,6 +961,7 @@ async def remind(
     urgency: str = "normal",
     recurrence: str | None = None,
     learned_from: str = "conversation",
+    language: str | None = None,
 ) -> str:
     """Create a todo, reminder, or planned action — anything the user intends to do.
     Use this for tasks, errands, goals, follow-ups, and scheduled work. Intentions
@@ -957,6 +977,7 @@ async def remind(
     _validate_enum(urgency, "urgency", VALID_URGENCY)
     now = now_utc()
     deliver_at_dt = _validate_timestamp(deliver_at, "deliver_at")
+    resolved_lang = resolve_language(explicit=language, text_for_detection=goal)
     entry = Entry(
         id=make_id(),
         type=EntryType.INTENTION,
@@ -973,6 +994,7 @@ async def remind(
             "recurrence": recurrence,
             "learned_from": learned_from,
         },
+        language=resolved_lang,
     )
     _srv.store.add(_srv._owner_id(), entry)
     return json.dumps({"status": "ok", "id": entry.id, "state": "pending"}, indent=2)
@@ -1048,8 +1070,9 @@ async def semantic_search(
     until: str | None = None,
     limit: int = 10,
     mode: str | None = None,
+    language: str | None = None,
 ) -> str:
-    """Search knowledge by meaning using semantic similarity.
+    """Search knowledge by meaning — hybrid vector + full-text search with RRF fusion.
     Use when tag-based filtering (get_knowledge) isn't specific enough,
     or when you need to find entries related to a concept without knowing exact tags.
     Example: semantic_search(query="retirement planning") finds entries
@@ -1057,11 +1080,16 @@ async def semantic_search(
     Combines with filters: source, tags, entry_type, since, until.
     Returns entries sorted by relevance with similarity scores.
     Requires an embedding provider (AWARENESS_EMBEDDING_PROVIDER env var).
+    language: optional ISO 639-1 code for query-time language resolution (e.g., 'en').
+    Affects the FTS branch — lexical matching uses language-specific stemming.
     mode: omit for full entries, 'list' for metadata only + similarity."""
+    from .language import iso_to_regconfig
+
     limit = max(1, min(limit, 100))
     since_dt = _validate_timestamp(since, "since")
     until_dt = _validate_timestamp(until, "until")
     et = _parse_entry_type(entry_type)
+    query_language = iso_to_regconfig(language) if language else "simple"
     provider = _srv._get_embedding_provider()
     if not provider.is_available():
         _error_response(
@@ -1082,6 +1110,8 @@ async def semantic_search(
         _srv._owner_id(),
         embedding=vectors[0],
         model=provider.model_name,
+        query_text=query,
+        query_language=query_language,
         entry_type=et,
         source=source,
         tags=tags,

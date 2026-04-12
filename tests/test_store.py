@@ -1919,7 +1919,7 @@ class TestEmbeddings:
         assert len(results) == 1
         found_entry, score = results[0]
         assert found_entry.id == entry.id
-        assert score > 0.99  # cosine similarity with itself should be ~1.0
+        assert score > 0  # RRF score: 1/(60+rnk) summed across branches
 
     def test_upsert_embedding_replaces(self, store):
         """Upserting same entry+model replaces the embedding."""
@@ -1939,7 +1939,7 @@ class TestEmbeddings:
         # Search along axis 1 should find it
         results = store.semantic_search(TEST_OWNER, self._vec(768, 1), "test-model", limit=5)
         assert len(results) == 1
-        assert results[0][1] > 0.99
+        assert results[0][1] > 0  # RRF score
 
     def test_upsert_embedding_preserves_created(self, store):
         """Upserting same entry+model preserves the original created timestamp."""
@@ -2321,6 +2321,188 @@ class TestEmbeddings:
         assert store.get_stale_embeddings(TEST_OWNER, "m") == []
 
 
+class TestHybridRetrieval:
+    """Tests for hybrid retrieval (vector + FTS + RRF) and language support."""
+
+    @staticmethod
+    def _vec(dim: int, axis: int) -> list[float]:
+        v = [0.0] * dim
+        v[axis] = 1.0
+        return v
+
+    def test_entry_language_defaults_to_simple(self, store):
+        """New entries default to language='simple'."""
+        entry = Entry(
+            id=make_id(),
+            type=EntryType.NOTE,
+            source="test",
+            tags=["a"],
+            created=now_utc(),
+            data={"description": "hello world"},
+        )
+        store.add(TEST_OWNER, entry)
+        found = store.get_entry_by_id(TEST_OWNER, entry.id)
+        assert found is not None
+        assert found.language == "simple"
+
+    def test_entry_language_stored_and_retrieved(self, store):
+        """Entries with explicit language are persisted and retrieved correctly."""
+        entry = Entry(
+            id=make_id(),
+            type=EntryType.NOTE,
+            source="test",
+            tags=["lang"],
+            created=now_utc(),
+            data={"description": "Ein kurzer deutscher Text"},
+            language="german",
+        )
+        store.add(TEST_OWNER, entry)
+        found = store.get_entry_by_id(TEST_OWNER, entry.id)
+        assert found is not None
+        assert found.language == "german"
+
+    def test_update_entry_language(self, store):
+        """update_entry can change an entry's language."""
+        entry = Entry(
+            id=make_id(),
+            type=EntryType.NOTE,
+            source="test",
+            tags=["a"],
+            created=now_utc(),
+            data={"description": "bonjour le monde"},
+            language="simple",
+        )
+        store.add(TEST_OWNER, entry)
+        result = store.update_entry(TEST_OWNER, entry.id, {"language": "french"})
+        assert result is not None
+        assert result.language == "french"
+        found = store.get_entry_by_id(TEST_OWNER, entry.id)
+        assert found is not None
+        assert found.language == "french"
+
+    def test_fts_finds_stemmed_match(self, store):
+        """FTS branch matches stemmed English words via the tsv generated column."""
+        entry = Entry(
+            id=make_id(),
+            type=EntryType.NOTE,
+            source="test",
+            tags=["fts"],
+            created=now_utc(),
+            data={"description": "The retirement planning documents are comprehensive"},
+            language="english",
+        )
+        store.add(TEST_OWNER, entry)
+        # Embed it so the hybrid CTE can find it via vector branch too
+        vec = self._vec(768, 0)
+        store.upsert_embedding(TEST_OWNER, entry.id, "m", 768, "h1", vec)
+        # Search with a query that should match via FTS stemming
+        # "retiring" stems to "retir" just like "retirement"
+        results = store.semantic_search(
+            TEST_OWNER,
+            embedding=vec,
+            model="m",
+            query_text="retiring",
+            query_language="english",
+            limit=5,
+        )
+        assert len(results) >= 1
+        assert results[0][0].id == entry.id
+
+    def test_hybrid_fuses_both_branches(self, store):
+        """Entries matching both vector and FTS branches rank higher than single-branch hits."""
+        # Entry 1: matches both vector (axis 0) and FTS ("planning")
+        e1 = Entry(
+            id=make_id(),
+            type=EntryType.NOTE,
+            source="test",
+            tags=["hybrid"],
+            created=now_utc(),
+            data={"description": "Financial planning for the future"},
+            language="english",
+        )
+        store.add(TEST_OWNER, e1)
+        store.upsert_embedding(TEST_OWNER, e1.id, "m", 768, "h1", self._vec(768, 0))
+
+        # Entry 2: matches vector (axis 0) but NOT FTS ("planning")
+        e2 = Entry(
+            id=make_id(),
+            type=EntryType.NOTE,
+            source="test",
+            tags=["hybrid"],
+            created=now_utc(),
+            data={"description": "Something completely different about cooking"},
+            language="english",
+        )
+        store.add(TEST_OWNER, e2)
+        store.upsert_embedding(TEST_OWNER, e2.id, "m", 768, "h2", self._vec(768, 0))
+
+        results = store.semantic_search(
+            TEST_OWNER,
+            embedding=self._vec(768, 0),
+            model="m",
+            query_text="planning",
+            query_language="english",
+            limit=5,
+        )
+        assert len(results) >= 2
+        ids = [e.id for e, _ in results]
+        # e1 should rank first (both branches), e2 second (vector only)
+        assert ids[0] == e1.id
+
+    def test_fts_only_when_no_query_text(self, store):
+        """When query_text is empty, only vector branch contributes."""
+        entry = Entry(
+            id=make_id(),
+            type=EntryType.NOTE,
+            source="test",
+            tags=["vec"],
+            created=now_utc(),
+            data={"description": "vector only test"},
+            language="english",
+        )
+        store.add(TEST_OWNER, entry)
+        vec = self._vec(768, 3)
+        store.upsert_embedding(TEST_OWNER, entry.id, "m", 768, "h1", vec)
+        results = store.semantic_search(
+            TEST_OWNER,
+            embedding=vec,
+            model="m",
+            query_text="",
+            query_language="simple",
+            limit=5,
+        )
+        assert len(results) >= 1
+        assert results[0][0].id == entry.id
+
+    def test_language_in_to_dict(self):
+        """Entry.to_dict includes language when not 'simple'."""
+        entry = Entry(
+            id="test-id",
+            type=EntryType.NOTE,
+            source="test",
+            tags=[],
+            created=now_utc(),
+            data={"description": "test"},
+            language="english",
+        )
+        d = entry.to_dict()
+        assert d["language"] == "english"
+
+    def test_language_omitted_from_to_dict_when_simple(self):
+        """Entry.to_dict omits language when it's 'simple' (default)."""
+        entry = Entry(
+            id="test-id",
+            type=EntryType.NOTE,
+            source="test",
+            tags=[],
+            created=now_utc(),
+            data={"description": "test"},
+            language="simple",
+        )
+        d = entry.to_dict()
+        assert "language" not in d
+
+
 class TestConcurrency:
     """Tests for concurrency patterns: connection pool, cleanup threading, concurrent writes."""
 
@@ -2614,7 +2796,7 @@ class TestEmbeddingRoundTrip:
             results = store.semantic_search(TEST_OWNER, self._vec(768, i), "m", limit=3)
             assert len(results) == 3
             assert results[0][0].id == entry.id
-            assert results[0][1] > 0.99  # cosine similarity with itself
+            assert results[0][1] > 0  # RRF score
 
     # -- 2. Stale embedding detection ----------------------------------------
 

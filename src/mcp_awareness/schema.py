@@ -108,6 +108,7 @@ class Entry:
     expires: datetime | None = None
     data: dict[str, Any] = field(default_factory=dict)
     logical_key: str | None = None
+    language: str = "simple"
 
     def to_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = {
@@ -122,6 +123,8 @@ class Entry:
         }
         if self.logical_key is not None:
             d["logical_key"] = self.logical_key
+        if self.language != "simple":
+            d["language"] = self.language
         return d
 
     def to_list_dict(self) -> dict[str, Any]:
@@ -164,6 +167,7 @@ class Entry:
             expires=ensure_dt_optional(d.get("expires")),
             data=d.get("data", {}),
             logical_key=d.get("logical_key"),
+            language=d.get("language", "simple"),
         )
 
     def is_expired(self) -> bool:

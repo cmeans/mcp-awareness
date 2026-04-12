@@ -2876,7 +2876,9 @@ class TestSemanticSearchTool:
         assert len(result) >= 1
         assert result[0]["id"] == entry.id
         assert "similarity" in result[0]
-        assert result[0]["similarity"] > 0.99
+        # RRF score: 1/(60+rnk) per branch, summed. Exact value depends on
+        # how many branches match; just verify it's positive and reasonable.
+        assert result[0]["similarity"] > 0
 
     @pytest.mark.anyio
     async def test_search_list_mode(self, monkeypatch) -> None:
