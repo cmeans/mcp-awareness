@@ -2892,6 +2892,47 @@ class TestSemanticSearchTool:
         assert result[0]["similarity"] > 0
 
     @pytest.mark.anyio
+    async def test_deprecated_semantic_search_delegates(self, monkeypatch) -> None:
+        """The deprecated semantic_search alias delegates to search with all params."""
+
+        class MockProvider:
+            model_name = "mock"
+            dimensions = 768
+
+            def embed(self, texts):
+                return [self._vec(768, 0) for _ in texts]
+
+            def is_available(self):
+                return True
+
+            @staticmethod
+            def _vec(dim, axis):
+                v = [0.0] * dim
+                v[axis] = 1.0
+                return v
+
+        provider = MockProvider()
+        monkeypatch.setattr(server_mod, "_embedding_provider", provider)
+        s = _store()
+        from mcp_awareness.schema import Entry, EntryType, make_id, now_utc
+
+        entry = Entry(
+            id=make_id(),
+            type=EntryType.NOTE,
+            source="test",
+            tags=["alias"],
+            created=now_utc(),
+            data={"description": "deprecated alias test"},
+        )
+        s.add(TEST_OWNER, entry)
+        s.upsert_embedding(TEST_OWNER, entry.id, "mock", 768, "h1", provider._vec(768, 0))
+
+        # Both tools should return the same entry
+        search_result = json.loads(await server_mod.search(query="deprecated alias"))
+        alias_result = json.loads(await server_mod.semantic_search(query="deprecated alias"))
+        assert search_result["entries"][0]["id"] == alias_result["entries"][0]["id"]
+
+    @pytest.mark.anyio
     async def test_search_list_mode(self, monkeypatch) -> None:
         """List mode returns lightweight entries with similarity scores."""
 
@@ -3873,6 +3914,7 @@ class TestWriteResponseShapes:
         "get_unread",
         "get_activity",
         "get_intentions",
+        "search",
         "semantic_search",
         "backfill_embeddings",
         "get_related",

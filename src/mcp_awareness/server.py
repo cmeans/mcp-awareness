@@ -701,6 +701,7 @@ from .tools import (  # noqa: E402, F401
     report_alert,
     report_status,
     restore_entry,
+    search,
     semantic_search,
     set_preference,
     suppress_alert,
