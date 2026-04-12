@@ -25,6 +25,7 @@ import pytest
 from mcp_awareness.schema import Entry, EntryType, make_id, now_utc
 
 TEST_OWNER = "test-owner"
+SIMPLE = "simple"
 
 # store fixture comes from conftest.py (testcontainers Postgres)
 
@@ -2343,7 +2344,7 @@ class TestHybridRetrieval:
         store.add(TEST_OWNER, entry)
         found = store.get_entry_by_id(TEST_OWNER, entry.id)
         assert found is not None
-        assert found.language == "simple"
+        assert found.language == SIMPLE
 
     def test_entry_language_stored_and_retrieved(self, store):
         """Entries with explicit language are persisted and retrieved correctly."""
@@ -2370,7 +2371,7 @@ class TestHybridRetrieval:
             tags=["a"],
             created=now_utc(),
             data={"description": "bonjour le monde"},
-            language="simple",
+            language=SIMPLE,
         )
         store.add(TEST_OWNER, entry)
         result = store.update_entry(TEST_OWNER, entry.id, {"language": "french"})
@@ -2468,7 +2469,7 @@ class TestHybridRetrieval:
             embedding=vec,
             model="m",
             query_text="",
-            query_language="simple",
+            query_language=SIMPLE,
             limit=5,
         )
         assert len(results) >= 1
@@ -2497,7 +2498,7 @@ class TestHybridRetrieval:
             tags=[],
             created=now_utc(),
             data={"description": "test"},
-            language="simple",
+            language=SIMPLE,
         )
         d = entry.to_dict()
         assert "language" not in d
@@ -2505,13 +2506,13 @@ class TestHybridRetrieval:
     def test_validate_regconfig_valid(self, store):
         """Valid regconfig names pass through validation."""
         assert store.validate_regconfig("english") == "english"
-        assert store.validate_regconfig("simple") == "simple"
+        assert store.validate_regconfig(SIMPLE) == SIMPLE
         assert store.validate_regconfig("french") == "french"
 
     def test_validate_regconfig_invalid_falls_back(self, store):
         """Invalid regconfig names fall back to 'simple'."""
-        assert store.validate_regconfig("klingon") == "simple"
-        assert store.validate_regconfig("japanese") == "simple"
+        assert store.validate_regconfig("klingon") == SIMPLE
+        assert store.validate_regconfig("japanese") == SIMPLE
 
     def test_insert_with_invalid_regconfig_falls_back(self, store):
         """Inserting an entry with an invalid regconfig silently falls back to 'simple'."""
@@ -2527,7 +2528,7 @@ class TestHybridRetrieval:
         store.add(TEST_OWNER, entry)
         found = store.get_entry_by_id(TEST_OWNER, entry.id)
         assert found is not None
-        assert found.language == "simple"
+        assert found.language == SIMPLE
 
     def test_regconfigs_loaded_at_init(self, store):
         """The regconfig cache is populated at store initialization."""
@@ -2544,7 +2545,7 @@ class TestHybridRetrieval:
         original = store._pool
         store._pool = None  # force an error
         store._load_regconfigs()
-        assert store._valid_regconfigs == {"simple"}
+        assert store._valid_regconfigs == {SIMPLE}
         store._pool = original  # restore
 
     def test_update_entry_validates_regconfig(self, store):
@@ -2560,7 +2561,7 @@ class TestHybridRetrieval:
         store.add(TEST_OWNER, entry)
         result = store.update_entry(TEST_OWNER, entry.id, {"language": "klingon"})
         assert result is not None
-        assert result.language == "simple"
+        assert result.language == SIMPLE
 
     def test_upsert_by_logical_key_validates_regconfig(self, store):
         """upsert_by_logical_key validates language on the INSERT path."""
@@ -2576,7 +2577,7 @@ class TestHybridRetrieval:
         )
         result, created = store.upsert_by_logical_key(TEST_OWNER, "test", "regconfig-test", entry)
         assert created
-        assert result.language == "simple"
+        assert result.language == SIMPLE
 
 
 class TestConcurrency:
