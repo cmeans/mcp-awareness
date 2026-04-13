@@ -197,7 +197,7 @@ The server is running on port 8420. Point any MCP client at `http://localhost:84
 | `AWARENESS_TRANSPORT` | `stdio` | Transport: `stdio` or `streamable-http` |
 | `AWARENESS_HOST` | `0.0.0.0` | Bind address (HTTP mode) |
 | `AWARENESS_PORT` | `8420` | Port (HTTP mode) |
-| `AWARENESS_DATABASE_URL` | _(required)_ | PostgreSQL connection string. Example: `postgresql://user:pass@localhost:5432/awareness` |
+| `AWARENESS_DATABASE_URL` | _(required)_ | PostgreSQL connection string. Accepts URL format (`postgresql://user:pass@host:5432/db`) or psycopg DSN format (`host=X dbname=Y user=Z password=W`). **If using DSN format in an env file, quote the value** — unquoted spaces cause the shell to split it into separate assignments. Example: `AWARENESS_DATABASE_URL="host=db dbname=awareness user=awareness password=secret"` |
 | `AWARENESS_MOUNT_PATH` | _(none)_ | Secret path prefix for access control (e.g., `/my-secret`). When set, only `/<secret>/mcp` is served; all other paths return 404. Use with a Cloudflare WAF rule. |
 
 #### Embedding (optional)
