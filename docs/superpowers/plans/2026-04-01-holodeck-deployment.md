@@ -407,7 +407,8 @@ Verify the CLI is available:
 
 ```bash
 mkdir -p /etc/awareness
-chmod 700 /etc/awareness
+chgrp awareness /etc/awareness
+chmod 750 /etc/awareness
 cat > /etc/awareness/env << 'EOF'
 AWARENESS_TRANSPORT=streamable-http
 AWARENESS_HOST=0.0.0.0
@@ -427,7 +428,8 @@ AWARENESS_EMBEDDING_PROVIDER=ollama
 AWARENESS_EMBEDDING_MODEL=nomic-embed-text
 AWARENESS_OLLAMA_URL=http://192.168.200.70:11434
 EOF
-chmod 600 /etc/awareness/env
+chown root:awareness /etc/awareness/env
+chmod 640 /etc/awareness/env
 ```
 
 **[USER]** Edit `/etc/awareness/env` and replace all `<...>` placeholders with real values from `.env.oauth`.

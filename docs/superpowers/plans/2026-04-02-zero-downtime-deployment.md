@@ -330,7 +330,7 @@ SVC"
 pct exec "$CT_ID" -- bash -c "systemctl daemon-reload && systemctl enable mcp-awareness"
 
 echo "Creating env directory (env file must be copied separately)..."
-pct exec "$CT_ID" -- bash -c "mkdir -p /etc/awareness && chmod 700 /etc/awareness"
+pct exec "$CT_ID" -- bash -c "mkdir -p /etc/awareness && chgrp awareness /etc/awareness && chmod 750 /etc/awareness"
 
 echo ""
 echo "CT ${CT_ID} (${HOSTNAME}) provisioned at ${IP}."
@@ -390,7 +390,7 @@ Expected: Script completes with "CT 210 (awareness-app-a) provisioned at 192.168
 
 From holodeck:
 ```bash
-pct exec 201 -- cat /etc/awareness/env | pct exec 210 -- bash -c 'cat > /etc/awareness/env && chmod 600 /etc/awareness/env'
+pct exec 201 -- cat /etc/awareness/env | pct exec 210 -- bash -c 'cat > /etc/awareness/env && chown root:awareness /etc/awareness/env && chmod 640 /etc/awareness/env'
 ```
 
 - [x] **Step 5: Start the service**
@@ -448,7 +448,7 @@ bash /tmp/create-app-ct.sh 211 111 awareness-app-b
 - [x] **Step 2: Copy env file from CT 201**
 
 ```bash
-pct exec 201 -- cat /etc/awareness/env | pct exec 211 -- bash -c 'cat > /etc/awareness/env && chmod 600 /etc/awareness/env'
+pct exec 201 -- cat /etc/awareness/env | pct exec 211 -- bash -c 'cat > /etc/awareness/env && chown root:awareness /etc/awareness/env && chmod 640 /etc/awareness/env'
 ```
 
 - [x] **Step 3: Start and verify**

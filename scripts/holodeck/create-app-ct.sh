@@ -107,7 +107,7 @@ SVC'
 pct exec "$CT_ID" -- bash -c "systemctl daemon-reload && systemctl enable mcp-awareness"
 
 echo "Creating env directory (env file must be copied separately)..."
-pct exec "$CT_ID" -- bash -c "mkdir -p /etc/awareness && chmod 700 /etc/awareness"
+pct exec "$CT_ID" -- bash -c "mkdir -p /etc/awareness && chgrp awareness /etc/awareness && chmod 750 /etc/awareness"
 
 echo ""
 echo "CT ${CT_ID} (${HOSTNAME}) provisioned at ${IP}."
