@@ -52,6 +52,8 @@ services:
     image: pgvector/pgvector:pg17
     container_name: awareness-postgres-qa
     restart: unless-stopped
+    ports:
+      - "127.0.0.1:5433:5432"
     environment:
       POSTGRES_DB: awareness_qa
       POSTGRES_USER: awareness
@@ -75,6 +77,8 @@ services:
     image: ollama/ollama:0.19.0
     container_name: awareness-ollama-qa
     restart: unless-stopped
+    ports:
+      - "127.0.0.1:11435:11434"
     entrypoint: ["/bin/sh", "-c"]
     command:
       - |
