@@ -22,7 +22,7 @@ services:
       - AWARENESS_PUBLIC_URL=${AWARENESS_PUBLIC_URL:-}
       - AWARENESS_DEFAULT_OWNER=${AWARENESS_DEFAULT_OWNER:-}
       - AWARENESS_EMBEDDING_PROVIDER=${AWARENESS_EMBEDDING_PROVIDER:-}
-      - AWARENESS_EMBEDDING_MODEL=${AWARENESS_EMBEDDING_MODEL:-nomic-embed-text}
+      - AWARENESS_EMBEDDING_MODEL=${AWARENESS_EMBEDDING_MODEL:-granite-embedding:278m}
       - AWARENESS_OLLAMA_URL=${AWARENESS_OLLAMA_URL:-http://ollama:11434}
     depends_on:
       postgres:
@@ -110,11 +110,11 @@ services:
         # Wait for server to be ready
         until ollama list > /dev/null 2>&1; do sleep 1; done
         # Pull model if not already cached
-        ollama pull ${AWARENESS_EMBEDDING_MODEL:-nomic-embed-text}
+        ollama pull ${AWARENESS_EMBEDDING_MODEL:-granite-embedding:278m}
         # Keep container alive (wait on background server)
         wait
     environment:
-      - AWARENESS_EMBEDDING_MODEL=${AWARENESS_EMBEDDING_MODEL:-nomic-embed-text}
+      - AWARENESS_EMBEDDING_MODEL=${AWARENESS_EMBEDDING_MODEL:-granite-embedding:278m}
     volumes:
       - ${AWARENESS_OLLAMA_DATA:-~/awareness-ollama}:/root/.ollama
     deploy:
@@ -123,7 +123,7 @@ services:
           cpus: '1.0'
           memory: 2G
     healthcheck:
-      test: ["CMD-SHELL", "ollama list | grep -q ${AWARENESS_EMBEDDING_MODEL:-nomic-embed-text}"]
+      test: ["CMD-SHELL", "ollama list | grep -q ${AWARENESS_EMBEDDING_MODEL:-granite-embedding:278m}"]
       interval: 30s
       timeout: 10s
       retries: 10

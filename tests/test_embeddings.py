@@ -328,7 +328,7 @@ class TestCreateProvider:
     def test_ollama_creates_provider(self):
         p = create_provider(provider="ollama", ollama_url="http://localhost:11434")
         assert isinstance(p, OllamaEmbedding)
-        assert p.model_name == "nomic-embed-text"
+        assert p.model_name == "granite-embedding:278m"
         assert p.dimensions == 768
 
 

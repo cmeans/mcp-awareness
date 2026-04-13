@@ -43,7 +43,7 @@ services:
       - AWARENESS_PUBLIC_URL=${AWARENESS_PUBLIC_URL:-https://staging.mcpawareness.com}
       - AWARENESS_DEFAULT_OWNER=${AWARENESS_DEFAULT_OWNER:-}
       - AWARENESS_EMBEDDING_PROVIDER=${AWARENESS_EMBEDDING_PROVIDER:-}
-      - AWARENESS_EMBEDDING_MODEL=${AWARENESS_EMBEDDING_MODEL:-nomic-embed-text}
+      - AWARENESS_EMBEDDING_MODEL=${AWARENESS_EMBEDDING_MODEL:-granite-embedding:278m}
       - AWARENESS_OLLAMA_URL=${AWARENESS_OLLAMA_URL:-http://ollama-oauth:11434}
     depends_on:
       postgres-oauth:
@@ -118,10 +118,10 @@ services:
       - |
         ollama serve &
         until ollama list > /dev/null 2>&1; do sleep 1; done
-        ollama pull ${AWARENESS_EMBEDDING_MODEL:-nomic-embed-text}
+        ollama pull ${AWARENESS_EMBEDDING_MODEL:-granite-embedding:278m}
         wait
     environment:
-      - AWARENESS_EMBEDDING_MODEL=${AWARENESS_EMBEDDING_MODEL:-nomic-embed-text}
+      - AWARENESS_EMBEDDING_MODEL=${AWARENESS_EMBEDDING_MODEL:-granite-embedding:278m}
     volumes:
       - ${AWARENESS_OLLAMA_DATA:-~/awareness-ollama-oauth}:/root/.ollama
     deploy:
@@ -130,7 +130,7 @@ services:
           cpus: '1.0'
           memory: 2G
     healthcheck:
-      test: ["CMD-SHELL", "ollama list | grep -q ${AWARENESS_EMBEDDING_MODEL:-nomic-embed-text}"]
+      test: ["CMD-SHELL", "ollama list | grep -q ${AWARENESS_EMBEDDING_MODEL:-granite-embedding:278m}"]
       interval: 30s
       timeout: 10s
       retries: 10

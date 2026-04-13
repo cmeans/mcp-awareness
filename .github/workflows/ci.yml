@@ -73,7 +73,7 @@ jobs:
             curl -sf http://localhost:11434/api/tags > /dev/null && break
             sleep 1
           done
-          curl -sf http://localhost:11434/api/pull -d '{"name": "nomic-embed-text"}'
+          curl -sf http://localhost:11434/api/pull -d '{"name": "granite-embedding:278m"}'
       - name: Run tests
         env:
           TESTCONTAINERS_RYUK_DISABLED: "true"

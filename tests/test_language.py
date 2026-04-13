@@ -347,3 +347,60 @@ class TestDetectLanguageIso:
                 lang_mod.detect_language_iso("Some ambiguous text that confuses the detector")
                 is None
             )
+
+
+class TestComposeDetectionText:
+    """Tests for compose_detection_text — shared text composition for language detection."""
+
+    def test_pattern_uses_description_and_effect(self):
+        from mcp_awareness.language import compose_detection_text
+
+        data = {"description": "CPU spike alert", "effect": "server becomes unresponsive"}
+        result = compose_detection_text("pattern", data)
+        assert result == "CPU spike alert server becomes unresponsive"
+
+    def test_note_uses_description_and_content(self):
+        from mcp_awareness.language import compose_detection_text
+
+        data = {"description": "Project notes", "content": "Detailed project content here"}
+        result = compose_detection_text("note", data)
+        assert result == "Project notes Detailed project content here"
+
+    def test_context_uses_description_only(self):
+        from mcp_awareness.language import compose_detection_text
+
+        data = {"description": "Deploy in progress", "content": "should be ignored"}
+        result = compose_detection_text("context", data)
+        assert result == "Deploy in progress"
+
+    def test_intention_uses_goal(self):
+        from mcp_awareness.language import compose_detection_text
+
+        data = {"goal": "Upgrade firmware", "description": "should be fallback"}
+        result = compose_detection_text("intention", data)
+        assert result == "Upgrade firmware"
+
+    def test_intention_falls_back_to_description(self):
+        from mcp_awareness.language import compose_detection_text
+
+        data = {"description": "Fallback text"}
+        result = compose_detection_text("intention", data)
+        assert result == "Fallback text"
+
+    def test_unknown_type_uses_description(self):
+        from mcp_awareness.language import compose_detection_text
+
+        data = {"description": "Some text", "content": "ignored"}
+        result = compose_detection_text("status", data)
+        assert result == "Some text"
+
+    def test_missing_fields_produce_empty(self):
+        from mcp_awareness.language import compose_detection_text
+
+        assert compose_detection_text("note", {}) == ""
+
+    def test_case_insensitive_type(self):
+        from mcp_awareness.language import compose_detection_text
+
+        data = {"description": "test", "effect": "effect"}
+        assert compose_detection_text("PATTERN", data) == "test effect"

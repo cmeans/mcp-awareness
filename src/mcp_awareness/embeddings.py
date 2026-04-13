@@ -103,7 +103,7 @@ class OllamaEmbedding:
     def __init__(
         self,
         base_url: str = "http://ollama:11434",
-        model: str = "nomic-embed-text",
+        model: str = "granite-embedding:278m",
         dimensions: int = 768,
         timeout: float = 30.0,
     ) -> None:
@@ -236,7 +236,7 @@ def should_embed(entry: Entry) -> bool:
 
 def create_provider(
     provider: str = "",
-    model: str = "nomic-embed-text",
+    model: str = "granite-embedding:278m",
     ollama_url: str = "http://ollama:11434",
     dimensions: int = 768,
 ) -> EmbeddingProvider:

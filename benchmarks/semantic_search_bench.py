@@ -63,7 +63,7 @@ from mcp_awareness.schema import Entry, EntryType, make_id
 POSTGRES_DSN = "postgresql://awareness:awareness-dev@postgres:5432/awareness"
 BENCH_DB = "awareness_bench"
 OLLAMA_URL = "http://ollama:11434"
-EMBEDDING_MODEL = "nomic-embed-text"
+EMBEDDING_MODEL = "granite-embedding:278m"
 EMBEDDING_DIM = 768
 
 BENCH_OWNER = "bench-owner"
@@ -106,7 +106,7 @@ DESCRIPTIONS = [
     "Home Assistant thermostat set to away mode automatically",
     "Garmin sleep score averaged 78 this week below target",
     "Project deadline moved to end of quarter per manager",
-    "Ollama model pull completed for nomic-embed-text",
+    "Ollama model pull completed for granite-embedding:278m",
     "Docker compose deployment updated with new secrets",
     "Network latency spike detected on WAN interface",
     "Calendar conflict detected between two meetings Friday",

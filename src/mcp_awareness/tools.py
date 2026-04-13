@@ -48,7 +48,13 @@ from .helpers import (
     _validate_pagination,
     _validate_timestamp,
 )
-from .language import ISO_639_1_TO_REGCONFIG, SIMPLE, detect_language_iso, resolve_language
+from .language import (
+    ISO_639_1_TO_REGCONFIG,
+    SIMPLE,
+    compose_detection_text,
+    detect_language_iso,
+    resolve_language,
+)
 from .schema import Entry, EntryType, make_id, now_utc, to_iso
 
 logger = logging.getLogger(__name__)
@@ -426,7 +432,8 @@ async def learn_pattern(
     If you receive an unstructured error, the failure is in the transport
     or platform layer, not in awareness."""
     now = now_utc()
-    text_for_detect = f"{description} {effect or ''}"
+    _data = {"description": description, "effect": effect}
+    text_for_detect = compose_detection_text("pattern", _data)
     resolved_lang = resolve_language(explicit=language, text_for_detection=text_for_detect)
     _check_unsupported_language(text_for_detect, resolved_lang)
     entry = Entry(
@@ -495,7 +502,7 @@ async def remember(
             content = json.dumps(content)
         data["content"] = content
         data["content_type"] = content_type
-    text_for_detect = f"{description} {content or ''}"
+    text_for_detect = compose_detection_text("note", data)
     resolved_lang = resolve_language(explicit=language, text_for_detection=text_for_detect)
     _check_unsupported_language(text_for_detect, resolved_lang)
     entry = Entry(
@@ -675,8 +682,9 @@ async def add_context(
         )
     now = now_utc()
     expires = now + timedelta(days=expires_days)
-    resolved_lang = resolve_language(explicit=language, text_for_detection=description)
-    _check_unsupported_language(description, resolved_lang)
+    text_for_detect = compose_detection_text("context", {"description": description})
+    resolved_lang = resolve_language(explicit=language, text_for_detection=text_for_detect)
+    _check_unsupported_language(text_for_detect, resolved_lang)
     entry = Entry(
         id=make_id(),
         type=EntryType.CONTEXT,
@@ -1044,8 +1052,9 @@ async def remind(
     _validate_enum(urgency, "urgency", VALID_URGENCY)
     now = now_utc()
     deliver_at_dt = _validate_timestamp(deliver_at, "deliver_at")
-    resolved_lang = resolve_language(explicit=language, text_for_detection=goal)
-    _check_unsupported_language(goal, resolved_lang)
+    text_for_detect = compose_detection_text("intention", {"goal": goal})
+    resolved_lang = resolve_language(explicit=language, text_for_detection=text_for_detect)
+    _check_unsupported_language(text_for_detect, resolved_lang)
     entry = Entry(
         id=make_id(),
         type=EntryType.INTENTION,
