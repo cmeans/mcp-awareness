@@ -784,3 +784,32 @@ class TestUserMainDispatch:
             assert row is not None
             assert row["password_hash"] is not None
             cur.execute("DELETE FROM users WHERE id = %s", ("pw-main-user",))
+
+
+class TestMigrateMain:
+    """Tests for mcp-awareness-migrate CLI entry point."""
+
+    def test_missing_database_url_exits(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Missing AWARENESS_DATABASE_URL prints usage and exits 1."""
+        monkeypatch.delenv("AWARENESS_DATABASE_URL", raising=False)
+        monkeypatch.setattr("sys.argv", ["mcp-awareness-migrate"])
+        from mcp_awareness.migrate import main
+
+        with pytest.raises(SystemExit) as exc_info:
+            main()
+        assert exc_info.value.code == 1
+
+    def test_missing_database_url_shows_both_formats(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Error message shows both URL and DSN examples with quoting note."""
+        monkeypatch.delenv("AWARENESS_DATABASE_URL", raising=False)
+        monkeypatch.setattr("sys.argv", ["mcp-awareness-migrate"])
+        from mcp_awareness.migrate import main
+
+        with pytest.raises(SystemExit):
+            main()
+        captured = capsys.readouterr()
+        assert "Example (URL):" in captured.err
+        assert "Example (DSN):" in captured.err
+        assert "quoted" in captured.err.lower()
