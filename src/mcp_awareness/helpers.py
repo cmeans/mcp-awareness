@@ -53,7 +53,8 @@ def dsn_to_sqlalchemy_url(dsn: str) -> str:
     parameters beyond host/port/dbname/user/password are forwarded as
     URL query string parameters.
 
-    Raises ``ValueError`` on unparseable or empty input.
+    Raises ``ValueError`` on empty input.  Unparseable DSN strings
+    propagate ``psycopg.ProgrammingError`` from the underlying parser.
     Always returns a ``postgresql+psycopg://`` URL.
     """
     from urllib.parse import quote, urlencode
