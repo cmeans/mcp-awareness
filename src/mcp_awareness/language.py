@@ -389,3 +389,33 @@ def resolve_language(
             return detected
 
     return SIMPLE
+
+
+def compose_detection_text(entry_type: str, data: dict[str, object]) -> str:
+    """Build the text string used for language detection from entry fields.
+
+    Each entry type uses the same field composition as its write tool:
+
+    - ``pattern``: description + effect (matches ``learn_pattern``)
+    - ``note``: description + content (matches ``remember``)
+    - ``context``: description only (matches ``add_context``)
+    - ``intention``: goal only (matches ``remind``)
+    - all others: description only (safe default)
+
+    This function is the single source of truth for detection text
+    composition — used by both write tools and the backfill script.
+    """
+    desc = str(data.get("description") or "")
+    entry_type_lower = entry_type.lower()
+
+    if entry_type_lower == "pattern":
+        effect = str(data.get("effect") or "")
+        return f"{desc} {effect}".strip()
+    elif entry_type_lower == "note":
+        content = str(data.get("content") or "")
+        return f"{desc} {content}".strip()
+    elif entry_type_lower == "intention":
+        goal = str(data.get("goal") or "")
+        return goal or desc
+    else:
+        return desc

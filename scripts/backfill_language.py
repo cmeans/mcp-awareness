@@ -40,20 +40,11 @@ import sys
 BATCH_SIZE = 100
 
 
-def _compose_text(data: dict) -> str:
-    """Build detection text from entry fields."""
-    parts: list[str] = []
-    if desc := data.get("description"):
-        parts.append(str(desc))
-    if content := data.get("content"):
-        parts.append(str(content))
-    if goal := data.get("goal"):
-        parts.append(str(goal))
-    if effect := data.get("effect"):
-        parts.append(str(effect))
-    if message := data.get("message"):
-        parts.append(str(message))
-    return " ".join(parts)
+def _compose_text(entry_type: str, data: dict) -> str:
+    """Build detection text matching what the write tool would have used."""
+    from mcp_awareness.language import compose_detection_text
+
+    return compose_detection_text(entry_type, data)
 
 
 def main() -> None:
@@ -102,7 +93,7 @@ def main() -> None:
                 with conn.transaction():
                     conn.execute("SELECT set_config('app.current_user', %s, true)", (owner_id,))
                     rows = conn.execute(
-                        "SELECT id, data FROM entries "
+                        "SELECT id, type, data FROM entries "
                         "WHERE language = 'simple'::regconfig AND deleted IS NULL "
                         "ORDER BY created "
                         "LIMIT %s OFFSET %s",
@@ -113,10 +104,10 @@ def main() -> None:
                     break
 
                 batch_updated = 0
-                for row_id, data in rows:
+                for row_id, entry_type, data in rows:
                     if isinstance(data, str):
                         data = json.loads(data)
-                    text = _compose_text(data)
+                    text = _compose_text(entry_type, data)
                     lang = resolve_language(text_for_detection=text)
                     if lang != "simple":
                         if args.dry_run:
