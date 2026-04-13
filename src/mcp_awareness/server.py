@@ -109,7 +109,7 @@ OAUTH_PROXY_IP_HEADERS = [
 
 # Embedding provider — optional, configured via env vars
 EMBEDDING_PROVIDER = os.environ.get("AWARENESS_EMBEDDING_PROVIDER", "")
-EMBEDDING_MODEL = os.environ.get("AWARENESS_EMBEDDING_MODEL", "nomic-embed-text")
+EMBEDDING_MODEL = os.environ.get("AWARENESS_EMBEDDING_MODEL", "granite-embedding:278m")
 OLLAMA_URL = os.environ.get("AWARENESS_OLLAMA_URL", "http://ollama:11434")
 EMBEDDING_DIMENSIONS = int(os.environ.get("AWARENESS_EMBEDDING_DIMENSIONS", "768"))
 

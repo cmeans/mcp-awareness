@@ -28,7 +28,7 @@ services:
       AWARENESS_HOST: "0.0.0.0"
       AWARENESS_PORT: "8420"
       AWARENESS_EMBEDDING_PROVIDER: ollama
-      AWARENESS_EMBEDDING_MODEL: nomic-embed-text
+      AWARENESS_EMBEDDING_MODEL: granite-embedding:278m
       AWARENESS_OLLAMA_URL: http://ollama-qa:11434
       AWARENESS_DEFAULT_OWNER: qa
     depends_on:
@@ -80,7 +80,7 @@ services:
       - |
         ollama serve &
         until ollama list > /dev/null 2>&1; do sleep 1; done
-        ollama pull nomic-embed-text
+        ollama pull granite-embedding:278m
         wait
     volumes:
       - awareness-qa-ollama:/root/.ollama
@@ -90,7 +90,7 @@ services:
           cpus: '1.0'
           memory: 2G
     healthcheck:
-      test: ["CMD-SHELL", "ollama list | grep -q nomic-embed-text"]
+      test: ["CMD-SHELL", "ollama list | grep -q granite-embedding:278m"]
       interval: 30s
       timeout: 10s
       retries: 10

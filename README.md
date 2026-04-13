@@ -205,7 +205,7 @@ The server is running on port 8420. Point any MCP client at `http://localhost:84
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `AWARENESS_EMBEDDING_PROVIDER` | _(none)_ | Set to `ollama` to enable the vector branch of hybrid search. Without it, `search` uses FTS only and `backfill_embeddings` is unavailable. |
-| `AWARENESS_EMBEDDING_MODEL` | `nomic-embed-text` | Ollama model name for embeddings. Must match the model pulled in the Ollama container. |
+| `AWARENESS_EMBEDDING_MODEL` | `granite-embedding:278m` | Ollama model name for embeddings. Must match the model pulled in the Ollama container. |
 | `AWARENESS_OLLAMA_URL` | `http://ollama:11434` | Ollama API endpoint. Default works with Docker Compose; change for external Ollama instances. |
 | `AWARENESS_EMBEDDING_DIMENSIONS` | `768` | Vector dimensions. Must match the model output. Only change if using a non-default model. |
 
@@ -377,7 +377,7 @@ For single-user deployments, secret path + WAF is sufficient. For multi-user, en
 - Regconfig validation — valid configs cached from `pg_ts_config` at startup, invalid values fall back to `simple` with cache-refresh retry
 - Background embedding generation via thread pool (non-blocking writes)
 - Stale embedding detection via `text_hash` comparison
-- Powered by Ollama (`nomic-embed-text`, 768 dimensions) — optional, self-hosted, zero cost
+- Powered by Ollama (`granite-embedding:278m`, 768 dimensions, multilingual) — optional, self-hosted, zero cost
 - Graceful degradation: FTS works without embeddings, vector search works without FTS matches, everything works without an embedding provider
 
 ### Awareness engine

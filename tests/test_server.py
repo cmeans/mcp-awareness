@@ -3677,14 +3677,14 @@ class TestSemanticSearchIntegration:
 
         for _ in range(20):
             s = _store()
-            missing = s.get_entries_without_embeddings(TEST_OWNER, "nomic-embed-text")
+            missing = s.get_entries_without_embeddings(TEST_OWNER, "granite-embedding:278m")
             if entry_id not in [e.id for e in missing]:
                 break
             time.sleep(0.5)
 
         # Verify embedding was created in the store
         s = _store()
-        missing = s.get_entries_without_embeddings(TEST_OWNER, "nomic-embed-text")
+        missing = s.get_entries_without_embeddings(TEST_OWNER, "granite-embedding:278m")
         missing_ids = [e.id for e in missing]
         assert entry_id not in missing_ids
 

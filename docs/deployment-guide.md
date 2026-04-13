@@ -135,14 +135,14 @@ echo "AWARENESS_EMBEDDING_PROVIDER=ollama" >> .env
 docker compose --profile embeddings up -d
 ```
 
-This adds an **ollama** container that auto-pulls the `nomic-embed-text` embedding model on first start. The model is cached in a volume — subsequent restarts are instant.
+This adds an **ollama** container that auto-pulls the `granite-embedding:278m` embedding model on first start. The model is cached in a volume — subsequent restarts are instant.
 
 Once running, the `semantic_search` tool finds entries by meaning (not just tags), and write tools automatically generate embeddings in the background. Use `backfill_embeddings` to embed entries created before the provider was configured.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `AWARENESS_EMBEDDING_PROVIDER` | `""` (disabled) | Set to `ollama` to enable |
-| `AWARENESS_EMBEDDING_MODEL` | `nomic-embed-text` | Ollama model name |
+| `AWARENESS_EMBEDDING_MODEL` | `granite-embedding:278m` | Ollama model name |
 | `AWARENESS_OLLAMA_URL` | `http://ollama:11434` | Ollama API endpoint |
 
 Without the embeddings profile, everything works as before — tag-based search only.

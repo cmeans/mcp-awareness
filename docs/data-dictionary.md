@@ -241,7 +241,7 @@ Stores vector embeddings for semantic search. One embedding per entry per model.
 | `id` | `SERIAL` | NO | auto | Row ID |
 | `owner_id` | `TEXT` | NO | — | Owner identifier. Denormalized for direct query scoping and RLS. |
 | `entry_id` | `TEXT` | NO | — | FK → `entries.id` (`ON DELETE CASCADE`) |
-| `model` | `TEXT` | NO | — | Embedding model name (e.g., `nomic-embed-text`) |
+| `model` | `TEXT` | NO | — | Embedding model name (e.g., `granite-embedding:278m`) |
 | `dimensions` | `INTEGER` | NO | — | Vector dimension count (e.g., 768) |
 | `text_hash` | `TEXT` | NO | — | SHA-256 of embedded text (staleness detection) |
 | `embedding` | `VECTOR(N)` | NO | — | pgvector embedding (N = `AWARENESS_EMBEDDING_DIMENSIONS`, default 768) |
@@ -264,7 +264,7 @@ Stores vector embeddings for semantic search. One embedding per entry per model.
 - The `text_hash` column enables detection of stale embeddings after entry updates. The hash is a SHA-256 digest of the string produced by `compose_embedding_text()` in `embeddings.py`. On each write, a fresh hash is computed and compared to the stored value; a mismatch marks the embedding as stale, and the background worker re-embeds the entry on its next cycle. Because the hash is derived from the composed text, any change to `compose_embedding_text()` (new fields, reordered fields, different separators) invalidates **all** stored hashes and triggers a one-time mass re-embedding. This is by design — embeddings always reflect the current composition logic
 - `ON DELETE CASCADE` ensures embeddings are cleaned up when entries are deleted
 - Requires `AWARENESS_EMBEDDING_PROVIDER=ollama` to activate (optional)
-- **Dimension constraint**: The `VECTOR` column dimension is configured via `AWARENESS_EMBEDDING_DIMENSIONS` (default: 768, matching `nomic-embed-text`). The inline DDL uses this value at table creation time. The initial Alembic migration hardcodes 768 — existing deployments that need a different dimension require a new migration. The dimension must match the embedding model's output size.
+- **Dimension constraint**: The `VECTOR` column dimension is configured via `AWARENESS_EMBEDDING_DIMENSIONS` (default: 768, matching `granite-embedding:278m`). The inline DDL uses this value at table creation time. The initial Alembic migration hardcodes 768 — existing deployments that need a different dimension require a new migration. The dimension must match the embedding model's output size.
 
 ## Table: `session_registry`
 

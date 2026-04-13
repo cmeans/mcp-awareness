@@ -1,0 +1,382 @@
+{
+  "meta": {
+    "timestamp": "2026-04-13T17:27:28.475478+00:00",
+    "owner": "benchmark-layer1",
+    "dsn_hash": "ea90898de3a9",
+    "vector_enabled": true,
+    "embedding_model": "nomic-embed-text",
+    "seed_entries": 13
+  },
+  "summary": {
+    "total": 23,
+    "pass": 23,
+    "fail": 0,
+    "skipped": 0,
+    "category_breakdown": {
+      "FTS Stemming": {
+        "total": 2,
+        "pass": 2,
+        "fail": 0,
+        "skip": 0
+      },
+      "Cross-language FTS": {
+        "total": 3,
+        "pass": 3,
+        "fail": 0,
+        "skip": 0
+      },
+      "Vector Search": {
+        "total": 2,
+        "pass": 2,
+        "fail": 0,
+        "skip": 0
+      },
+      "RRF Fusion": {
+        "total": 2,
+        "pass": 2,
+        "fail": 0,
+        "skip": 0
+      },
+      "Language Detection": {
+        "total": 3,
+        "pass": 3,
+        "fail": 0,
+        "skip": 0
+      },
+      "Language Filter": {
+        "total": 3,
+        "pass": 3,
+        "fail": 0,
+        "skip": 0
+      },
+      "Write-time Language": {
+        "total": 3,
+        "pass": 3,
+        "fail": 0,
+        "skip": 0
+      },
+      "Regconfig Validation": {
+        "total": 1,
+        "pass": 1,
+        "fail": 0,
+        "skip": 0
+      },
+      "Deprecated Alias": {
+        "total": 1,
+        "pass": 1,
+        "fail": 0,
+        "skip": 0
+      },
+      "Search Latency": {
+        "total": 1,
+        "pass": 1,
+        "fail": 0,
+        "skip": 0
+      },
+      "Embedding Status": {
+        "total": 2,
+        "pass": 2,
+        "fail": 0,
+        "skip": 0
+      }
+    },
+    "latency_percentiles": {
+      "p50_ms": 1.76,
+      "p95_ms": 2.2,
+      "p99_ms": 2.2,
+      "mean_ms": 1.82
+    }
+  },
+  "results": [
+    {
+      "name": "fts_stem_walk",
+      "category": "FTS Stemming",
+      "description": "Query 'walking' finds entry containing 'walked' via English stemmer",
+      "expected": "bench-en-walked in results",
+      "actual": "found: ['bench-en-running', 'bench-en-walked']",
+      "passed": true,
+      "latency_ms": 3.42,
+      "error": null,
+      "details": null
+    },
+    {
+      "name": "fts_stem_run",
+      "category": "FTS Stemming",
+      "description": "Query 'run' finds entry containing 'running' via English stemmer",
+      "expected": "bench-en-running in results",
+      "actual": "found: ['bench-en-running', 'bench-en-walked']",
+      "passed": true,
+      "latency_ms": 3.28,
+      "error": null,
+      "details": null
+    },
+    {
+      "name": "fts_cross_lang_french",
+      "category": "Cross-language FTS",
+      "description": "French query 'cuisine fran\u00e7aise qualit\u00e9' finds French entries",
+      "expected": "at least one French entry",
+      "actual": "french entries found: ['bench-fr-cuisine', 'bench-fr-jardinage']",
+      "passed": true,
+      "latency_ms": 3.39,
+      "error": null,
+      "details": null
+    },
+    {
+      "name": "fts_cross_lang_german",
+      "category": "Cross-language FTS",
+      "description": "German query finds German entries",
+      "expected": "at least one German entry",
+      "actual": "german entries found: ['bench-de-kochen', 'bench-de-wandern']",
+      "passed": true,
+      "latency_ms": 2.43,
+      "error": null,
+      "details": null
+    },
+    {
+      "name": "fts_wrong_language_no_match",
+      "category": "Cross-language FTS",
+      "description": "German words queried with English regconfig do not match via FTS",
+      "expected": "0 FTS matches (raw tsquery, wrong stemmer)",
+      "actual": "0 FTS matches",
+      "passed": true,
+      "latency_ms": 0.74,
+      "error": null,
+      "details": null
+    },
+    {
+      "name": "vector_pension_401k",
+      "category": "Vector Search",
+      "description": "Query 'pension retirement savings' finds 401k entry via vector similarity",
+      "expected": "bench-vec-401k in results",
+      "actual": "top results: ['bench-vec-401k', 'bench-en-walked', 'bench-en-running', 'bench-vec-solar', 'bench-fr-jardinage']",
+      "passed": true,
+      "latency_ms": 3.27,
+      "error": null,
+      "details": null
+    },
+    {
+      "name": "vector_green_solar",
+      "category": "Vector Search",
+      "description": "Query 'green power renewable energy' finds solar panels entry",
+      "expected": "bench-vec-solar in results",
+      "actual": "top results: ['bench-vec-solar', 'bench-vec-401k', 'bench-en-running', 'bench-en-walked', 'bench-unsupported-tl']",
+      "passed": true,
+      "latency_ms": 3.26,
+      "error": null,
+      "details": null
+    },
+    {
+      "name": "rrf_both_arms_contribute",
+      "category": "RRF Fusion",
+      "description": "Target entry appears in vector-only, FTS-only, and hybrid results",
+      "expected": "bench-vec-401k in all three result sets",
+      "actual": "vector=True, fts=True, hybrid=True",
+      "passed": true,
+      "latency_ms": 3.56,
+      "error": null,
+      "details": {
+        "hybrid_score": 0.03278688524590164,
+        "vec_score": 0.01639344262295082,
+        "fts_score": 0.03047794966520434
+      }
+    },
+    {
+      "name": "rrf_fusion_score_higher",
+      "category": "RRF Fusion",
+      "description": "Hybrid fusion score >= max single-arm score for target entry",
+      "expected": "hybrid (0.0328) >= max_single (0.0305)",
+      "actual": "hybrid=0.0328, vec=0.0164, fts=0.0305",
+      "passed": true,
+      "latency_ms": 0.0,
+      "error": null,
+      "details": {
+        "hybrid_score": 0.03278688524590164,
+        "vec_score": 0.01639344262295082,
+        "fts_score": 0.03047794966520434
+      }
+    },
+    {
+      "name": "detect_english",
+      "category": "Language Detection",
+      "description": "detect_language identifies English text correctly",
+      "expected": "english",
+      "actual": "english",
+      "passed": true,
+      "latency_ms": 5939.7,
+      "error": null,
+      "details": null
+    },
+    {
+      "name": "detect_french",
+      "category": "Language Detection",
+      "description": "detect_language identifies French text correctly",
+      "expected": "french",
+      "actual": "french",
+      "passed": true,
+      "latency_ms": 3.01,
+      "error": null,
+      "details": null
+    },
+    {
+      "name": "detect_short_none",
+      "category": "Language Detection",
+      "description": "detect_language returns None for text shorter than threshold",
+      "expected": "None",
+      "actual": "None",
+      "passed": true,
+      "latency_ms": 0.0,
+      "error": null,
+      "details": null
+    },
+    {
+      "name": "filter_french",
+      "category": "Language Filter",
+      "description": "get_knowledge(language='french') returns only French entries",
+      "expected": "only entries with language=french",
+      "actual": "2 entries, all french: True, keys: ['bench-fr-cuisine', 'bench-fr-jardinage']",
+      "passed": true,
+      "latency_ms": 1.86,
+      "error": null,
+      "details": null
+    },
+    {
+      "name": "filter_german",
+      "category": "Language Filter",
+      "description": "get_knowledge(language='german') returns only German entries",
+      "expected": "only entries with language=german",
+      "actual": "2 entries, all german: True, keys: ['bench-de-kochen', 'bench-de-wandern']",
+      "passed": true,
+      "latency_ms": 1.27,
+      "error": null,
+      "details": null
+    },
+    {
+      "name": "filter_simple",
+      "category": "Language Filter",
+      "description": "get_knowledge(language='simple') returns only simple-language entries",
+      "expected": "only entries with language=simple",
+      "actual": "2 entries, all simple: True, keys: ['bench-short', 'bench-unsupported-tl']",
+      "passed": true,
+      "latency_ms": 1.12,
+      "error": null,
+      "details": null
+    },
+    {
+      "name": "write_explicit_override",
+      "category": "Write-time Language",
+      "description": "Entry with explicit language='spanish' stored as spanish",
+      "expected": "spanish",
+      "actual": "spanish",
+      "passed": true,
+      "latency_ms": 0.0,
+      "error": null,
+      "details": null
+    },
+    {
+      "name": "write_autodetect_portuguese",
+      "category": "Write-time Language",
+      "description": "Portuguese text entry stored with language='portuguese'",
+      "expected": "portuguese",
+      "actual": "portuguese",
+      "passed": true,
+      "latency_ms": 0.0,
+      "error": null,
+      "details": null
+    },
+    {
+      "name": "write_short_simple",
+      "category": "Write-time Language",
+      "description": "Short text entry stored with language='simple'",
+      "expected": "simple",
+      "actual": "simple",
+      "passed": true,
+      "latency_ms": 0.0,
+      "error": null,
+      "details": null
+    },
+    {
+      "name": "regconfig_invalid_fallback",
+      "category": "Regconfig Validation",
+      "description": "Invalid regconfig 'nonexistent_language_xyz' falls back to 'simple'",
+      "expected": "simple",
+      "actual": "simple",
+      "passed": true,
+      "latency_ms": 0.5,
+      "error": null,
+      "details": null
+    },
+    {
+      "name": "deprecated_semantic_search_alias",
+      "category": "Deprecated Alias",
+      "description": "semantic_search function exists in tools.py and is marked deprecated",
+      "expected": "function exists with deprecation marker",
+      "actual": "function_in_source=True, deprecated_marker=True",
+      "passed": true,
+      "latency_ms": 0.0,
+      "error": null,
+      "details": null
+    },
+    {
+      "name": "search_latency_p95",
+      "category": "Search Latency",
+      "description": "Hybrid search p95 latency under 500ms over 20 iterations",
+      "expected": "p95 < 500ms",
+      "actual": "p50=1.76ms, p95=2.2ms, p99=2.2ms, mean=1.82ms",
+      "passed": true,
+      "latency_ms": 1.76,
+      "error": null,
+      "details": {
+        "p50_ms": 1.76,
+        "p95_ms": 2.2,
+        "p99_ms": 2.2,
+        "mean_ms": 1.82,
+        "iterations": 20,
+        "all_ms": [
+          1.59,
+          1.61,
+          1.69,
+          1.7,
+          1.7,
+          1.7,
+          1.71,
+          1.71,
+          1.71,
+          1.76,
+          1.76,
+          1.81,
+          1.82,
+          1.89,
+          1.9,
+          1.94,
+          1.96,
+          2.0,
+          2.18,
+          2.2
+        ]
+      }
+    },
+    {
+      "name": "embedding_all_seeded",
+      "category": "Embedding Status",
+      "description": "All benchmark entries have embeddings",
+      "expected": "0 benchmark entries without embeddings",
+      "actual": "0 missing: []",
+      "passed": true,
+      "latency_ms": 0.0,
+      "error": null,
+      "details": null
+    },
+    {
+      "name": "embedding_vector_cte_returns_rows",
+      "category": "Embedding Status",
+      "description": "Vector-only search returns results from benchmark entries",
+      "expected": ">0 results",
+      "actual": "5 results",
+      "passed": true,
+      "latency_ms": 0.0,
+      "error": null,
+      "details": null
+    }
+  ],
+  "baseline_comparison": null
+}
