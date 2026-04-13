@@ -120,6 +120,7 @@ the verification plan and the three-option trilemma.
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from typing import TYPE_CHECKING, Final
 
 if TYPE_CHECKING:
@@ -391,7 +392,7 @@ def resolve_language(
     return SIMPLE
 
 
-def compose_detection_text(entry_type: str, data: dict[str, object]) -> str:
+def compose_detection_text(entry_type: str, data: Mapping[str, object]) -> str:
     """Build the text string used for language detection from entry fields.
 
     Each entry type uses the same field composition as its write tool:
