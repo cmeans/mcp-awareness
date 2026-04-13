@@ -41,6 +41,49 @@ VALID_URGENCY = {"low", "normal", "high"}
 DEFAULT_QUERY_LIMIT = 100
 
 
+def dsn_to_sqlalchemy_url(dsn: str) -> str:
+    """Convert a database connection string to a SQLAlchemy-compatible URL.
+
+    Accepts either:
+    - A psycopg DSN (``host=X dbname=Y user=Z password=W port=P``)
+    - A URL (``postgresql://...`` or ``postgresql+psycopg://...``)
+
+    DSN values may be single-quoted (``password='has spaces'``).
+    Special characters in user/password are percent-encoded for the URL.
+
+    Always returns a ``postgresql+psycopg://`` URL.
+    """
+    from urllib.parse import quote
+
+    dsn = dsn.strip()
+
+    # Already a URL — just normalise the dialect prefix
+    if dsn.startswith(("postgresql://", "postgresql+psycopg://")):
+        if dsn.startswith("postgresql://"):
+            dsn = "postgresql+psycopg://" + dsn[len("postgresql://") :]
+        return dsn
+
+    # Parse psycopg key=value DSN.  Values may be unquoted or single-quoted.
+    import re
+
+    parts: dict[str, str] = {}
+    for m in re.finditer(r"(\w+)\s*=\s*(?:'((?:[^'\\]|\\.)*)'|(\S+))", dsn):
+        key = m.group(1)
+        # group(2) is the quoted value, group(3) the unquoted value
+        val = m.group(2) if m.group(2) is not None else m.group(3)
+        # Un-escape backslash sequences inside quoted values
+        if m.group(2) is not None:
+            val = val.replace("\\'", "'").replace("\\\\", "\\")
+        parts[key] = val
+
+    host = parts.get("host", "localhost")
+    port = parts.get("port", "5432")
+    dbname = parts.get("dbname", "awareness")
+    user = quote(parts.get("user", "awareness"), safe="")
+    password = quote(parts.get("password", ""), safe="")
+    return f"postgresql+psycopg://{user}:{password}@{host}:{port}/{dbname}"
+
+
 def canonical_email(email: str) -> str:
     """Normalize email for uniqueness: strip +tags, dots for gmail, lowercase."""
     email = email.lower().strip()

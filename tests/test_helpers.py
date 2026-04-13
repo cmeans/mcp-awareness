@@ -27,6 +27,7 @@ from mcp_awareness.helpers import (
     _suggest,
     _validate_enum,
     _validate_timestamp,
+    dsn_to_sqlalchemy_url,
 )
 
 
@@ -75,6 +76,59 @@ def test_paginate_empty():
     result = _paginate([], limit=10, offset=0)
     assert result["entries"] == []
     assert result["has_more"] is False
+
+
+class TestDsnToSqlalchemyUrl:
+    """Test DSN-to-SQLAlchemy URL conversion used by alembic/env.py."""
+
+    def test_plain_dsn(self):
+        dsn = "host=db.local dbname=awareness user=admin password=secret port=5432"
+        assert dsn_to_sqlalchemy_url(dsn) == (
+            "postgresql+psycopg://admin:secret@db.local:5432/awareness"
+        )
+
+    def test_dsn_defaults(self):
+        """Missing keys get sensible defaults."""
+        assert dsn_to_sqlalchemy_url("host=myhost") == (
+            "postgresql+psycopg://awareness:@myhost:5432/awareness"
+        )
+
+    def test_dsn_quoted_password_with_spaces(self):
+        dsn = "host=localhost dbname=db user=u password='my secret'"
+        assert dsn_to_sqlalchemy_url(dsn) == (
+            "postgresql+psycopg://u:my%20secret@localhost:5432/db"
+        )
+
+    def test_dsn_password_with_at_sign(self):
+        dsn = "host=localhost dbname=db user=u password='p@ss'"
+        assert dsn_to_sqlalchemy_url(dsn) == ("postgresql+psycopg://u:p%40ss@localhost:5432/db")
+
+    def test_dsn_password_with_slash(self):
+        dsn = "host=localhost dbname=db user=u password='a/b'"
+        assert dsn_to_sqlalchemy_url(dsn) == ("postgresql+psycopg://u:a%2Fb@localhost:5432/db")
+
+    def test_dsn_escaped_quote_in_password(self):
+        dsn = r"host=localhost dbname=db user=u password='it\'s'"
+        assert dsn_to_sqlalchemy_url(dsn) == ("postgresql+psycopg://u:it%27s@localhost:5432/db")
+
+    def test_url_passthrough_postgresql_psycopg(self):
+        url = "postgresql+psycopg://u:p@h:5432/db"
+        assert dsn_to_sqlalchemy_url(url) == url
+
+    def test_url_passthrough_postgresql_plain(self):
+        """postgresql:// is rewritten to postgresql+psycopg://."""
+        url = "postgresql://u:p@h:5432/db"
+        assert dsn_to_sqlalchemy_url(url) == "postgresql+psycopg://u:p@h:5432/db"
+
+    def test_whitespace_stripped(self):
+        dsn = "  host=localhost dbname=db  "
+        result = dsn_to_sqlalchemy_url(dsn)
+        assert result.startswith("postgresql+psycopg://")
+
+    def test_unquoted_special_chars_encoded(self):
+        """Unquoted password with URL-special chars gets encoded."""
+        dsn = "host=localhost dbname=db user=u password=p%ss"
+        assert dsn_to_sqlalchemy_url(dsn) == ("postgresql+psycopg://u:p%25ss@localhost:5432/db")
 
 
 class TestLevenshtein:

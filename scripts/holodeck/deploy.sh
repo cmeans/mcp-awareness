@@ -130,7 +130,7 @@ maintenance_deploy() {
     local first_ip
     first_ip=$(node_ip "${APP_NODES[0]}")
     update_node "$first_ip"
-    ssh "root@${first_ip}" 'cd /opt/mcp-awareness && sudo -u awareness bash -c "set -a && source /etc/awareness/env && set +a && /opt/mcp-awareness/venv/bin/mcp-awareness-migrate upgrade head"'
+    ssh "root@${first_ip}" 'cd /opt/mcp-awareness && sudo -u awareness bash -c "set -a && source /etc/awareness/env && set +a && /opt/mcp-awareness/venv/bin/mcp-awareness-migrate"'
     echo "  Migration complete on ${first_ip}"
     wait_healthy "$first_ip" || echo "  WARNING: ${first_ip} not healthy after migration"
 
