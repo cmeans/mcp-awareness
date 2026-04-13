@@ -44,6 +44,20 @@ if not database_url:
         "Example: postgresql+psycopg://awareness:awareness-dev@localhost:5432/awareness"
     )
 
+# Convert psycopg DSN format (key=value pairs) to SQLAlchemy URL format.
+# Production deployments use DSN format for psycopg; Alembic needs a URL.
+if not database_url.startswith(("postgresql://", "postgresql+psycopg://")):
+    # Parse DSN key=value pairs: "host=X dbname=Y user=Z password=W port=P"
+    import re
+
+    dsn_parts = dict(re.findall(r"(\w+)=(\S+)", database_url))
+    host = dsn_parts.get("host", "localhost")
+    port = dsn_parts.get("port", "5432")
+    dbname = dsn_parts.get("dbname", "awareness")
+    user = dsn_parts.get("user", "awareness")
+    password = dsn_parts.get("password", "")
+    database_url = f"postgresql+psycopg://{user}:{password}@{host}:{port}/{dbname}"
+
 # Ensure the URL uses a SQLAlchemy-compatible dialect prefix
 if database_url.startswith("postgresql://"):
     database_url = database_url.replace("postgresql://", "postgresql+psycopg://", 1)
