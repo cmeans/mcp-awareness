@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-04-13
+
 ### Added
 - **Unsupported-language alerts** — when lingua detects a language not in the regconfig mapping, write tools fire an info-level structural alert (`unsupported-language-{iso}`). One alert per unsupported language (upsert, not duplicate). Signals demand for Phase 3 non-Western language support. New `detect_language_iso` function in `language.py` returns raw ISO code even for unmapped languages. Refs [#264](https://github.com/cmeans/mcp-awareness/issues/264), [#238](https://github.com/cmeans/mcp-awareness/issues/238).
 - **Language backfill migration** — Alembic data migration detects language on existing entries via lingua-py and updates the `language` column. Processes in batches, idempotent, gracefully skips if lingua is not installed. Refs [#263](https://github.com/cmeans/mcp-awareness/issues/263), [#238](https://github.com/cmeans/mcp-awareness/issues/238).
@@ -514,7 +516,8 @@ Initial implementation.
 - **Dockerfile** for container deployment
 - Design docs: core spec and collation layer
 
-[Unreleased]: https://github.com/cmeans/mcp-awareness/compare/v0.16.2...HEAD
+[Unreleased]: https://github.com/cmeans/mcp-awareness/compare/v0.17.0...HEAD
+[0.17.0]: https://github.com/cmeans/mcp-awareness/compare/v0.16.2...v0.17.0
 [0.16.2]: https://github.com/cmeans/mcp-awareness/compare/v0.16.1...v0.16.2
 [0.16.1]: https://github.com/cmeans/mcp-awareness/compare/v0.16.0...v0.16.1
 [0.16.0]: https://github.com/cmeans/mcp-awareness/compare/v0.15.0...v0.16.0
