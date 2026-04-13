@@ -41,6 +41,71 @@ VALID_URGENCY = {"low", "normal", "high"}
 DEFAULT_QUERY_LIMIT = 100
 
 
+def dsn_to_sqlalchemy_url(dsn: str) -> str:
+    """Convert a database connection string to a SQLAlchemy-compatible URL.
+
+    Accepts either:
+    - A psycopg DSN (``host=X dbname=Y user=Z password=W port=P``)
+    - A URL (``postgresql://...`` or ``postgresql+psycopg://...``)
+
+    DSN parsing delegates to ``psycopg.conninfo.conninfo_to_dict`` for
+    correctness (quoted values, sslmode, socket paths, etc.).  Extra
+    parameters beyond host/port/dbname/user/password are forwarded as
+    URL query string parameters.
+
+    Raises ``ValueError`` on empty input.  Unparseable DSN strings
+    propagate ``psycopg.ProgrammingError`` from the underlying parser.
+    Always returns a ``postgresql+psycopg://`` URL.
+    """
+    from urllib.parse import quote, urlencode, urlparse
+
+    from psycopg.conninfo import conninfo_to_dict
+
+    dsn = dsn.strip()
+    if not dsn:
+        raise ValueError("Database connection string must not be empty")
+
+    # Already a URL — normalise the dialect prefix, validate credentials
+    if dsn.startswith(("postgresql://", "postgresql+psycopg://")):
+        if dsn.startswith("postgresql://"):
+            dsn = "postgresql+psycopg://" + dsn[len("postgresql://") :]
+        # Detect ambiguous URLs where unencoded @ in password makes the
+        # netloc unparseable (e.g. "u:p@ss@host" → host looks like "ss").
+        parsed = urlparse(dsn)
+        netloc = parsed.netloc
+        if netloc.count("@") > 1:
+            raise ValueError(
+                "Ambiguous URL: password appears to contain an unencoded '@'. "
+                "Percent-encode it as %40, or use DSN format instead."
+            )
+        return dsn
+
+    # Parse DSN via psycopg's battle-tested parser.
+    # conninfo_to_dict returns dict[str, Any] (values are str or int);
+    # coerce to str for URL construction.
+    raw = conninfo_to_dict(dsn)
+    parts: dict[str, str] = {k: str(v) for k, v in raw.items() if v is not None and v != ""}
+
+    host = parts.pop("host", "") or "localhost"
+    port = parts.pop("port", "") or "5432"
+    dbname = parts.pop("dbname", "") or "awareness"
+    user = quote(parts.pop("user", "") or "awareness", safe="")
+    password = quote(parts.pop("password", "") or "", safe="")
+
+    # Unix socket: host goes in query string, not netloc
+    if host.startswith("/"):
+        parts["host"] = host
+        host = ""
+
+    base = f"postgresql+psycopg://{user}:{password}@{host}:{port}/{dbname}"
+
+    # Forward remaining DSN params (sslmode, connect_timeout, etc.)
+    if parts:
+        base += "?" + urlencode(parts)
+
+    return base
+
+
 def canonical_email(email: str) -> str:
     """Normalize email for uniqueness: strip +tags, dots for gmail, lowercase."""
     email = email.lower().strip()

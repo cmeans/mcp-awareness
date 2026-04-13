@@ -33,6 +33,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `update_intention` no longer echoes `state` or `reason`; now returns `{status, id}`. Verified in code that `state` was a pure pass-through with no coercion or auto-advancement, making it textbook echoed input.
   - **Breaking for clients that read these fields from write responses.** The data is trivially recoverable (caller already has it). The eight unchanged write tools (`report_status`, `report_alert`, `update_entry`, `suppress_alert`, `add_context`, `delete_entry`, `restore_entry`, `remind`) keep their existing shapes — handles or server-derived fields only.
 
+### Fixed
+- **Alembic DSN format handling** — `alembic/env.py` now converts psycopg DSN format (`host=X dbname=Y user=Z password=W`) to SQLAlchemy URL format via `dsn_to_sqlalchemy_url()` helper. Delegates DSN parsing to `psycopg.conninfo.conninfo_to_dict()` for correctness; forwards extra params (sslmode, connect_timeout, etc.) as URL query string. Fixes migration/backfill failures on production where `AWARENESS_DATABASE_URL` uses DSN format.
+- **Deploy script** — `scripts/holodeck/deploy.sh` maintenance mode no longer passes `upgrade head` positional args to `mcp-awareness-migrate` (which uses `--flags`, not positional args).
+- **README** — fix documented `mcp-awareness-migrate upgrade head` syntax to match actual CLI interface (`mcp-awareness-migrate` with no positional args).
+
 ## [0.16.2] - 2026-04-09
 
 ### Added

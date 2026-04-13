@@ -408,7 +408,7 @@ For single-user deployments, secret path + WAF is sufficient. For multi-user, en
 
 ### Upgrading
 
-When upgrading to a release with hybrid retrieval (Layer 1), running `mcp-awareness-migrate upgrade head` applies two migrations:
+When upgrading to a release with hybrid retrieval (Layer 1), running `mcp-awareness-migrate` applies two migrations:
 
 1. **Schema migration** — adds `language` (regconfig) and `tsv` (generated tsvector) columns to the entries table, plus GIN and partial indexes. Fast (DDL only).
 2. **Language backfill** — runs lingua-py detection on all existing entries and updates the `language` column where a known language is detected. This is a one-time data migration that may take longer than usual on the first deploy:

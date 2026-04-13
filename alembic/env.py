@@ -44,9 +44,11 @@ if not database_url:
         "Example: postgresql+psycopg://awareness:awareness-dev@localhost:5432/awareness"
     )
 
-# Ensure the URL uses a SQLAlchemy-compatible dialect prefix
-if database_url.startswith("postgresql://"):
-    database_url = database_url.replace("postgresql://", "postgresql+psycopg://", 1)
+# Normalise to a SQLAlchemy-compatible URL.  Production deployments often
+# use psycopg DSN format (key=value pairs); Alembic/SQLAlchemy needs a URL.
+from mcp_awareness.helpers import dsn_to_sqlalchemy_url  # noqa: E402
+
+database_url = dsn_to_sqlalchemy_url(database_url)
 
 
 def run_migrations_offline() -> None:
