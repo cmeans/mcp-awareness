@@ -121,6 +121,16 @@ class TestDsnToSqlalchemyUrl:
         url = "postgresql://u:p@h:5432/db"
         assert dsn_to_sqlalchemy_url(url) == "postgresql+psycopg://u:p@h:5432/db"
 
+    def test_url_ambiguous_at_in_password_raises(self):
+        """Unencoded @ in password makes URL ambiguous — must raise."""
+        with pytest.raises(ValueError, match="unencoded '@'"):
+            dsn_to_sqlalchemy_url("postgresql://u:p@ss@h:5432/db")
+
+    def test_url_encoded_at_in_password_ok(self):
+        """Properly percent-encoded @ in password passes through."""
+        url = "postgresql+psycopg://u:p%40ss@h:5432/db"
+        assert dsn_to_sqlalchemy_url(url) == url
+
     def test_whitespace_stripped(self):
         dsn = "  host=localhost dbname=db  "
         assert dsn_to_sqlalchemy_url(dsn) == ("postgresql+psycopg://awareness:@localhost:5432/db")

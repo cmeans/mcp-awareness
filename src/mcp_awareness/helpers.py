@@ -57,7 +57,7 @@ def dsn_to_sqlalchemy_url(dsn: str) -> str:
     propagate ``psycopg.ProgrammingError`` from the underlying parser.
     Always returns a ``postgresql+psycopg://`` URL.
     """
-    from urllib.parse import quote, urlencode
+    from urllib.parse import quote, urlencode, urlparse
 
     from psycopg.conninfo import conninfo_to_dict
 
@@ -65,10 +65,19 @@ def dsn_to_sqlalchemy_url(dsn: str) -> str:
     if not dsn:
         raise ValueError("Database connection string must not be empty")
 
-    # Already a URL — just normalise the dialect prefix
+    # Already a URL — normalise the dialect prefix, validate credentials
     if dsn.startswith(("postgresql://", "postgresql+psycopg://")):
         if dsn.startswith("postgresql://"):
             dsn = "postgresql+psycopg://" + dsn[len("postgresql://") :]
+        # Detect ambiguous URLs where unencoded @ in password makes the
+        # netloc unparseable (e.g. "u:p@ss@host" → host looks like "ss").
+        parsed = urlparse(dsn)
+        netloc = parsed.netloc
+        if netloc.count("@") > 1:
+            raise ValueError(
+                "Ambiguous URL: password appears to contain an unencoded '@'. "
+                "Percent-encode it as %40, or use DSN format instead."
+            )
         return dsn
 
     # Parse DSN via psycopg's battle-tested parser.
