@@ -71,80 +71,81 @@ def main() -> None:
 
     from mcp_awareness.language import resolve_language
 
-    conn = psycopg.connect(dsn)
+    with psycopg.connect(dsn) as conn:
+        # Get all distinct owner_ids — this query bypasses RLS because it's
+        # a superuser/table-owner query on the owner_id column itself.
+        # If RLS blocks even this, fall back to the default owner.
+        with conn.transaction():
+            conn.execute("SELECT set_config('app.current_user', 'system', true)")
+            owners = [
+                row[0] for row in conn.execute("SELECT DISTINCT owner_id FROM entries").fetchall()
+            ]
 
-    # Get all distinct owner_ids — this query bypasses RLS because it's
-    # a superuser/table-owner query on the owner_id column itself.
-    # If RLS blocks even this, fall back to the default owner.
-    with conn.transaction():
-        conn.execute("SELECT set_config('app.current_user', 'system', true)")
-        owners = [
-            row[0]
-            for row in conn.execute("SELECT DISTINCT owner_id FROM entries").fetchall()
-        ]
+        if not owners:
+            # RLS blocked even the owner list — try env or positional arg
+            fallback = os.environ.get("AWARENESS_DEFAULT_OWNER", "system")
+            owners = [fallback]
+            print(f"Could not query owner_ids (RLS). Trying default: {owners[0]}")
 
-    if not owners:
-        # RLS blocked even the owner list — try env or positional arg
-        fallback = os.environ.get("AWARENESS_DEFAULT_OWNER", "system")
-        owners = [fallback]
-        print(f"Could not query owner_ids (RLS). Trying default: {owners[0]}")
+        # Allow explicit owner override via --owner
+        if args.owner:
+            owners = [args.owner]
+            print(f"Using explicit owner: {args.owner}")
 
-    # Allow explicit owner override via --owner
-    if hasattr(args, "owner") and args.owner:
-        owners = [args.owner]
-        print(f"Using explicit owner: {args.owner}")
+        print(f"Found {len(owners)} owner(s): {owners}")
 
-    print(f"Found {len(owners)} owner(s): {owners}")
+        total_updated = 0
+        for owner_id in owners:
+            owner_updated = 0
+            offset = 0
+            while True:
+                with conn.transaction():
+                    conn.execute("SELECT set_config('app.current_user', %s, true)", (owner_id,))
+                    rows = conn.execute(
+                        "SELECT id, data FROM entries "
+                        "WHERE language = 'simple'::regconfig AND deleted IS NULL "
+                        "ORDER BY created "
+                        "LIMIT %s OFFSET %s",
+                        (BATCH_SIZE, offset),
+                    ).fetchall()
 
-    total_updated = 0
-    for owner_id in owners:
-        owner_updated = 0
-        while True:
-            with conn.transaction():
-                conn.execute(
-                    "SELECT set_config('app.current_user', %s, true)", (owner_id,)
-                )
-                rows = conn.execute(
-                    "SELECT id, data FROM entries "
-                    "WHERE language = 'simple'::regconfig AND deleted IS NULL "
-                    "ORDER BY created "
-                    "LIMIT %s",
-                    (BATCH_SIZE,),
-                ).fetchall()
+                if not rows:
+                    break
 
-            if not rows:
-                break
+                batch_updated = 0
+                for row_id, data in rows:
+                    if isinstance(data, str):
+                        data = json.loads(data)
+                    text = _compose_text(data)
+                    lang = resolve_language(text_for_detection=text)
+                    if lang != "simple":
+                        if args.dry_run:
+                            desc = (data.get("description") or "")[:60]
+                            print(f"  [dry-run] {row_id[:8]}... -> {lang:12s} | {desc}")
+                        else:
+                            with conn.transaction():
+                                conn.execute(
+                                    "SELECT set_config('app.current_user', %s, true)",
+                                    (owner_id,),
+                                )
+                                conn.execute(
+                                    "UPDATE entries SET language = %s::regconfig WHERE id = %s",
+                                    (lang, row_id),
+                                )
+                        batch_updated += 1
+                owner_updated += batch_updated
+                if args.dry_run:
+                    # In dry-run, entries aren't updated so the same batch would
+                    # re-fetch. Advance offset instead.
+                    offset += BATCH_SIZE
+                elif batch_updated == 0:
+                    # All entries in this batch genuinely detected as 'simple' —
+                    # stop to avoid infinite loop.
+                    break
 
-            batch_updated = 0
-            for row_id, data in rows:
-                if isinstance(data, str):
-                    data = json.loads(data)
-                text = _compose_text(data)
-                lang = resolve_language(text_for_detection=text)
-                if lang != "simple":
-                    if args.dry_run:
-                        desc = (data.get("description") or "")[:60]
-                        print(f"  [dry-run] {row_id[:8]}... -> {lang:12s} | {desc}")
-                    else:
-                        with conn.transaction():
-                            conn.execute(
-                                "SELECT set_config('app.current_user', %s, true)",
-                                (owner_id,),
-                            )
-                            conn.execute(
-                                "UPDATE entries SET language = %s::regconfig WHERE id = %s",
-                                (lang, row_id),
-                            )
-                    batch_updated += 1
-            owner_updated += batch_updated
-            if batch_updated == 0:
-                break
-
-        if owner_updated:
-            print(f"  {owner_id}: updated {owner_updated} entries")
-        total_updated += owner_updated
-
-    conn.close()
+            if owner_updated:
+                print(f"  {owner_id}: updated {owner_updated} entries")
+            total_updated += owner_updated
     action = "would update" if args.dry_run else "updated"
     print(f"\nDone. {action} {total_updated} entries total.")
 
