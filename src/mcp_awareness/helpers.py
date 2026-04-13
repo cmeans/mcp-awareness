@@ -74,8 +74,6 @@ def dsn_to_sqlalchemy_url(dsn: str) -> str:
     # conninfo_to_dict returns dict[str, Any] (values are str or int);
     # coerce to str for URL construction.
     raw = conninfo_to_dict(dsn)
-    if not raw:
-        raise ValueError(f"No connection parameters found in DSN: {dsn!r}")
     parts: dict[str, str] = {k: str(v) for k, v in raw.items() if v is not None and v != ""}
 
     host = parts.pop("host", "") or "localhost"
