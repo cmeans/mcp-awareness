@@ -335,7 +335,7 @@ Use cases: decision → context, intention → action, note → note ("see also"
 - **WAL level:** `wal_level=logical` configured for Debezium CDC readiness and logical replication
 - **Replication slots:** `max_replication_slots=4` for future replication/CDC
 - **Background cleanup:** Daemon thread with its own psycopg connection, debounced (10s), with alive-check guard to prevent thread accumulation
-- **Connection string:** Configured via `AWARENESS_DATABASE_URL` (e.g., `postgresql://user:pass@localhost:5432/awareness`)
+- **Connection string:** Configured via `AWARENESS_DATABASE_URL`. Accepts URL format (`postgresql://user:pass@host:5432/db`) or psycopg DSN format (`host=X dbname=Y user=Z password=W`). If using DSN format in an env file sourced by the shell, **the value must be quoted** to prevent space-splitting (e.g., `AWARENESS_DATABASE_URL="host=db dbname=awareness user=u password=p"`)
 - **Docker image:** `pgvector/pgvector:pg17` (PostgreSQL 17 with pgvector pre-installed)
 - **Schema migrations:** Managed by Alembic (raw SQL, no ORM). Migration files in `alembic/versions/`. Run `mcp-awareness-migrate` or `alembic upgrade head`. Version tracked in `alembic_version` table.
 

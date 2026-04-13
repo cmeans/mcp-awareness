@@ -41,7 +41,9 @@ database_url = os.environ.get("AWARENESS_DATABASE_URL", "")
 if not database_url:
     raise ValueError(
         "AWARENESS_DATABASE_URL environment variable is required. "
-        "Example: postgresql+psycopg://awareness:awareness-dev@localhost:5432/awareness"
+        'Example (URL): postgresql+psycopg://user:pass@localhost:5432/awareness  '
+        'Example (DSN): "host=localhost dbname=awareness user=user password=pass"  '
+        "Note: DSN values with spaces must be quoted in env files."
     )
 
 # Normalise to a SQLAlchemy-compatible URL.  Production deployments often

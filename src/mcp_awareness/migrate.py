@@ -47,7 +47,15 @@ def main() -> None:
     if not database_url:
         print("Error: AWARENESS_DATABASE_URL is required.", file=sys.stderr)
         print(
-            "Example: AWARENESS_DATABASE_URL=postgresql://user:pass@localhost:5432/awareness",
+            "Example (URL): AWARENESS_DATABASE_URL=postgresql://user:pass@localhost:5432/awareness",
+            file=sys.stderr,
+        )
+        print(
+            'Example (DSN): AWARENESS_DATABASE_URL="host=localhost dbname=db user=u password=p"',
+            file=sys.stderr,
+        )
+        print(
+            "Note: DSN values with spaces must be quoted in env files.",
             file=sys.stderr,
         )
         sys.exit(1)

@@ -37,6 +37,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Alembic DSN format handling** — `alembic/env.py` now converts psycopg DSN format (`host=X dbname=Y user=Z password=W`) to SQLAlchemy URL format via `dsn_to_sqlalchemy_url()` helper. Delegates DSN parsing to `psycopg.conninfo.conninfo_to_dict()` for correctness; forwards extra params (sslmode, connect_timeout, etc.) as URL query string. Fixes migration/backfill failures on production where `AWARENESS_DATABASE_URL` uses DSN format.
 - **Deploy script** — `scripts/holodeck/deploy.sh` maintenance mode no longer passes `upgrade head` positional args to `mcp-awareness-migrate` (which uses `--flags`, not positional args).
 - **README** — fix documented `mcp-awareness-migrate upgrade head` syntax to match actual CLI interface (`mcp-awareness-migrate` with no positional args).
+- **Docs** — document that `AWARENESS_DATABASE_URL` accepts both URL and DSN formats, and that DSN values must be quoted in env files to prevent shell space-splitting. Updated in README, data dictionary, `migrate.py` error message, and `alembic/env.py` error message.
 
 ## [0.16.2] - 2026-04-09
 
