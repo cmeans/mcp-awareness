@@ -48,14 +48,21 @@ def dsn_to_sqlalchemy_url(dsn: str) -> str:
     - A psycopg DSN (``host=X dbname=Y user=Z password=W port=P``)
     - A URL (``postgresql://...`` or ``postgresql+psycopg://...``)
 
-    DSN values may be single-quoted (``password='has spaces'``).
-    Special characters in user/password are percent-encoded for the URL.
+    DSN parsing delegates to ``psycopg.conninfo.conninfo_to_dict`` for
+    correctness (quoted values, sslmode, socket paths, etc.).  Extra
+    parameters beyond host/port/dbname/user/password are forwarded as
+    URL query string parameters.
 
+    Raises ``ValueError`` on unparseable or empty input.
     Always returns a ``postgresql+psycopg://`` URL.
     """
-    from urllib.parse import quote
+    from urllib.parse import quote, urlencode
+
+    from psycopg.conninfo import conninfo_to_dict
 
     dsn = dsn.strip()
+    if not dsn:
+        raise ValueError("Database connection string must not be empty")
 
     # Already a URL — just normalise the dialect prefix
     if dsn.startswith(("postgresql://", "postgresql+psycopg://")):
@@ -63,25 +70,32 @@ def dsn_to_sqlalchemy_url(dsn: str) -> str:
             dsn = "postgresql+psycopg://" + dsn[len("postgresql://") :]
         return dsn
 
-    # Parse psycopg key=value DSN.  Values may be unquoted or single-quoted.
-    import re
+    # Parse DSN via psycopg's battle-tested parser.
+    # conninfo_to_dict returns dict[str, Any] (values are str or int);
+    # coerce to str for URL construction.
+    raw = conninfo_to_dict(dsn)
+    if not raw:
+        raise ValueError(f"No connection parameters found in DSN: {dsn!r}")
+    parts: dict[str, str] = {k: str(v) for k, v in raw.items() if v is not None and v != ""}
 
-    parts: dict[str, str] = {}
-    for m in re.finditer(r"(\w+)\s*=\s*(?:'((?:[^'\\]|\\.)*)'|(\S+))", dsn):
-        key = m.group(1)
-        # group(2) is the quoted value, group(3) the unquoted value
-        val = m.group(2) if m.group(2) is not None else m.group(3)
-        # Un-escape backslash sequences inside quoted values
-        if m.group(2) is not None:
-            val = val.replace("\\'", "'").replace("\\\\", "\\")
-        parts[key] = val
+    host = parts.pop("host", "") or "localhost"
+    port = parts.pop("port", "") or "5432"
+    dbname = parts.pop("dbname", "") or "awareness"
+    user = quote(parts.pop("user", "") or "awareness", safe="")
+    password = quote(parts.pop("password", "") or "", safe="")
 
-    host = parts.get("host", "localhost")
-    port = parts.get("port", "5432")
-    dbname = parts.get("dbname", "awareness")
-    user = quote(parts.get("user", "awareness"), safe="")
-    password = quote(parts.get("password", ""), safe="")
-    return f"postgresql+psycopg://{user}:{password}@{host}:{port}/{dbname}"
+    # Unix socket: host goes in query string, not netloc
+    if host.startswith("/"):
+        parts["host"] = host
+        host = ""
+
+    base = f"postgresql+psycopg://{user}:{password}@{host}:{port}/{dbname}"
+
+    # Forward remaining DSN params (sslmode, connect_timeout, etc.)
+    if parts:
+        base += "?" + urlencode(parts)
+
+    return base
 
 
 def canonical_email(email: str) -> str:

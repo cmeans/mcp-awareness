@@ -16,6 +16,7 @@
 
 import json
 
+import psycopg
 import pytest
 from mcp.server.fastmcp.exceptions import ToolError
 
@@ -122,13 +123,45 @@ class TestDsnToSqlalchemyUrl:
 
     def test_whitespace_stripped(self):
         dsn = "  host=localhost dbname=db  "
-        result = dsn_to_sqlalchemy_url(dsn)
-        assert result.startswith("postgresql+psycopg://")
+        assert dsn_to_sqlalchemy_url(dsn) == ("postgresql+psycopg://awareness:@localhost:5432/db")
 
     def test_unquoted_special_chars_encoded(self):
         """Unquoted password with URL-special chars gets encoded."""
         dsn = "host=localhost dbname=db user=u password=p%ss"
         assert dsn_to_sqlalchemy_url(dsn) == ("postgresql+psycopg://u:p%25ss@localhost:5432/db")
+
+    def test_extra_params_forwarded(self):
+        """sslmode and other extra DSN params become URL query string."""
+        dsn = "host=db dbname=mydb user=u password=p port=5432 sslmode=require"
+        result = dsn_to_sqlalchemy_url(dsn)
+        assert result.startswith("postgresql+psycopg://u:p@db:5432/mydb?")
+        assert "sslmode=require" in result
+
+    def test_multiple_extra_params(self):
+        dsn = "host=db dbname=mydb user=u password=p connect_timeout=10 sslmode=verify-full"
+        result = dsn_to_sqlalchemy_url(dsn)
+        assert "sslmode=verify-full" in result
+        assert "connect_timeout=10" in result
+
+    def test_unix_socket_host(self):
+        """Unix socket path goes in query string, not netloc."""
+        dsn = "host=/var/run/postgresql dbname=db user=u"
+        result = dsn_to_sqlalchemy_url(dsn)
+        assert "host=%2Fvar%2Frun%2Fpostgresql" in result
+        # netloc should have empty host
+        assert "://u:@:5432/db?" in result
+
+    def test_empty_raises(self):
+        with pytest.raises(ValueError, match="must not be empty"):
+            dsn_to_sqlalchemy_url("")
+
+    def test_whitespace_only_raises(self):
+        with pytest.raises(ValueError, match="must not be empty"):
+            dsn_to_sqlalchemy_url("   ")
+
+    def test_garbage_raises(self):
+        with pytest.raises(psycopg.ProgrammingError):
+            dsn_to_sqlalchemy_url("garbage")
 
 
 class TestLevenshtein:
