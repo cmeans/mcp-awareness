@@ -204,7 +204,7 @@ The server is running on port 8420. Point any MCP client at `http://localhost:84
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `AWARENESS_EMBEDDING_PROVIDER` | _(none)_ | Set to `ollama` to enable semantic search. Without it, all features work except `semantic_search` and `backfill_embeddings`. |
+| `AWARENESS_EMBEDDING_PROVIDER` | _(none)_ | Set to `ollama` to enable the vector branch of hybrid search. Without it, `search` uses FTS only and `backfill_embeddings` is unavailable. |
 | `AWARENESS_EMBEDDING_MODEL` | `nomic-embed-text` | Ollama model name for embeddings. Must match the model pulled in the Ollama container. |
 | `AWARENESS_OLLAMA_URL` | `http://ollama:11434` | Ollama API endpoint. Default works with Docker Compose; change for external Ollama instances. |
 | `AWARENESS_EMBEDDING_DIMENSIONS` | `768` | Vector dimensions. Must match the model output. Only change if using a non-default model. |
@@ -282,7 +282,7 @@ Results from the initial run (2026-03-27): HNSW query P50 stays under 4ms from 5
 
 ## Tools
 
-The server exposes 29 MCP tools. Clients that support MCP resources also get 6 read-only resources, but since not all clients surface resources, every resource has a tool mirror.
+The server exposes 30 MCP tools. Clients that support MCP resources also get 6 read-only resources, but since not all clients surface resources, every resource has a tool mirror.
 
 ### Read tools
 
@@ -301,7 +301,8 @@ The server exposes 29 MCP tools. Clients that support MCP resources also get 6 r
 | `get_unread` | Entries with zero reads. Cleanup candidates or missed knowledge. |
 | `get_activity` | Combined read + action feed, chronological. |
 | `get_related` | Bidirectional entry relationships — entries referenced via `related_ids` and entries that reference the given entry. |
-| `semantic_search` | Find entries by meaning using vector similarity (pgvector + Ollama). Combines with tag/source/type/date filters. Requires embedding provider. |
+| `search` | Hybrid search — finds entries by meaning (vector) and by exact terms (FTS), fused via Reciprocal Rank Fusion. Combines with tag/source/type/date/language filters. Requires embedding provider for vector branch; FTS works without it. |
+| `semantic_search` | Deprecated alias for `search`. Will be removed in a future release. |
 
 ### Write tools
 
@@ -350,7 +351,7 @@ For single-user deployments, secret path + WAF is sufficient. For multi-user, en
 ### Getting started
 - **One-line demo install** — `curl | bash` sets up Awareness + Postgres + Cloudflare quick tunnel with pre-loaded demo data and a `getting-started` prompt that personalizes your instance
 - **Published Docker images** — `ghcr.io/cmeans/mcp-awareness` (GHCR) and Docker Hub, auto-built on release tags
-- **Optional semantic search** — add `AWARENESS_EMBEDDING_PROVIDER=ollama` and `docker compose --profile embeddings up -d` for vector similarity search
+- **Optional embedding provider** — add `AWARENESS_EMBEDDING_PROVIDER=ollama` and `docker compose --profile embeddings up -d` to enable the vector branch of hybrid search. FTS works without it
 - **CLI tools** — `mcp-awareness-user` (user management), `mcp-awareness-token` (JWT generation), `mcp-awareness-secret` (signing secret generation)
 
 ### Knowledge store
@@ -358,20 +359,26 @@ For single-user deployments, secret path + WAF is sufficient. For multi-user, en
 - Idempotent upserts via `logical_key` — same source + key updates in place with changelog tracking
 - In-place updates with changelog tracking (`update_entry` + `include_history`)
 - General-purpose notes with optional content payload and MIME type
+- Per-entry language support — optional `language` parameter (ISO 639-1) on write tools, auto-detection via lingua-py, `simple` fallback for unsupported languages
+- `get_knowledge` language filter — query entries by their detected language
+- Unsupported-language alerts — info-level alerts fire when lingua detects a language without a Postgres regconfig, signaling demand for future language support
 - Store introspection: `get_stats` for entry counts, `get_tags` for tag discovery
 - Soft delete with 30-day trash, dry-run confirmation for bulk operations
 - Delete and restore by tags with AND logic
 - Pagination (`limit`/`offset`) on all list queries
 - Entry relationships via `related_ids` convention + `get_related` bidirectional traversal
 
-### Semantic search
-- `semantic_search` tool — find entries by meaning using pgvector cosine similarity
+### Hybrid search
+- `search` tool — hybrid vector + full-text search fused via Reciprocal Rank Fusion (RRF, k=60). Finds entries by meaning *and* by exact terms — long documents are rescued by lexical matches, rare identifiers are found by FTS, semantic queries still use vector similarity
+- `semantic_search` — deprecated alias for `search`, will be removed in a future release
 - `backfill_embeddings` tool — embed pre-existing entries and re-embed stale ones
-- `hint` parameter on `get_knowledge` — re-rank tag-filtered results by semantic similarity
+- `hint` parameter on `get_knowledge` — re-rank tag-filtered results by hybrid similarity
+- Per-entry language-aware FTS — generated `tsvector` column with weighted fields (description=A, content/goal=B, tags=C) and language-specific stemming via Postgres regconfigs (28 stock snowball languages)
+- Regconfig validation — valid configs cached from `pg_ts_config` at startup, invalid values fall back to `simple` with cache-refresh retry
 - Background embedding generation via thread pool (non-blocking writes)
 - Stale embedding detection via `text_hash` comparison
 - Powered by Ollama (`nomic-embed-text`, 768 dimensions) — optional, self-hosted, zero cost
-- Graceful degradation: everything works without an embedding provider
+- Graceful degradation: FTS works without embeddings, vector search works without FTS matches, everything works without an embedding provider
 
 ### Awareness engine
 - Ambient awareness: status reporting, alert detection, suppression, briefing generation
@@ -387,7 +394,7 @@ For single-user deployments, secret path + WAF is sufficient. For multi-user, en
 - Streamable HTTP + stdio transports
 
 ### Infrastructure
-- PostgreSQL 17 with pgvector, GIN-indexed tag queries, HNSW-indexed embeddings, Debezium CDC-ready
+- PostgreSQL 17 with pgvector, GIN-indexed tag queries, HNSW-indexed embeddings, GIN-indexed tsvector for full-text search, Debezium CDC-ready
 - Connection pooling (psycopg_pool, min 2 / max 5) with automatic health checks and reconnection
 - List mode and since/until/created_after/created_before filters for lightweight queries
 - Storage abstraction: `Store` protocol — backends are swappable without changing server or collator logic
@@ -398,6 +405,18 @@ For single-user deployments, secret path + WAF is sufficient. For multi-user, en
 - Docker Compose with Postgres, optional Ollama, named Cloudflare Tunnel, or ephemeral quick tunnel
 - Request timing instrumentation and `/health` endpoint
 - Comprehensive test suite (all against real Postgres + Ollama in CI), strict type checking, CI pipeline with coverage, QA gate
+
+### Upgrading
+
+When upgrading to a release with hybrid retrieval (Layer 1), running `mcp-awareness-migrate upgrade head` applies two migrations:
+
+1. **Schema migration** — adds `language` (regconfig) and `tsv` (generated tsvector) columns to the entries table, plus GIN and partial indexes. Fast (DDL only).
+2. **Language backfill** — runs lingua-py detection on all existing entries and updates the `language` column where a known language is detected. This is a one-time data migration that may take longer than usual on the first deploy:
+   - lingua's first call loads ~300MB of n-gram models (multi-second startup cost)
+   - Each existing entry is processed for language detection
+   - If `lingua-language-detector` is not installed, the backfill is skipped and entries remain as `simple` (FTS still works, just without language-specific stemming)
+
+The `semantic_search` tool continues to work as a deprecated alias for the new `search` tool. Update your agent prompts to use `search` — the alias will be removed in a future release.
 
 ### Not yet implemented
 - Layer 2 (baseline) detection — rolling averages and deviation calculation
