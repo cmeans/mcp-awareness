@@ -554,7 +554,7 @@ async def register_schema(
     If you receive an unstructured error, the failure is in the transport
     or platform layer, not in awareness."""
     import psycopg.errors
-    from jsonschema import exceptions as jse  # type: ignore[import-untyped]
+    from jsonschema import exceptions as jse
 
     from mcp_awareness.validation import compose_schema_logical_key, validate_schema_body
 
@@ -659,7 +659,7 @@ async def create_record(
 
     If you receive an unstructured error, the failure is in the transport
     or platform layer, not in awareness."""
-    from jsonschema import exceptions as jse  # type: ignore[import-untyped]
+    from jsonschema import exceptions as jse
 
     from mcp_awareness.validation import resolve_schema, validate_record_content
 
@@ -674,7 +674,7 @@ async def create_record(
             searched_owners=[_srv._owner_id(), "_system"],
         )
 
-    schema_body = resolved.data["schema"]  # type: ignore[union-attr]
+    schema_body = resolved.data["schema"]
     try:
         errors = validate_record_content(schema_body, content)
     except jse.JsonSchemaException as e:
