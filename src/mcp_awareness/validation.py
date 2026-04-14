@@ -23,6 +23,10 @@ protocol stays swappable (no jsonschema import in store.py).
 
 from __future__ import annotations
 
+from typing import Any
+
+from jsonschema import Draft202012Validator
+
 
 def compose_schema_logical_key(family: str, version: str) -> str:
     """Derive the canonical logical_key for a schema entry.
@@ -31,3 +35,13 @@ def compose_schema_logical_key(family: str, version: str) -> str:
     Used by register_schema on write and by resolve_schema on lookup.
     """
     return f"{family}:{version}"
+
+
+def validate_schema_body(schema: Any) -> None:
+    """Validate a schema body against the JSON Schema Draft 2020-12 meta-schema.
+
+    Raises jsonschema.exceptions.SchemaError on invalid schema. Callers at
+    the MCP boundary translate this into a structured 'invalid_schema' error
+    response; direct callers (CLI) format to stderr.
+    """
+    Draft202012Validator.check_schema(schema)

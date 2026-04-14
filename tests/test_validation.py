@@ -18,9 +18,10 @@
 
 from __future__ import annotations
 
+import jsonschema
 import pytest
 
-from mcp_awareness.validation import compose_schema_logical_key
+from mcp_awareness.validation import compose_schema_logical_key, validate_schema_body
 
 
 def test_compose_schema_logical_key_basic():
@@ -29,3 +30,29 @@ def test_compose_schema_logical_key_basic():
 
 def test_compose_schema_logical_key_no_prefix():
     assert compose_schema_logical_key("tag-taxonomy", "0.1.0") == "tag-taxonomy:0.1.0"
+
+
+def test_validate_schema_body_accepts_valid_object_schema():
+    schema = {
+        "type": "object",
+        "properties": {"name": {"type": "string"}},
+        "required": ["name"],
+    }
+    validate_schema_body(schema)  # must not raise
+
+
+def test_validate_schema_body_rejects_bad_type():
+    schema = {"type": "strng"}  # typo: 'strng' is not a valid JSON Schema type
+    with pytest.raises(jsonschema.exceptions.SchemaError):
+        validate_schema_body(schema)
+
+
+def test_validate_schema_body_accepts_empty_object():
+    # Empty schema matches anything — valid per spec
+    validate_schema_body({})
+
+
+def test_validate_schema_body_rejects_non_dict():
+    # Schemas must be objects; bare arrays fail meta-schema
+    with pytest.raises(jsonschema.exceptions.SchemaError):
+        validate_schema_body([{"type": "string"}])  # type: ignore[arg-type]
