@@ -108,36 +108,10 @@ async def test_register_schema_rejects_duplicate_family_version(configured_serve
         )
     err = _parse_tool_error(excinfo)["error"]
     assert err["code"] == "schema_already_exists"
-
-
-@pytest.mark.anyio
-async def test_register_schema_generic_unique_exception_fallback(configured_server, monkeypatch):
-    """register_schema catches generic exceptions whose message contains 'unique'."""
-    from mcp.server.fastmcp.exceptions import ToolError
-
-    import mcp_awareness.server as srv
-    from mcp_awareness.tools import register_schema
-
-    original_add = srv.store.add
-
-    def _fake_add(owner_id, entry):
-        raise RuntimeError("unique constraint violation (generic driver)")
-
-    monkeypatch.setattr(srv.store, "add", _fake_add)
-
-    with pytest.raises(ToolError) as excinfo:
-        await register_schema(
-            source="test",
-            tags=[],
-            description="generic unique test",
-            family="schema:unique-fallback",
-            version="1.0.0",
-            schema={"type": "object"},
-        )
-    err = _parse_tool_error(excinfo)["error"]
-    assert err["code"] == "schema_already_exists"
-
-    monkeypatch.setattr(srv.store, "add", original_add)
+    # Structured extras — callers can locate the existing entry without parsing
+    # the human-readable message. Matches design-doc error-code table.
+    assert err["logical_key"] == "schema:dup:1.0.0"
+    assert err["existing_id"]  # non-empty; first-register's entry id
 
 
 @pytest.mark.anyio

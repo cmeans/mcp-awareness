@@ -127,12 +127,17 @@ def main() -> None:
         )
         sys.exit(1)
 
+    from mcp_awareness.language import resolve_language
     from mcp_awareness.postgres_store import PostgresStore
     from mcp_awareness.schema import Entry, EntryType, make_id, now_utc
 
     store = PostgresStore(database_url)
     logical_key = compose_schema_logical_key(args.family, args.version)
     tags = [t.strip() for t in args.tags.split(",") if t.strip()]
+    # Match the MCP path: run the description through the standard
+    # language-resolution chain (lingua auto-detection, SIMPLE fallback)
+    # instead of pinning every CLI-seeded schema to english.
+    resolved_lang = resolve_language(text_for_detection=args.description)
 
     entry = Entry(
         id=make_id(),
@@ -149,7 +154,7 @@ def main() -> None:
             "learned_from": "cli-bootstrap",
         },
         logical_key=logical_key,
-        language="english",
+        language=resolved_lang,
     )
 
     try:

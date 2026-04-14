@@ -108,7 +108,6 @@ ignore_missing_imports = true
 [[tool.mypy.overrides]]
 module = ["jsonschema.*"]
 ignore_missing_imports = true
-ignore_errors = true
 
 # The tools/resources/prompts modules use a circular import pattern
 # (from . import server as _srv) to access mutable state through the server

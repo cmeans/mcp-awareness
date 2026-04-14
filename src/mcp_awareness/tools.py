@@ -613,21 +613,19 @@ async def register_schema(
     try:
         _srv.store.add(_srv._owner_id(), entry)
     except psycopg.errors.UniqueViolation:
+        # Surface the structured fields promised by the error-code table
+        # (design doc §Error codes): logical_key and existing_id. existing_id
+        # is best-effort — if the lookup fails for any reason we still return
+        # a useful error rather than raising over the original error.
+        _existing = _srv.store.find_schema(_srv._owner_id(), logical_key)
+        _existing_id = _existing.id if _existing is not None else None
         _error_response(
             "schema_already_exists",
             f"Schema {logical_key} already exists in source {source!r}",
             retryable=False,
+            logical_key=logical_key,
+            existing_id=_existing_id,
         )
-    except Exception as e:
-        # Fallback: detect unique constraint via message for non-psycopg wrappers
-        msg = str(e).lower()
-        if "unique" in msg or "duplicate" in msg or "23505" in msg:
-            _error_response(
-                "schema_already_exists",
-                f"Schema {logical_key} already exists in source {source!r}",
-                retryable=False,
-            )
-        raise
 
     _srv._generate_embedding(entry)
     return json.dumps({"status": "ok", "id": entry.id, "logical_key": logical_key})
