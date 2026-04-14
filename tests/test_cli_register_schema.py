@@ -175,3 +175,88 @@ def test_cli_register_schema_missing_schema_file(pg_dsn, monkeypatch, capsys):
     with pytest.raises(SystemExit) as excinfo:
         main()
     assert excinfo.value.code == 1
+
+
+def test_cli_register_schema_bad_json(monkeypatch, capsys):
+    """Schema file contains invalid JSON — should exit 1 with invalid_json error."""
+    import tempfile
+
+    from mcp_awareness.cli_register_schema import main
+
+    with tempfile.NamedTemporaryFile(suffix=".json", mode="w", delete=False) as f:
+        f.write("{ not valid json }")
+        path = f.name
+
+    monkeypatch.delenv("AWARENESS_DATABASE_URL", raising=False)
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "mcp-awareness-register-schema",
+            "--system",
+            "--family",
+            "schema:bad-json",
+            "--version",
+            "1.0.0",
+            "--schema-file",
+            path,
+            "--source",
+            "test",
+            "--tags",
+            "",
+            "--description",
+            "bad json test",
+        ],
+    )
+    with pytest.raises(SystemExit) as excinfo:
+        main()
+    assert excinfo.value.code == 1
+    captured = capsys.readouterr()
+    err = json.loads(captured.err.strip())
+    assert err["error"]["code"] == "invalid_json"
+    Path(path).unlink(missing_ok=True)
+
+
+def test_cli_register_schema_store_error(pg_dsn, system_schema_file, monkeypatch, capsys):
+    """store.add raises — should exit 1 with store_error code."""
+    from mcp_awareness.cli_register_schema import main
+
+    monkeypatch.setenv("AWARENESS_DATABASE_URL", pg_dsn)
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "mcp-awareness-register-schema",
+            "--system",
+            "--family",
+            "schema:store-err",
+            "--version",
+            "1.0.0",
+            "--schema-file",
+            system_schema_file,
+            "--source",
+            "test",
+            "--tags",
+            "",
+            "--description",
+            "store error test",
+        ],
+    )
+
+    # Patch PostgresStore.add to simulate a DB error
+    import mcp_awareness.postgres_store as ps_mod
+
+    original_add = ps_mod.PostgresStore.add
+
+    def _boom(self, owner_id, entry):
+        raise RuntimeError("simulated DB failure")
+
+    monkeypatch.setattr(ps_mod.PostgresStore, "add", _boom)
+
+    with pytest.raises(SystemExit) as excinfo:
+        main()
+    assert excinfo.value.code == 1
+    captured = capsys.readouterr()
+    err = json.loads(captured.err.strip())
+    assert err["error"]["code"] == "store_error"
+    assert "simulated DB failure" in err["error"]["message"]
+
+    monkeypatch.setattr(ps_mod.PostgresStore, "add", original_add)

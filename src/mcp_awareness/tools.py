@@ -659,8 +659,6 @@ async def create_record(
 
     If you receive an unstructured error, the failure is in the transport
     or platform layer, not in awareness."""
-    from jsonschema import exceptions as jse
-
     from mcp_awareness.validation import resolve_schema, validate_record_content
 
     resolved = resolve_schema(_srv.store, _srv._owner_id(), schema_ref, schema_version)
@@ -677,7 +675,7 @@ async def create_record(
     schema_body = resolved.data["schema"]
     try:
         errors = validate_record_content(schema_body, content)
-    except jse.JsonSchemaException as e:
+    except Exception as e:
         _error_response(
             "validation_error",
             f"Unexpected content validation error: {e}",

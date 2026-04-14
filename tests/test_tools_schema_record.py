@@ -111,6 +111,103 @@ async def test_register_schema_rejects_duplicate_family_version(configured_serve
 
 
 @pytest.mark.asyncio
+async def test_register_schema_generic_unique_exception_fallback(configured_server, monkeypatch):
+    """register_schema catches generic exceptions whose message contains 'unique'."""
+    from mcp.server.fastmcp.exceptions import ToolError
+
+    from mcp_awareness.tools import register_schema
+
+    import mcp_awareness.server as srv
+
+    original_add = srv.store.add
+
+    def _fake_add(owner_id, entry):
+        raise RuntimeError("unique constraint violation (generic driver)")
+
+    monkeypatch.setattr(srv.store, "add", _fake_add)
+
+    with pytest.raises(ToolError) as excinfo:
+        await register_schema(
+            source="test",
+            tags=[],
+            description="generic unique test",
+            family="schema:unique-fallback",
+            version="1.0.0",
+            schema={"type": "object"},
+        )
+    err = _parse_tool_error(excinfo)["error"]
+    assert err["code"] == "schema_already_exists"
+
+    monkeypatch.setattr(srv.store, "add", original_add)
+
+
+@pytest.mark.asyncio
+async def test_register_schema_generic_non_unique_exception_reraises(configured_server, monkeypatch):
+    """register_schema re-raises generic exceptions that are not unique violations."""
+    from mcp_awareness.tools import register_schema
+
+    import mcp_awareness.server as srv
+
+    original_add = srv.store.add
+
+    def _fake_add(owner_id, entry):
+        raise RuntimeError("connection refused")
+
+    monkeypatch.setattr(srv.store, "add", _fake_add)
+
+    with pytest.raises(RuntimeError, match="connection refused"):
+        await register_schema(
+            source="test",
+            tags=[],
+            description="non-unique exception test",
+            family="schema:reraise",
+            version="1.0.0",
+            schema={"type": "object"},
+        )
+
+    monkeypatch.setattr(srv.store, "add", original_add)
+
+
+@pytest.mark.asyncio
+async def test_create_record_validate_raises_unexpected_error(configured_server, monkeypatch):
+    """create_record reports validation_error if validate_record_content raises unexpectedly."""
+    from mcp.server.fastmcp.exceptions import ToolError
+
+    from mcp_awareness.tools import create_record, register_schema
+
+    await register_schema(
+        source="test",
+        tags=[],
+        description="s",
+        family="schema:except",
+        version="1.0.0",
+        schema={"type": "object"},
+    )
+
+    import mcp_awareness.validation as validation_mod
+
+    monkeypatch.setattr(
+        validation_mod,
+        "validate_record_content",
+        lambda _s, _c: (_ for _ in ()).throw(RuntimeError("internal jsonschema error")),
+    )
+
+    with pytest.raises(ToolError) as excinfo:
+        await create_record(
+            source="test",
+            tags=[],
+            description="error case",
+            logical_key="except-rec",
+            schema_ref="schema:except",
+            schema_version="1.0.0",
+            content={},
+        )
+    err = json.loads(str(excinfo.value))["error"]
+    assert err["code"] == "validation_error"
+    assert "internal jsonschema error" in err["message"]
+
+
+@pytest.mark.asyncio
 async def test_register_schema_rejects_empty_family(configured_server):
     from mcp.server.fastmcp.exceptions import ToolError
 
@@ -661,3 +758,129 @@ async def test_caller_schema_overrides_system(configured_server, store, monkeypa
         )
     err = json.loads(str(excinfo.value))["error"]
     assert err["code"] == "validation_failed"
+
+
+@pytest.mark.asyncio
+async def test_create_record_validation_truncation(configured_server, monkeypatch):
+    """When validate_record_content returns a truncated list, create_record reports truncation."""
+    from mcp.server.fastmcp.exceptions import ToolError
+
+    from mcp_awareness.tools import create_record, register_schema
+
+    await register_schema(
+        source="test",
+        tags=[],
+        description="s",
+        family="schema:trunc",
+        version="1.0.0",
+        schema={"type": "object"},
+    )
+
+    # Patch validate_record_content at the module level so the lazy local import picks it up
+    import mcp_awareness.validation as validation_mod
+
+    fake_errors = [
+        {"path": f"$.f{i}", "message": "err", "validator": "type", "schema_path": "/type"}
+        for i in range(50)
+    ] + [{"truncated": True, "total_errors": 99}]
+
+    monkeypatch.setattr(validation_mod, "validate_record_content", lambda _s, _c: fake_errors)
+
+    with pytest.raises(ToolError) as excinfo:
+        await create_record(
+            source="test",
+            tags=[],
+            description="truncated errors test",
+            logical_key="trunc-rec",
+            schema_ref="schema:trunc",
+            schema_version="1.0.0",
+            content={},
+        )
+    err = json.loads(str(excinfo.value))["error"]
+    assert err["code"] == "validation_failed"
+    assert err["truncated"] is True
+    assert err["total_errors"] == 99
+
+
+@pytest.mark.asyncio
+async def test_update_entry_record_schema_gone(configured_server, store):
+    """update_entry re-validation returns schema_not_found if schema was deleted."""
+    from mcp.server.fastmcp.exceptions import ToolError
+
+    from mcp_awareness.tools import create_record, register_schema, update_entry
+
+    schema_resp = json.loads(
+        await register_schema(
+            source="test",
+            tags=[],
+            description="s",
+            family="schema:gone",
+            version="1.0.0",
+            schema={"type": "object", "properties": {"name": {"type": "string"}}},
+        )
+    )
+    record_resp = json.loads(
+        await create_record(
+            source="test",
+            tags=[],
+            description="r",
+            logical_key="r-gone",
+            schema_ref="schema:gone",
+            schema_version="1.0.0",
+            content={"name": "ok"},
+        )
+    )
+
+    # Soft-delete the schema directly via store (bypasses the referencing-records guard)
+    store.soft_delete_by_id(TEST_OWNER, schema_resp["id"])
+
+    # Now updating the record's content should fail with schema_not_found
+    with pytest.raises(ToolError) as excinfo:
+        await update_entry(entry_id=record_resp["id"], content={"name": "updated"})
+    err = json.loads(str(excinfo.value))["error"]
+    assert err["code"] == "schema_not_found"
+
+
+@pytest.mark.asyncio
+async def test_update_entry_record_revalidation_truncation(configured_server, monkeypatch):
+    """update_entry re-validation reports truncation when many errors are returned."""
+    from mcp.server.fastmcp.exceptions import ToolError
+
+    from mcp_awareness.tools import create_record, register_schema, update_entry
+
+    await register_schema(
+        source="test",
+        tags=[],
+        description="s",
+        family="schema:trunc2",
+        version="1.0.0",
+        schema={"type": "object"},
+    )
+    record_resp = json.loads(
+        await create_record(
+            source="test",
+            tags=[],
+            description="r",
+            logical_key="r-trunc2",
+            schema_ref="schema:trunc2",
+            schema_version="1.0.0",
+            content={},
+        )
+    )
+
+    # Patch validate_record_content at the module level so the lazy local import picks it up
+    import mcp_awareness.validation as validation_mod
+
+    fake_errors = [
+        {"path": f"$.f{i}", "message": "err", "validator": "type", "schema_path": "/type"}
+        for i in range(50)
+    ] + [{"truncated": True, "total_errors": 77}]
+
+    monkeypatch.setattr(validation_mod, "validate_record_content", lambda _s, _c: fake_errors)
+
+    with pytest.raises(ToolError) as excinfo:
+        await update_entry(entry_id=record_resp["id"], content={"bad": "data"})
+    err = json.loads(str(excinfo.value))["error"]
+    assert err["code"] == "validation_failed"
+    assert err["truncated"] is True
+    assert err["total_errors"] == 77
