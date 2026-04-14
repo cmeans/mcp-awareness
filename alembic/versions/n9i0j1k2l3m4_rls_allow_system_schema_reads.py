@@ -31,14 +31,19 @@ because the `find_schema` query's ``owner_id IN (%s, '_system')`` clause is
 evaluated AFTER RLS strips the `_system` row.
 
 This migration narrows the read carve-out to `_system`-owned *schema* rows
-only. Writes remain isolated by the existing `owner_insert` WITH CHECK
-policy (which still requires `owner_id = current_user`), so operators
-cannot accidentally write to `_system` via the MCP path — the CLI
-(`mcp-awareness-register-schema --system`) bypasses MCP and connects as
-whichever DB role the operator chose.
+only. Writes are kept strictly isolated by an explicit ``WITH CHECK``
+clause — without it, a ``FOR ALL`` permissive policy's ``USING`` is used
+for INSERT/UPDATE too, and (because permissive policies combine with OR)
+the read carve-out would leak into the write path, allowing non-privileged
+owners to INSERT/UPDATE rows with ``owner_id = '_system' AND type = 'schema'``
+(PR #287 Round-3 QA reproduction). Keeping the write check strict ensures
+the only path that can seed ``_system`` schemas is the CLI
+(``mcp-awareness-register-schema --system``) which bypasses MCP entirely
+and connects as whichever DB role the operator chose.
 
 Rationale: option 1 from the PR #287 Round-2 QA review (narrowest
-change, read-only carve-out, no SECURITY DEFINER functions needed).
+change, read-only carve-out, no SECURITY DEFINER functions needed) —
+plus the explicit WITH CHECK added in Round 3.
 """
 
 from __future__ import annotations
@@ -55,7 +60,8 @@ depends_on: str | Sequence[str] | None = None
 
 def upgrade() -> None:
     """Replace the owner_isolation policy on `entries` to allow reads of
-    `_system`-owned schema rows from any owner context."""
+    `_system`-owned schema rows from any owner context while keeping
+    writes strictly isolated via an explicit WITH CHECK clause."""
     op.execute("DROP POLICY IF EXISTS owner_isolation ON entries")
     op.execute("""
         CREATE POLICY owner_isolation ON entries
@@ -63,6 +69,7 @@ def upgrade() -> None:
                 owner_id = current_setting('app.current_user', true)
                 OR (owner_id = '_system' AND type = 'schema')
             )
+            WITH CHECK (owner_id = current_setting('app.current_user', true))
     """)
 
 

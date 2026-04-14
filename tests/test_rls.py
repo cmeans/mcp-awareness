@@ -50,7 +50,10 @@ def rls_store(pg_dsn: str) -> PostgresStore:
 
             # Create policies — entries gets the _system-schema read carve-out
             # added in migration n9i0j1k2l3m4 so non-privileged owners can see
-            # built-in schemas. Other tables keep strict owner isolation.
+            # built-in schemas. The WITH CHECK clause is explicit because
+            # permissive policies combine with OR, and without it the USING
+            # clause would leak into the write path (PR #287 Round-3 finding).
+            # Other tables keep strict owner isolation.
             if table == "entries":
                 cur.execute(f"""
                     CREATE POLICY owner_isolation ON {table}
@@ -58,6 +61,7 @@ def rls_store(pg_dsn: str) -> PostgresStore:
                             owner_id = current_setting('app.current_user', true)
                             OR (owner_id = '_system' AND type = 'schema')
                         )
+                        WITH CHECK (owner_id = current_setting('app.current_user', true))
                 """)
             else:
                 cur.execute(f"""
@@ -294,11 +298,100 @@ class TestRLSSystemSchemaFallback:
         alice_view = rls_store.get_entries("alice", tags=["rls-sys-note"])
         assert alice_view == []
 
-    # NOTE: A WITH-CHECK negative case ("alice cannot INSERT with
-    # owner_id='_system'") is intentionally NOT asserted here. The testcontainers
-    # postgres role does not reliably reject the raw INSERT even under FORCE ROW
-    # LEVEL SECURITY, so the test would not exercise the policy against the real
-    # production (non-superuser) role. The SELECT-side carve-out is the
-    # load-bearing behavior change in this migration and is covered by the three
-    # cases above; production WITH-CHECK enforcement is covered by the
-    # non-superuser repro documented in PR #287 round-2 QA feedback.
+    def test_nonsuperuser_cannot_insert_as_system(self, rls_store: PostgresStore) -> None:
+        """Non-privileged owners must not be able to write to `_system`.
+
+        This exercises the WITH CHECK clause against a real non-superuser role
+        — the production deployment target. Container superusers have
+        BYPASSRLS implicitly, so the raw INSERT against the default role
+        would silently succeed and leave the policy untested. We create a
+        NOSUPERUSER NOBYPASSRLS role, GRANT only what's needed, then
+        ``SET LOCAL ROLE`` onto it for the duration of the test transaction.
+
+        Regression for PR #287 Round-3: the original migration omitted the
+        explicit WITH CHECK, so the `_system`-schema carve-out in USING
+        leaked into INSERT/UPDATE via the FOR ALL permissive policy.
+        """
+        from mcp_awareness.schema import Entry
+
+        entry = Entry(
+            id=make_id(),
+            type=EntryType.SCHEMA,
+            source="impostor",
+            tags=[],
+            created=now_utc(),
+            expires=None,
+            data={"family": "schema:pwned", "version": "1.0.0", "schema": {"type": "object"}},
+            logical_key="schema:pwned:1.0.0",
+        )
+
+        # Provision the non-superuser role once per test (idempotent). Use a
+        # separate connection so the CREATE/GRANT commits regardless of the
+        # main test transaction's outcome.
+        with rls_store._pool.connection() as conn, conn.cursor() as cur:
+            conn.autocommit = True
+            cur.execute(
+                "DO $$ BEGIN "
+                "IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='rls_prod_sim') THEN "
+                "  CREATE ROLE rls_prod_sim NOSUPERUSER NOBYPASSRLS NOINHERIT; "
+                "END IF; END $$"
+            )
+            cur.execute("GRANT USAGE ON SCHEMA public TO rls_prod_sim")
+            cur.execute("GRANT SELECT, INSERT, UPDATE, DELETE ON entries TO rls_prod_sim")
+
+        # Now run the actual test inside a transaction as the simulated prod role.
+        with (
+            pytest.raises(psycopg.errors.InsufficientPrivilege),
+            rls_store._pool.connection() as conn,
+            conn.transaction(),
+            conn.cursor() as cur,
+        ):
+            cur.execute("SET LOCAL ROLE rls_prod_sim")
+            cur.execute("SELECT set_config('app.current_user', 'alice', true)")
+            cur.execute(
+                "INSERT INTO entries (id, owner_id, type, source, created, tags, data,"
+                " logical_key, language) VALUES (%s, '_system', 'schema', %s, now(), '[]',"
+                " %s::jsonb, %s, 'english')",
+                (entry.id, entry.source, '{"family": "schema:pwned"}', entry.logical_key),
+            )
+
+    def test_nonsuperuser_cannot_update_system_schema(self, rls_store: PostgresStore) -> None:
+        """Same WITH CHECK guard — an existing `_system` schema row cannot be
+        tampered with by a non-privileged owner via UPDATE."""
+        from mcp_awareness.schema import Entry
+
+        seed = Entry(
+            id=make_id(),
+            type=EntryType.SCHEMA,
+            source="system-bootstrap",
+            tags=[],
+            created=now_utc(),
+            expires=None,
+            data={"family": "schema:readonly", "version": "1.0.0", "schema": {"type": "object"}},
+            logical_key="schema:readonly:1.0.0",
+        )
+        rls_store.add("_system", seed)
+
+        with rls_store._pool.connection() as conn, conn.cursor() as cur:
+            conn.autocommit = True
+            cur.execute(
+                "DO $$ BEGIN "
+                "IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='rls_prod_sim') THEN "
+                "  CREATE ROLE rls_prod_sim NOSUPERUSER NOBYPASSRLS NOINHERIT; "
+                "END IF; END $$"
+            )
+            cur.execute("GRANT USAGE ON SCHEMA public TO rls_prod_sim")
+            cur.execute("GRANT SELECT, INSERT, UPDATE, DELETE ON entries TO rls_prod_sim")
+
+        with (
+            pytest.raises(psycopg.errors.InsufficientPrivilege),
+            rls_store._pool.connection() as conn,
+            conn.transaction(),
+            conn.cursor() as cur,
+        ):
+            cur.execute("SET LOCAL ROLE rls_prod_sim")
+            cur.execute("SELECT set_config('app.current_user', 'alice', true)")
+            cur.execute(
+                "UPDATE entries SET data = data || '{\"tampered\": true}'::jsonb"
+                " WHERE owner_id = '_system' AND type = 'schema'"
+            )
