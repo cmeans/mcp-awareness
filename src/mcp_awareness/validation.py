@@ -94,3 +94,35 @@ def resolve_schema(
     the SQL level). Returns the schema Entry or None.
     """
     return store.find_schema(owner_id, compose_schema_logical_key(family, version))
+
+
+class SchemaInUseError(Exception):
+    """Raised when a schema cannot be deleted because records reference it.
+
+    Callers at the MCP boundary translate this into a structured schema_in_use
+    error response with the referencing_records list and total_count.
+    """
+
+    def __init__(self, total_count: int, referencing_records: list[str]):
+        self.total_count = total_count
+        self.referencing_records = referencing_records
+        super().__init__(
+            f"Cannot delete schema: {total_count} record(s) still reference it"
+        )
+
+
+class _RefCounter(Protocol):
+    """Minimal protocol for assert_schema_deletable's store dependency."""
+
+    def count_records_referencing(
+        self, owner_id: str, schema_logical_key: str
+    ) -> tuple[int, list[str]]: ...
+
+
+def assert_schema_deletable(
+    store: _RefCounter, owner_id: str, schema_logical_key: str
+) -> None:
+    """Raise SchemaInUseError if any non-deleted records reference this schema."""
+    count, ids = store.count_records_referencing(owner_id, schema_logical_key)
+    if count > 0:
+        raise SchemaInUseError(total_count=count, referencing_records=ids)

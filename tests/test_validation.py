@@ -22,6 +22,8 @@ import jsonschema
 import pytest
 
 from mcp_awareness.validation import (
+    SchemaInUseError,
+    assert_schema_deletable,
     compose_schema_logical_key,
     resolve_schema,
     validate_record_content,
@@ -177,3 +179,31 @@ def test_resolve_schema_composes_logical_key_correctly():
     stub = _StubStore()
     resolve_schema(stub, "alice", "schema:edge-manifest", "2.3.4")
     assert stub.calls == [("alice", "schema:edge-manifest:2.3.4")]
+
+
+class _CounterStore:
+    """Stub exposing count_records_referencing for assert_schema_deletable tests."""
+
+    def __init__(self, count: int, ids: list[str]):
+        self._count = count
+        self._ids = ids
+
+    def count_records_referencing(self, owner_id, schema_logical_key):
+        return (self._count, self._ids)
+
+
+def test_assert_schema_deletable_passes_with_zero_refs():
+    # Must not raise
+    assert_schema_deletable(_CounterStore(0, []), "alice", "s:test:1.0.0")
+
+
+def test_assert_schema_deletable_raises_with_refs():
+    with pytest.raises(SchemaInUseError) as excinfo:
+        assert_schema_deletable(_CounterStore(3, ["id1", "id2", "id3"]), "alice", "s:test:1.0.0")
+    assert excinfo.value.total_count == 3
+    assert excinfo.value.referencing_records == ["id1", "id2", "id3"]
+
+
+def test_schema_in_use_error_has_readable_message():
+    err = SchemaInUseError(total_count=5, referencing_records=["a", "b"])
+    assert "5" in str(err)
