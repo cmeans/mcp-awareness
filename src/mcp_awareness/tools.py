@@ -659,24 +659,20 @@ async def create_record(
 
     If you receive an unstructured error, the failure is in the transport
     or platform layer, not in awareness."""
-    from mcp.server.fastmcp.exceptions import ToolError
     from jsonschema import exceptions as jse  # type: ignore[import-untyped]
 
     from mcp_awareness.validation import resolve_schema, validate_record_content
 
     resolved = resolve_schema(_srv.store, _srv._owner_id(), schema_ref, schema_version)
     if resolved is None:
-        raise ToolError(json.dumps({
-            "status": "error",
-            "error": {
-                "code": "schema_not_found",
-                "message": f"No schema {schema_ref}:{schema_version} in your namespace or _system",
-                "retryable": False,
-                "schema_ref": schema_ref,
-                "schema_version": schema_version,
-                "searched_owners": [_srv._owner_id(), "_system"],
-            },
-        }))
+        _error_response(
+            "schema_not_found",
+            f"No schema {schema_ref}:{schema_version} in your namespace or _system",
+            retryable=False,
+            schema_ref=schema_ref,
+            schema_version=schema_version,
+            searched_owners=[_srv._owner_id(), "_system"],
+        )
 
     schema_body = resolved.data["schema"]  # type: ignore[union-attr]
     try:
@@ -693,18 +689,23 @@ async def create_record(
         truncated = errors[-1].get("truncated") is True
         total_errors = errors[-1]["total_errors"] if truncated else len(errors)
         validation_errors = errors[:-1] if truncated else errors
-        err_body: dict[str, Any] = {
-            "code": "validation_failed",
-            "message": f"Record content does not conform to schema {schema_ref}:{schema_version} ({total_errors} errors)",
-            "retryable": False,
+        vf_extras: dict[str, Any] = {
             "schema_ref": schema_ref,
             "schema_version": schema_version,
             "validation_errors": validation_errors,
         }
         if truncated:
-            err_body["truncated"] = True
-            err_body["total_errors"] = total_errors
-        raise ToolError(json.dumps({"status": "error", "error": err_body}))
+            vf_extras["truncated"] = True
+            vf_extras["total_errors"] = total_errors
+        _error_response(
+            "validation_failed",
+            (
+                f"Record content does not conform to schema"
+                f" {schema_ref}:{schema_version} ({total_errors} errors)"
+            ),
+            retryable=False,
+            **vf_extras,
+        )
 
     now = now_utc()
     data: dict[str, Any] = {
@@ -730,9 +731,7 @@ async def create_record(
         language=resolved_lang,
     )
 
-    saved, created = _srv.store.upsert_by_logical_key(
-        _srv._owner_id(), source, logical_key, entry
-    )
+    saved, created = _srv.store.upsert_by_logical_key(_srv._owner_id(), source, logical_key, entry)
     _srv._generate_embedding(saved)
     action = "created" if created else "updated"
     return json.dumps({"status": "ok", "id": saved.id, "action": action})
@@ -764,6 +763,8 @@ async def update_entry(
         updates["tags"] = tags
     if source is not None:
         updates["source"] = source
+    # Preserve the raw content value for re-validation before stringifying it.
+    _raw_content: Any = content
     if content is not None:
         if not isinstance(content, str):
             content = json.dumps(content)
@@ -782,6 +783,57 @@ async def update_entry(
             retryable=False,
             param="content",
         )
+    # --- New: type-specific branching for schema and record entries ---
+    from mcp_awareness.schema import EntryType as _EntryType
+    from mcp_awareness.validation import resolve_schema, validate_record_content
+
+    _existing = _srv.store.get_entry_by_id(_srv._owner_id(), entry_id)
+    if _existing is not None:
+        if _existing.type == _EntryType.SCHEMA:
+            _error_response(
+                "schema_immutable",
+                "Schemas cannot be updated. Register a new version instead.",
+                retryable=False,
+            )
+        if _existing.type == _EntryType.RECORD and _raw_content is not None:
+            _schema_ref = _existing.data["schema_ref"]
+            _schema_version = _existing.data["schema_version"]
+            _resolved = resolve_schema(_srv.store, _srv._owner_id(), _schema_ref, _schema_version)
+            if _resolved is None:
+                _error_response(
+                    "schema_not_found",
+                    f"Cannot re-validate: schema {_schema_ref}:{_schema_version} not found",
+                    retryable=False,
+                    schema_ref=_schema_ref,
+                    schema_version=_schema_version,
+                    searched_owners=[_srv._owner_id(), "_system"],
+                )
+            _content_to_validate = (
+                json.loads(_raw_content) if isinstance(_raw_content, str) else _raw_content
+            )
+            _errors = validate_record_content(_resolved.data["schema"], _content_to_validate)
+            if _errors:
+                _truncated = _errors[-1].get("truncated") is True
+                _total_errors = _errors[-1]["total_errors"] if _truncated else len(_errors)
+                _validation_errors = _errors[:-1] if _truncated else _errors
+                _vf_extras: dict[str, Any] = {
+                    "schema_ref": _schema_ref,
+                    "schema_version": _schema_version,
+                    "validation_errors": _validation_errors,
+                }
+                if _truncated:
+                    _vf_extras["truncated"] = True
+                    _vf_extras["total_errors"] = _total_errors
+                _error_response(
+                    "validation_failed",
+                    (
+                        f"Record content does not conform to schema"
+                        f" {_schema_ref}:{_schema_version} ({_total_errors} errors)"
+                    ),
+                    retryable=False,
+                    **_vf_extras,
+                )
+    # --- end branching ---
     result = _srv.store.update_entry(_srv._owner_id(), entry_id, updates)
     if result is None:
         _error_response(
