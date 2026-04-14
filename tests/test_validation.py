@@ -21,8 +21,12 @@ from __future__ import annotations
 import jsonschema
 import pytest
 
-from mcp_awareness.validation import compose_schema_logical_key, validate_schema_body, validate_record_content
-
+from mcp_awareness.validation import (
+    compose_schema_logical_key,
+    resolve_schema,
+    validate_record_content,
+    validate_schema_body,
+)
 
 _PERSON_SCHEMA = {
     "type": "object",
@@ -35,7 +39,9 @@ _PERSON_SCHEMA = {
 
 
 def test_compose_schema_logical_key_basic():
-    assert compose_schema_logical_key("schema:edge-manifest", "1.0.0") == "schema:edge-manifest:1.0.0"
+    assert (
+        compose_schema_logical_key("schema:edge-manifest", "1.0.0") == "schema:edge-manifest:1.0.0"
+    )
 
 
 def test_compose_schema_logical_key_no_prefix():
@@ -131,3 +137,43 @@ def test_validate_record_content_truncates_at_50():
     assert len(result) == 51  # 50 errors + 1 truncation marker
     assert result[-1]["truncated"] is True
     assert result[-1]["total_errors"] == 60
+
+
+class _StubStore:
+    """Minimal Store-like stub for validation unit tests.
+
+    Records calls to find_schema and returns pre-configured results keyed by
+    (owner_id, logical_key). Only needs to implement find_schema; other Store
+    methods are never called by resolve_schema.
+    """
+
+    def __init__(self):
+        self._results: dict[tuple[str, str], object] = {}
+        self.calls: list[tuple[str, str]] = []
+
+    def set(self, owner_id: str, logical_key: str, result):
+        self._results[(owner_id, logical_key)] = result
+
+    def find_schema(self, owner_id, logical_key):
+        self.calls.append((owner_id, logical_key))
+        return self._results.get((owner_id, logical_key))
+
+
+def test_resolve_schema_delegates_to_find_schema():
+    stub = _StubStore()
+    sentinel = object()
+    stub.set("alice", "s:test:1.0.0", sentinel)
+    result = resolve_schema(stub, "alice", "s:test", "1.0.0")
+    assert result is sentinel
+
+
+def test_resolve_schema_returns_none_when_missing():
+    stub = _StubStore()
+    assert resolve_schema(stub, "alice", "s:nope", "1.0.0") is None
+
+
+def test_resolve_schema_composes_logical_key_correctly():
+    """Confirms family+version are composed via compose_schema_logical_key."""
+    stub = _StubStore()
+    resolve_schema(stub, "alice", "schema:edge-manifest", "2.3.4")
+    assert stub.calls == [("alice", "schema:edge-manifest:2.3.4")]

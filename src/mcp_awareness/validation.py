@@ -23,7 +23,10 @@ protocol stays swappable (no jsonschema import in store.py).
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any, Protocol
+
+if TYPE_CHECKING:
+    from mcp_awareness.schema import Entry
 
 from jsonschema import Draft202012Validator, ValidationError
 
@@ -73,3 +76,21 @@ def validate_record_content(schema_body: dict[str, Any], content: Any) -> list[d
     kept = [_flatten_error(e) for e in all_errors[:_MAX_VALIDATION_ERRORS]]
     kept.append({"truncated": True, "total_errors": len(all_errors)})
     return kept
+
+
+class _SchemaFinder(Protocol):
+    """Minimal protocol for resolve_schema's store dependency."""
+
+    def find_schema(self, owner_id: str, logical_key: str) -> Entry | None:
+        ...
+
+
+def resolve_schema(
+    store: _SchemaFinder, owner_id: str, family: str, version: str
+) -> Entry | None:
+    """Resolve a schema by family + version, preferring caller-owned.
+
+    Delegates to Store.find_schema (which handles the _system fallback at
+    the SQL level). Returns the schema Entry or None.
+    """
+    return store.find_schema(owner_id, compose_schema_logical_key(family, version))
