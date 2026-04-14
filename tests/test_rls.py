@@ -16,16 +16,24 @@
 
 """Tests for row-level security policies.
 
-These tests verify that RLS policies correctly isolate data between owners.
-RLS is defense-in-depth — application code already filters by owner_id,
-but RLS ensures the database enforces isolation even if app code has bugs.
+**Guardrail — all RLS tests must run as a non-superuser role.** Superuser
+roles implicitly bypass RLS regardless of ``FORCE ROW LEVEL SECURITY``, so a
+passing RLS test under the testcontainers default role proves nothing about
+the policy. The ``rls_store`` fixture below enforces this by monkey-patching
+``PostgresStore._set_rls_context`` to issue ``SET LOCAL ROLE rls_test_role``
+before every transaction, so every store API call exercises the policy the
+way production does. Tests that need direct-SQL negative cases (e.g.
+``test_nonsuperuser_cannot_insert_as_system``) use the same role via an
+explicit ``SET LOCAL ROLE`` in their own cursor block.
 
-Note: RLS policies only affect non-superuser roles. The test creates a
-restricted role to test policy enforcement, since the default test
-connection uses the postgres superuser which bypasses RLS.
+See issue #289 and the PR #287 QA rounds for the process rationale: rounds
+2 and 3 both caught RLS defects that CI reported green because the fixture
+ran as superuser. Do not add a new RLS test that skips the role switch.
 """
 
 from __future__ import annotations
+
+from typing import Any
 
 import psycopg
 import pytest
@@ -33,60 +41,96 @@ import pytest
 from mcp_awareness.postgres_store import PostgresStore
 from mcp_awareness.schema import EntryType, make_id, now_utc
 
+RLS_TEST_ROLE = "rls_test_role"
+_RLS_TABLES = ("entries", "reads", "actions", "embeddings")
+_RLS_SEQUENCES = ("reads_id_seq", "actions_id_seq", "embeddings_id_seq")
+
+
+def _provision_rls_role(conn: psycopg.Connection) -> None:
+    """Idempotently create the non-superuser test role and GRANT the minimum
+    privileges needed for every store call path (including SERIAL sequence
+    nextval on reads/actions/embeddings)."""
+    with conn.cursor() as cur:
+        cur.execute(
+            "DO $$ BEGIN "
+            f"IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='{RLS_TEST_ROLE}') THEN "
+            f"  CREATE ROLE {RLS_TEST_ROLE} NOSUPERUSER NOBYPASSRLS NOINHERIT; "
+            "END IF; END $$"
+        )
+        cur.execute(f"GRANT USAGE ON SCHEMA public TO {RLS_TEST_ROLE}")
+        for table in _RLS_TABLES:
+            cur.execute(f"GRANT SELECT, INSERT, UPDATE, DELETE ON {table} TO {RLS_TEST_ROLE}")
+        for seq in _RLS_SEQUENCES:
+            cur.execute(f"GRANT USAGE, SELECT ON SEQUENCE {seq} TO {RLS_TEST_ROLE}")
+
 
 @pytest.fixture
-def rls_store(pg_dsn: str) -> PostgresStore:
-    """Store with RLS policies enabled on all tables."""
+def rls_store(pg_dsn: str, monkeypatch: pytest.MonkeyPatch) -> PostgresStore:
+    """PostgresStore under RLS, with every store API call rerouted through
+    ``rls_test_role`` (NOSUPERUSER NOBYPASSRLS) for the duration of each
+    transaction. This ensures the policy is actually enforced — the default
+    testcontainers role is a superuser and would silently bypass RLS.
+
+    The monkey-patch of ``_set_rls_context`` issues ``SET LOCAL ROLE`` +
+    ``set_config('app.current_user', …)`` together; both are transaction-
+    scoped and revert when the store's ``conn.transaction()`` block exits,
+    so the pool connection returns to the pool as the superuser it was
+    checked out as.
+    """
     store = PostgresStore(pg_dsn)
 
-    with psycopg.connect(pg_dsn) as conn, conn.cursor() as cur:
-        for table in ("entries", "reads", "actions", "embeddings"):
-            # Enable RLS
-            cur.execute(f"ALTER TABLE {table} ENABLE ROW LEVEL SECURITY")
+    with psycopg.connect(pg_dsn, autocommit=True) as conn:
+        _provision_rls_role(conn)
+        with conn.cursor() as cur:
+            for table in _RLS_TABLES:
+                cur.execute(f"ALTER TABLE {table} ENABLE ROW LEVEL SECURITY")
+                cur.execute(f"DROP POLICY IF EXISTS owner_isolation ON {table}")
+                cur.execute(f"DROP POLICY IF EXISTS owner_insert ON {table}")
 
-            # Drop existing policies if any (idempotent)
-            cur.execute(f"DROP POLICY IF EXISTS owner_isolation ON {table}")
-            cur.execute(f"DROP POLICY IF EXISTS owner_insert ON {table}")
-
-            # Create policies — entries gets the _system-schema read carve-out
-            # added in migration n9i0j1k2l3m4 so non-privileged owners can see
-            # built-in schemas. The WITH CHECK clause is explicit because
-            # permissive policies combine with OR, and without it the USING
-            # clause would leak into the write path (PR #287 Round-3 finding).
-            # Other tables keep strict owner isolation.
-            if table == "entries":
+                # `entries` gets the _system-schema read carve-out added in
+                # migration n9i0j1k2l3m4 with an explicit strict WITH CHECK
+                # so the carve-out does not leak into INSERT/UPDATE (PR #287
+                # Round-3 finding). Other tables keep strict owner isolation.
+                if table == "entries":
+                    cur.execute("""
+                        CREATE POLICY owner_isolation ON entries
+                            USING (
+                                owner_id = current_setting('app.current_user', true)
+                                OR (owner_id = '_system' AND type = 'schema')
+                            )
+                            WITH CHECK (owner_id = current_setting('app.current_user', true))
+                    """)
+                else:
+                    cur.execute(f"""
+                        CREATE POLICY owner_isolation ON {table}
+                            USING (owner_id = current_setting('app.current_user', true))
+                    """)
                 cur.execute(f"""
-                    CREATE POLICY owner_isolation ON {table}
-                        USING (
-                            owner_id = current_setting('app.current_user', true)
-                            OR (owner_id = '_system' AND type = 'schema')
-                        )
+                    CREATE POLICY owner_insert ON {table}
+                        FOR INSERT
                         WITH CHECK (owner_id = current_setting('app.current_user', true))
                 """)
-            else:
-                cur.execute(f"""
-                    CREATE POLICY owner_isolation ON {table}
-                        USING (owner_id = current_setting('app.current_user', true))
-                """)
-            cur.execute(f"""
-                CREATE POLICY owner_insert ON {table}
-                    FOR INSERT
-                    WITH CHECK (owner_id = current_setting('app.current_user', true))
-            """)
 
-            # Force RLS even for table owner (superuser bypass would otherwise skip it)
-            cur.execute(f"ALTER TABLE {table} FORCE ROW LEVEL SECURITY")
+                # Force RLS so the table owner also gets the policy applied —
+                # the BYPASSRLS attribute on superusers still wins, which is
+                # precisely why we switch to rls_test_role below.
+                cur.execute(f"ALTER TABLE {table} FORCE ROW LEVEL SECURITY")
+
+    def _set_rls_ctx_nonsuper(cur: psycopg.Cursor[Any], owner_id: str) -> None:
+        cur.execute(f"SET LOCAL ROLE {RLS_TEST_ROLE}")
+        cur.execute("SELECT set_config('app.current_user', %s, true)", (owner_id,))
+
+    monkeypatch.setattr(PostgresStore, "_set_rls_context", staticmethod(_set_rls_ctx_nonsuper))
 
     yield store
 
-    # Cleanup: disable RLS and drop policies
-    with psycopg.connect(pg_dsn) as conn, conn.cursor() as cur:
-        for table in ("entries", "reads", "actions", "embeddings"):
+    # Cleanup: disable RLS and drop policies (back under superuser).
+    with psycopg.connect(pg_dsn, autocommit=True) as conn, conn.cursor() as cur:
+        for table in _RLS_TABLES:
             cur.execute(f"ALTER TABLE {table} NO FORCE ROW LEVEL SECURITY")
             cur.execute(f"DROP POLICY IF EXISTS owner_insert ON {table}")
             cur.execute(f"DROP POLICY IF EXISTS owner_isolation ON {table}")
             cur.execute(f"ALTER TABLE {table} DISABLE ROW LEVEL SECURITY")
-        # Clean up test data
         cur.execute("DELETE FROM reads")
         cur.execute("DELETE FROM actions")
         cur.execute("DELETE FROM embeddings")
@@ -301,12 +345,10 @@ class TestRLSSystemSchemaFallback:
     def test_nonsuperuser_cannot_insert_as_system(self, rls_store: PostgresStore) -> None:
         """Non-privileged owners must not be able to write to `_system`.
 
-        This exercises the WITH CHECK clause against a real non-superuser role
-        — the production deployment target. Container superusers have
-        BYPASSRLS implicitly, so the raw INSERT against the default role
-        would silently succeed and leave the policy untested. We create a
-        NOSUPERUSER NOBYPASSRLS role, GRANT only what's needed, then
-        ``SET LOCAL ROLE`` onto it for the duration of the test transaction.
+        This exercises the WITH CHECK clause against the fixture's
+        ``rls_test_role`` (NOSUPERUSER NOBYPASSRLS). Container superusers
+        have BYPASSRLS implicitly, so the raw INSERT against the default
+        role would silently succeed and leave the policy untested.
 
         Regression for PR #287 Round-3: the original migration omitted the
         explicit WITH CHECK, so the `_system`-schema carve-out in USING
@@ -325,28 +367,14 @@ class TestRLSSystemSchemaFallback:
             logical_key="schema:pwned:1.0.0",
         )
 
-        # Provision the non-superuser role once per test (idempotent). Use a
-        # separate connection so the CREATE/GRANT commits regardless of the
-        # main test transaction's outcome.
-        with rls_store._pool.connection() as conn, conn.cursor() as cur:
-            conn.autocommit = True
-            cur.execute(
-                "DO $$ BEGIN "
-                "IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='rls_prod_sim') THEN "
-                "  CREATE ROLE rls_prod_sim NOSUPERUSER NOBYPASSRLS NOINHERIT; "
-                "END IF; END $$"
-            )
-            cur.execute("GRANT USAGE ON SCHEMA public TO rls_prod_sim")
-            cur.execute("GRANT SELECT, INSERT, UPDATE, DELETE ON entries TO rls_prod_sim")
-
-        # Now run the actual test inside a transaction as the simulated prod role.
+        # rls_test_role is already provisioned + GRANTed by the rls_store fixture.
         with (
             pytest.raises(psycopg.errors.InsufficientPrivilege),
             rls_store._pool.connection() as conn,
             conn.transaction(),
             conn.cursor() as cur,
         ):
-            cur.execute("SET LOCAL ROLE rls_prod_sim")
+            cur.execute(f"SET LOCAL ROLE {RLS_TEST_ROLE}")
             cur.execute("SELECT set_config('app.current_user', 'alice', true)")
             cur.execute(
                 "INSERT INTO entries (id, owner_id, type, source, created, tags, data,"
@@ -372,26 +400,117 @@ class TestRLSSystemSchemaFallback:
         )
         rls_store.add("_system", seed)
 
-        with rls_store._pool.connection() as conn, conn.cursor() as cur:
-            conn.autocommit = True
-            cur.execute(
-                "DO $$ BEGIN "
-                "IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='rls_prod_sim') THEN "
-                "  CREATE ROLE rls_prod_sim NOSUPERUSER NOBYPASSRLS NOINHERIT; "
-                "END IF; END $$"
-            )
-            cur.execute("GRANT USAGE ON SCHEMA public TO rls_prod_sim")
-            cur.execute("GRANT SELECT, INSERT, UPDATE, DELETE ON entries TO rls_prod_sim")
-
         with (
             pytest.raises(psycopg.errors.InsufficientPrivilege),
             rls_store._pool.connection() as conn,
             conn.transaction(),
             conn.cursor() as cur,
         ):
-            cur.execute("SET LOCAL ROLE rls_prod_sim")
+            cur.execute(f"SET LOCAL ROLE {RLS_TEST_ROLE}")
             cur.execute("SELECT set_config('app.current_user', 'alice', true)")
             cur.execute(
                 "UPDATE entries SET data = data || '{\"tampered\": true}'::jsonb"
                 " WHERE owner_id = '_system' AND type = 'schema'"
             )
+
+
+class TestRLSFixtureGuardrail:
+    """Meta-tests: prove the `rls_store` fixture is not tautological.
+
+    If either of these fails it means the fixture has silently reverted
+    to running as a superuser (bypassing RLS), which would invalidate
+    every other test in this file. Keep both — they cover complementary
+    failure modes.
+    """
+
+    def test_fixture_switches_to_nonsuperuser_role(self, rls_store: PostgresStore) -> None:
+        """``_set_rls_context`` must switch the transaction's current_user to
+        ``rls_test_role`` (NOSUPERUSER NOBYPASSRLS). If the fixture forgets
+        to monkey-patch, store calls run as the container superuser and RLS
+        is bypassed regardless of FORCE ROW LEVEL SECURITY."""
+        with (
+            rls_store._pool.connection() as conn,
+            conn.transaction(),
+            conn.cursor() as cur,
+        ):
+            PostgresStore._set_rls_context(cur, "alice")
+            cur.execute("SELECT current_user AS u")
+            row = cur.fetchone()
+            assert row is not None
+            assert row["u"] == RLS_TEST_ROLE, (
+                f"Expected current_user to be {RLS_TEST_ROLE!r} after "
+                f"_set_rls_context; got {row['u']!r}. The rls_store fixture "
+                "is not monkey-patching _set_rls_context to SET LOCAL ROLE — "
+                "every other RLS test in this file is tautological."
+            )
+
+    def test_rls_fixture_actually_enforces_policy(
+        self, rls_store: PostgresStore, pg_dsn: str
+    ) -> None:
+        """Insert bob's entry, then run a raw SELECT as alice (`SET LOCAL ROLE`
+        + ``set_config``) without any ``owner_id = %s`` filter. Under the real
+        ``owner_isolation`` policy the SELECT returns zero rows; under a
+        temporarily-relaxed ``USING (true)`` policy it returns bob's row.
+
+        The raw SELECT is deliberately not via ``get_entries``: that SQL
+        already hard-codes ``WHERE owner_id = %s``, which would shield the
+        test from any RLS misbehavior and make it tautological. We want to
+        prove the policy itself is load-bearing, not just the application
+        filter.
+        """
+        from mcp_awareness.schema import Entry
+
+        entry = Entry(
+            id=make_id(),
+            type=EntryType.NOTE,
+            source="meta-test",
+            tags=["meta-rls"],
+            created=now_utc(),
+            expires=None,
+            data={"description": "bob's note — only visible to bob under policy"},
+        )
+        rls_store.add("bob", entry)
+
+        def _alice_raw_select() -> int:
+            with (
+                rls_store._pool.connection() as conn,
+                conn.transaction(),
+                conn.cursor() as cur,
+            ):
+                cur.execute(f"SET LOCAL ROLE {RLS_TEST_ROLE}")
+                cur.execute("SELECT set_config('app.current_user', 'alice', true)")
+                cur.execute(
+                    "SELECT count(*) AS n FROM entries WHERE tags @> %s::jsonb",
+                    ('["meta-rls"]',),
+                )
+                row = cur.fetchone()
+                assert row is not None
+                return int(row["n"])
+
+        # Under the real owner_isolation policy, alice sees zero rows.
+        assert _alice_raw_select() == 0
+
+        # Relax the policy so USING returns true regardless of owner. If the
+        # fixture were silently bypassing RLS, behavior wouldn't change; if
+        # the fixture is correctly exercising RLS, alice now sees bob's row —
+        # proving the assertion above was load-bearing.
+        with psycopg.connect(pg_dsn, autocommit=True) as conn, conn.cursor() as cur:
+            cur.execute("DROP POLICY owner_isolation ON entries")
+            cur.execute("""
+                CREATE POLICY owner_isolation ON entries
+                    USING (true)
+                    WITH CHECK (owner_id = current_setting('app.current_user', true))
+            """)
+        try:
+            assert _alice_raw_select() == 1
+        finally:
+            with psycopg.connect(pg_dsn, autocommit=True) as conn, conn.cursor() as cur:
+                cur.execute("DROP POLICY owner_isolation ON entries")
+                cur.execute("""
+                    CREATE POLICY owner_isolation ON entries
+                        USING (
+                            owner_id = current_setting('app.current_user', true)
+                            OR (owner_id = '_system' AND type = 'schema')
+                        )
+                        WITH CHECK (owner_id = current_setting('app.current_user', true))
+                """)
