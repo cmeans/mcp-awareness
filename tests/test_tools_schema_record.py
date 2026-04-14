@@ -476,3 +476,169 @@ async def test_delete_entry_schema_allowed_after_records_deleted(configured_serv
     await delete_entry(entry_id=record_resp["id"])
     # Now schema delete succeeds
     await delete_entry(entry_id=schema_resp["id"])
+
+
+@pytest.mark.asyncio
+async def test_cross_owner_schema_invisible(configured_server, store, monkeypatch):
+    """Owner A registers a schema; Owner B cannot resolve it."""
+    import mcp_awareness.server as srv
+
+    from mcp.server.fastmcp.exceptions import ToolError
+
+    from mcp_awareness.tools import create_record, register_schema
+
+    # Owner A (default TEST_OWNER) registers a schema
+    await register_schema(
+        source="test",
+        tags=[],
+        description="A's schema",
+        family="schema:mine",
+        version="1.0.0",
+        schema={"type": "object"},
+    )
+
+    # Switch to Owner B by re-patching the _owner_id accessor
+    monkeypatch.setattr(srv, "_owner_id", lambda: "other-owner")
+    with pytest.raises(ToolError) as excinfo:
+        await create_record(
+            source="test",
+            tags=[],
+            description="B's attempt",
+            logical_key="r-b",
+            schema_ref="schema:mine",
+            schema_version="1.0.0",
+            content={},
+        )
+    err = json.loads(str(excinfo.value))["error"]
+    assert err["code"] == "schema_not_found"
+
+
+@pytest.mark.asyncio
+async def test_both_owners_see_system_schema(configured_server, store, monkeypatch):
+    """Both A and B can use a _system schema."""
+    import mcp_awareness.server as srv
+
+    from mcp_awareness.schema import Entry, make_id, now_utc
+
+    from mcp_awareness.tools import create_record
+
+    # Seed _system schema directly
+    store.add(
+        "_system",
+        Entry(
+            id=make_id(),
+            type=EntryType.SCHEMA,
+            source="system",
+            tags=["system"],
+            created=now_utc(),
+            expires=None,
+            data={
+                "family": "schema:shared",
+                "version": "1.0.0",
+                "schema": {"type": "object"},
+                "description": "shared",
+                "learned_from": "cli-bootstrap",
+            },
+            logical_key="schema:shared:1.0.0",
+        ),
+    )
+
+    # A creates a record against _system schema
+    a_resp = json.loads(
+        await create_record(
+            source="test",
+            tags=[],
+            description="A's record",
+            logical_key="rec-a",
+            schema_ref="schema:shared",
+            schema_version="1.0.0",
+            content={"who": "alice"},
+        )
+    )
+    assert a_resp["status"] == "ok"
+
+    # Switch to Owner B
+    monkeypatch.setattr(srv, "_owner_id", lambda: "bob")
+    b_resp = json.loads(
+        await create_record(
+            source="test",
+            tags=[],
+            description="B's record",
+            logical_key="rec-b",
+            schema_ref="schema:shared",
+            schema_version="1.0.0",
+            content={"who": "bob"},
+        )
+    )
+    assert b_resp["status"] == "ok"
+
+
+@pytest.mark.asyncio
+async def test_caller_schema_overrides_system(configured_server, store, monkeypatch):
+    """When both _system and caller have the same logical_key, caller's version wins."""
+    import mcp_awareness.server as srv
+
+    from mcp.server.fastmcp.exceptions import ToolError
+
+    from mcp_awareness.schema import Entry, make_id, now_utc
+
+    from mcp_awareness.tools import create_record, register_schema
+
+    # _system schema allows integer only
+    store.add(
+        "_system",
+        Entry(
+            id=make_id(),
+            type=EntryType.SCHEMA,
+            source="system",
+            tags=["system"],
+            created=now_utc(),
+            expires=None,
+            data={
+                "family": "schema:override",
+                "version": "1.0.0",
+                "schema": {"type": "integer"},
+                "description": "system strict",
+                "learned_from": "cli-bootstrap",
+            },
+            logical_key="schema:override:1.0.0",
+        ),
+    )
+
+    # Caller schema allows string only — overrides _system
+    await register_schema(
+        source="test",
+        tags=[],
+        description="caller's permissive",
+        family="schema:override",
+        version="1.0.0",
+        schema={"type": "string"},
+    )
+
+    # Caller's record with a STRING should pass (caller's schema wins)
+    resp = json.loads(
+        await create_record(
+            source="test",
+            tags=[],
+            description="caller-wins",
+            logical_key="rec-override",
+            schema_ref="schema:override",
+            schema_version="1.0.0",
+            content="string-value",
+        )
+    )
+    assert resp["status"] == "ok"
+
+    # Caller's record with an INTEGER should FAIL (caller's schema says string only)
+    with pytest.raises(ToolError) as excinfo:
+        await create_record(
+            source="test",
+            tags=[],
+            description="wrong-type",
+            logical_key="rec-override-2",
+            schema_ref="schema:override",
+            schema_version="1.0.0",
+            content=42,
+        )
+    err = json.loads(str(excinfo.value))["error"]
+    assert err["code"] == "validation_failed"
