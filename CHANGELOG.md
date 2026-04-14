@@ -8,6 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Two new entry types: `schema` (JSON Schema Draft 2020-12 definition) and `record` (validated payload conforming to a schema). Tools: `register_schema`, `create_record`. Schemas are absolutely immutable after registration; records re-validate on content update. Schema deletion is blocked while live records reference a version. Per-owner storage with a shared `_system` fallback namespace for built-in schemas.
+- New CLI: `mcp-awareness-register-schema` for operators to seed `_system`-owned schemas at deploy time.
+- New migration: `_system` user seed (idempotent).
+- `_error_response()` helper now accepts `**extras` kwargs so tools can include structured fields in error envelopes beyond the fixed set (e.g., `validation_errors`, `schema_ref`, `referencing_records`).
+
+### Dependencies
+- Added `jsonschema>=4.26.0` as a runtime dependency.
+
 ## [0.17.0] - 2026-04-13
 
 ### Added

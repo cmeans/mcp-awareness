@@ -18,3 +18,11 @@ unbounded results. Use hint to re-rank by relevance so the best matches
 come first. Narrow with 2–3 specific tags rather than one broad tag.
 Use since/until for time-bounded queries. Call get_stats or get_tags
 first if you're unsure how much data exists.
+
+When you need typed data contracts for edge providers, tag taxonomies, or any
+shape that should be validated on write: register a schema via `register_schema`
+(family + version + JSON Schema body), then write records via `create_record`
+referencing `schema_ref` + `schema_version`. Schemas are immutable after
+registration — to evolve a shape, register a new version and soft-delete the
+old one (only allowed when no records still reference it). Built-in shared
+schemas live in the `_system` namespace, seeded by the operator.

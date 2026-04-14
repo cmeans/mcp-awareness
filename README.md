@@ -282,7 +282,7 @@ Results from the initial run (2026-03-27): HNSW query P50 stays under 4ms from 5
 
 ## Tools
 
-The server exposes 30 MCP tools. Clients that support MCP resources also get 6 read-only resources, but since not all clients surface resources, every resource has a tool mirror.
+The server exposes 32 MCP tools. Clients that support MCP resources also get 6 read-only resources, but since not all clients surface resources, every resource has a tool mirror.
 
 ### Read tools
 
@@ -318,6 +318,8 @@ The server exposes 30 MCP tools. Clients that support MCP resources also get 6 r
 | `remind` | Create a todo, reminder, or planned action. Optional `deliver_at` timestamp for time-based surfacing. Intentions have a lifecycle: pending → fired → active → completed. |
 | `update_intention` | Transition an intention state: pending → fired → active → completed/snoozed/cancelled. |
 | `acted_on` | Log that you took action because of an entry. Tags inherited from the entry. |
+| `register_schema` | Define a typed data contract using JSON Schema Draft 2020-12. Schemas are immutable after registration; family + version become logical_key. Per-owner with `_system` fallback for shared built-in shapes. |
+| `create_record` | Write a validated data entry conforming to a registered schema. Records pin exact schema version and re-validate on content update. Validation errors include every failure with structured envelope. |
 
 ### Data management tools
 
