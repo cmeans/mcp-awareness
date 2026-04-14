@@ -39,20 +39,30 @@ def test_cli_register_schema_happy_path(pg_dsn, system_schema_file, monkeypatch,
     from mcp_awareness.cli_register_schema import main
 
     monkeypatch.setenv("AWARENESS_DATABASE_URL", pg_dsn)
-    monkeypatch.setattr("sys.argv", [
-        "mcp-awareness-register-schema",
-        "--system",
-        "--family", "schema:cli-test",
-        "--version", "1.0.0",
-        "--schema-file", system_schema_file,
-        "--source", "awareness-built-in",
-        "--tags", "cli,test",
-        "--description", "CLI-registered test schema",
-    ])
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "mcp-awareness-register-schema",
+            "--system",
+            "--family",
+            "schema:cli-test",
+            "--version",
+            "1.0.0",
+            "--schema-file",
+            system_schema_file,
+            "--source",
+            "awareness-built-in",
+            "--tags",
+            "cli,test",
+            "--description",
+            "CLI-registered test schema",
+        ],
+    )
 
     # Seed _system user so insert doesn't FK-violate (conftest fixture does this for store tests;
     # CLI creates its own PostgresStore so we seed manually here)
     from mcp_awareness.postgres_store import PostgresStore
+
     tmp = PostgresStore(pg_dsn)
     with tmp._pool.connection() as conn, conn.cursor() as cur:
         cur.execute(
@@ -82,11 +92,25 @@ def test_cli_register_schema_rejects_invalid_schema_file(pg_dsn, monkeypatch, ca
         path = f.name
 
     monkeypatch.setenv("AWARENESS_DATABASE_URL", pg_dsn)
-    monkeypatch.setattr("sys.argv", [
-        "mcp-awareness-register-schema", "--system",
-        "--family", "schema:bad", "--version", "1.0.0",
-        "--schema-file", path, "--source", "test", "--tags", "", "--description", "bad",
-    ])
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "mcp-awareness-register-schema",
+            "--system",
+            "--family",
+            "schema:bad",
+            "--version",
+            "1.0.0",
+            "--schema-file",
+            path,
+            "--source",
+            "test",
+            "--tags",
+            "",
+            "--description",
+            "bad",
+        ],
+    )
     with pytest.raises(SystemExit) as excinfo:
         main()
     assert excinfo.value.code == 1
@@ -99,12 +123,25 @@ def test_cli_register_schema_missing_db_url(monkeypatch, system_schema_file, cap
     from mcp_awareness.cli_register_schema import main
 
     monkeypatch.delenv("AWARENESS_DATABASE_URL", raising=False)
-    monkeypatch.setattr("sys.argv", [
-        "mcp-awareness-register-schema", "--system",
-        "--family", "schema:test", "--version", "1.0.0",
-        "--schema-file", system_schema_file,
-        "--source", "test", "--tags", "", "--description", "test",
-    ])
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "mcp-awareness-register-schema",
+            "--system",
+            "--family",
+            "schema:test",
+            "--version",
+            "1.0.0",
+            "--schema-file",
+            system_schema_file,
+            "--source",
+            "test",
+            "--tags",
+            "",
+            "--description",
+            "test",
+        ],
+    )
     with pytest.raises(SystemExit) as excinfo:
         main()
     assert excinfo.value.code == 1
@@ -116,12 +153,25 @@ def test_cli_register_schema_missing_schema_file(pg_dsn, monkeypatch, capsys):
     from mcp_awareness.cli_register_schema import main
 
     monkeypatch.setenv("AWARENESS_DATABASE_URL", pg_dsn)
-    monkeypatch.setattr("sys.argv", [
-        "mcp-awareness-register-schema", "--system",
-        "--family", "schema:test", "--version", "1.0.0",
-        "--schema-file", "/nonexistent/path.json",
-        "--source", "test", "--tags", "", "--description", "test",
-    ])
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "mcp-awareness-register-schema",
+            "--system",
+            "--family",
+            "schema:test",
+            "--version",
+            "1.0.0",
+            "--schema-file",
+            "/nonexistent/path.json",
+            "--source",
+            "test",
+            "--tags",
+            "",
+            "--description",
+            "test",
+        ],
+    )
     with pytest.raises(SystemExit) as excinfo:
         main()
     assert excinfo.value.code == 1

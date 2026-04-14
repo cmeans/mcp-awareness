@@ -81,13 +81,10 @@ def validate_record_content(schema_body: dict[str, Any], content: Any) -> list[d
 class _SchemaFinder(Protocol):
     """Minimal protocol for resolve_schema's store dependency."""
 
-    def find_schema(self, owner_id: str, logical_key: str) -> Entry | None:
-        ...
+    def find_schema(self, owner_id: str, logical_key: str) -> Entry | None: ...
 
 
-def resolve_schema(
-    store: _SchemaFinder, owner_id: str, family: str, version: str
-) -> Entry | None:
+def resolve_schema(store: _SchemaFinder, owner_id: str, family: str, version: str) -> Entry | None:
     """Resolve a schema by family + version, preferring caller-owned.
 
     Delegates to Store.find_schema (which handles the _system fallback at
@@ -106,9 +103,7 @@ class SchemaInUseError(Exception):
     def __init__(self, total_count: int, referencing_records: list[str]):
         self.total_count = total_count
         self.referencing_records = referencing_records
-        super().__init__(
-            f"Cannot delete schema: {total_count} record(s) still reference it"
-        )
+        super().__init__(f"Cannot delete schema: {total_count} record(s) still reference it")
 
 
 class _RefCounter(Protocol):
@@ -119,9 +114,7 @@ class _RefCounter(Protocol):
     ) -> tuple[int, list[str]]: ...
 
 
-def assert_schema_deletable(
-    store: _RefCounter, owner_id: str, schema_logical_key: str
-) -> None:
+def assert_schema_deletable(store: _RefCounter, owner_id: str, schema_logical_key: str) -> None:
     """Raise SchemaInUseError if any non-deleted records reference this schema."""
     count, ids = store.count_records_referencing(owner_id, schema_logical_key)
     if count > 0:

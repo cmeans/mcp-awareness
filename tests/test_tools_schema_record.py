@@ -422,11 +422,16 @@ async def test_update_entry_record_non_content_skips_revalidation(configured_ser
 async def test_delete_entry_schema_with_no_records_succeeds(configured_server):
     from mcp_awareness.tools import delete_entry, register_schema
 
-    resp = json.loads(await register_schema(
-        source="test", tags=[], description="s",
-        family="schema:thing", version="1.0.0",
-        schema={"type": "object"},
-    ))
+    resp = json.loads(
+        await register_schema(
+            source="test",
+            tags=[],
+            description="s",
+            family="schema:thing",
+            version="1.0.0",
+            schema={"type": "object"},
+        )
+    )
     # No records → soft-delete succeeds
     await delete_entry(entry_id=resp["id"])
     # Verify soft-deleted: find_schema returns None
@@ -436,17 +441,26 @@ async def test_delete_entry_schema_with_no_records_succeeds(configured_server):
 @pytest.mark.asyncio
 async def test_delete_entry_schema_with_records_rejected(configured_server):
     from mcp.server.fastmcp.exceptions import ToolError
+
     from mcp_awareness.tools import create_record, delete_entry, register_schema
 
-    resp = json.loads(await register_schema(
-        source="test", tags=[], description="s",
-        family="schema:thing", version="1.0.0",
-        schema={"type": "object"},
-    ))
+    resp = json.loads(
+        await register_schema(
+            source="test",
+            tags=[],
+            description="s",
+            family="schema:thing",
+            version="1.0.0",
+            schema={"type": "object"},
+        )
+    )
     await create_record(
-        source="test", tags=[], description="r",
+        source="test",
+        tags=[],
+        description="r",
         logical_key="r1",
-        schema_ref="schema:thing", schema_version="1.0.0",
+        schema_ref="schema:thing",
+        schema_version="1.0.0",
         content={},
     )
     with pytest.raises(ToolError) as excinfo:
@@ -461,17 +475,27 @@ async def test_delete_entry_schema_with_records_rejected(configured_server):
 async def test_delete_entry_schema_allowed_after_records_deleted(configured_server):
     from mcp_awareness.tools import create_record, delete_entry, register_schema
 
-    schema_resp = json.loads(await register_schema(
-        source="test", tags=[], description="s",
-        family="schema:thing", version="1.0.0",
-        schema={"type": "object"},
-    ))
-    record_resp = json.loads(await create_record(
-        source="test", tags=[], description="r",
-        logical_key="r1",
-        schema_ref="schema:thing", schema_version="1.0.0",
-        content={},
-    ))
+    schema_resp = json.loads(
+        await register_schema(
+            source="test",
+            tags=[],
+            description="s",
+            family="schema:thing",
+            version="1.0.0",
+            schema={"type": "object"},
+        )
+    )
+    record_resp = json.loads(
+        await create_record(
+            source="test",
+            tags=[],
+            description="r",
+            logical_key="r1",
+            schema_ref="schema:thing",
+            schema_version="1.0.0",
+            content={},
+        )
+    )
     # Soft-delete the record first
     await delete_entry(entry_id=record_resp["id"])
     # Now schema delete succeeds
@@ -481,10 +505,9 @@ async def test_delete_entry_schema_allowed_after_records_deleted(configured_serv
 @pytest.mark.asyncio
 async def test_cross_owner_schema_invisible(configured_server, store, monkeypatch):
     """Owner A registers a schema; Owner B cannot resolve it."""
-    import mcp_awareness.server as srv
-
     from mcp.server.fastmcp.exceptions import ToolError
 
+    import mcp_awareness.server as srv
     from mcp_awareness.tools import create_record, register_schema
 
     # Owner A (default TEST_OWNER) registers a schema
@@ -517,9 +540,7 @@ async def test_cross_owner_schema_invisible(configured_server, store, monkeypatc
 async def test_both_owners_see_system_schema(configured_server, store, monkeypatch):
     """Both A and B can use a _system schema."""
     import mcp_awareness.server as srv
-
     from mcp_awareness.schema import Entry, make_id, now_utc
-
     from mcp_awareness.tools import create_record
 
     # Seed _system schema directly
@@ -576,12 +597,10 @@ async def test_both_owners_see_system_schema(configured_server, store, monkeypat
 @pytest.mark.asyncio
 async def test_caller_schema_overrides_system(configured_server, store, monkeypatch):
     """When both _system and caller have the same logical_key, caller's version wins."""
-    import mcp_awareness.server as srv
 
     from mcp.server.fastmcp.exceptions import ToolError
 
     from mcp_awareness.schema import Entry, make_id, now_utc
-
     from mcp_awareness.tools import create_record, register_schema
 
     # _system schema allows integer only

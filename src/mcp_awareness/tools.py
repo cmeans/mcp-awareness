@@ -1014,18 +1014,22 @@ async def delete_entry(
         from mcp_awareness.validation import SchemaInUseError, assert_schema_deletable
 
         _candidate = _srv.store.get_entry_by_id(_srv._owner_id(), entry_id)
-        if _candidate is not None and _candidate.type == EntryType.SCHEMA:
-            if _candidate.logical_key is not None:
-                try:
-                    assert_schema_deletable(_srv.store, _srv._owner_id(), _candidate.logical_key)
-                except SchemaInUseError as e:
-                    _error_response(
-                        "schema_in_use",
-                        f"Cannot delete schema {_candidate.logical_key}: {e.total_count} record(s) reference it",
-                        retryable=False,
-                        referencing_records=e.referencing_records,
-                        total_count=e.total_count,
-                    )
+        if (
+            _candidate is not None
+            and _candidate.type == EntryType.SCHEMA
+            and _candidate.logical_key is not None
+        ):
+            try:
+                assert_schema_deletable(_srv.store, _srv._owner_id(), _candidate.logical_key)
+            except SchemaInUseError as e:
+                _error_response(
+                    "schema_in_use",
+                    f"Cannot delete schema {_candidate.logical_key}:"
+                    f" {e.total_count} record(s) reference it",
+                    retryable=False,
+                    referencing_records=e.referencing_records,
+                    total_count=e.total_count,
+                )
         _srv.store.soft_delete_by_id(_srv._owner_id(), entry_id)
         return json.dumps(
             {

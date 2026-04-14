@@ -98,13 +98,15 @@ def main() -> None:
         validate_schema_body(schema_body)
     except jse.SchemaError as e:
         print(
-            json.dumps({
-                "error": {
-                    "code": "invalid_schema",
-                    "message": str(e.message),
-                    "schema_error_path": "/" + "/".join(str(p) for p in e.absolute_path),
+            json.dumps(
+                {
+                    "error": {
+                        "code": "invalid_schema",
+                        "message": str(e.message),
+                        "schema_error_path": "/" + "/".join(str(p) for p in e.absolute_path),
+                    }
                 }
-            }),
+            ),
             file=sys.stderr,
         )
         sys.exit(1)
@@ -113,12 +115,14 @@ def main() -> None:
     database_url = os.environ.get("AWARENESS_DATABASE_URL", "")
     if not database_url:
         print(
-            json.dumps({
-                "error": {
-                    "code": "missing_env",
-                    "message": "AWARENESS_DATABASE_URL required",
+            json.dumps(
+                {
+                    "error": {
+                        "code": "missing_env",
+                        "message": "AWARENESS_DATABASE_URL required",
+                    }
                 }
-            }),
+            ),
             file=sys.stderr,
         )
         sys.exit(1)

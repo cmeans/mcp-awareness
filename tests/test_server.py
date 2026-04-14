@@ -4183,8 +4183,11 @@ class TestWriteResponseShapes:
         if tool_name == "create_record":
             # Register a schema first (not sentinel-wrapped — it's a prerequisite)
             await server_mod.register_schema(
-                source="setup", tags=[], description="setup",
-                family="schema:sentinel-record-test", version="1.0.0",
+                source="setup",
+                tags=[],
+                description="setup",
+                family="schema:sentinel-record-test",
+                version="1.0.0",
                 schema={"type": "object"},
             )
             return await server_mod.create_record(
