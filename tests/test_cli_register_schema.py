@@ -260,3 +260,32 @@ def test_cli_register_schema_store_error(pg_dsn, system_schema_file, monkeypatch
     assert "simulated DB failure" in err["error"]["message"]
 
     monkeypatch.setattr(ps_mod.PostgresStore, "add", original_add)
+
+
+def test_cli_register_schema_module_runs_as_main(monkeypatch):
+    """Cover the `if __name__ == '__main__': main()` guard via runpy."""
+    import runpy
+
+    # No DB URL → main exits before touching the store. Covers the guard cleanly.
+    monkeypatch.delenv("AWARENESS_DATABASE_URL", raising=False)
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "mcp-awareness-register-schema",
+            "--system",
+            "--family",
+            "s:test",
+            "--version",
+            "1.0.0",
+            "--schema-file",
+            "/nonexistent/path.json",
+            "--source",
+            "test",
+            "--tags",
+            "",
+            "--description",
+            "test",
+        ],
+    )
+    with pytest.raises(SystemExit):
+        runpy.run_module("mcp_awareness.cli_register_schema", run_name="__main__")
