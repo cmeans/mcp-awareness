@@ -247,3 +247,13 @@ def test_to_list_dict_intention_includes_goal_state():
     assert d["goal"] == "Pick up milk"
     assert d["state"] == "pending"
     assert "data" not in d
+
+
+def test_entry_type_schema_value():
+    assert EntryType.SCHEMA.value == "schema"
+    assert EntryType("schema") is EntryType.SCHEMA
+
+
+def test_entry_type_record_value():
+    assert EntryType.RECORD.value == "record"
+    assert EntryType("record") is EntryType.RECORD

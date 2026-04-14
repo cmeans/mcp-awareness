@@ -36,6 +36,8 @@ class EntryType(str, Enum):
     PREFERENCE = "preference"
     NOTE = "note"
     INTENTION = "intention"
+    SCHEMA = "schema"
+    RECORD = "record"
 
 
 # Valid states for the INTENTION lifecycle
