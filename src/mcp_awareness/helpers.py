@@ -221,12 +221,17 @@ def _error_response(
     valid: list[str] | None = None,
     suggestion: str | None = None,
     help_url: str | None = None,
+    **extras: Any,
 ) -> NoReturn:
     """Build a structured error envelope and raise ToolError.
 
     The MCP SDK wraps ToolError in a CallToolResult with isError=True,
     so clients get proper error signaling. The JSON envelope provides
     structured fields for smart clients alongside a human-readable message.
+
+    Extra keyword arguments (``**extras``) are merged into the error dict
+    after the fixed fields, allowing structured context such as
+    ``schema_ref``, ``validation_errors``, ``searched_owners``, etc.
 
     Raises:
         ToolError: always — this function never returns.
@@ -248,6 +253,8 @@ def _error_response(
         error["suggestion"] = suggestion
     if help_url is not None:
         error["help_url"] = help_url
+    for k, v in extras.items():
+        error[k] = v
 
     raise ToolError(json.dumps({"status": "error", "error": error}))
 
