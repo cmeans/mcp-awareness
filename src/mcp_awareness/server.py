@@ -696,6 +696,7 @@ from .tools import (  # noqa: E402, F401
     get_tags,
     get_unread,
     learn_pattern,
+    register_schema,
     remember,
     remind,
     report_alert,

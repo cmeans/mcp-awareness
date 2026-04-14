@@ -4000,6 +4000,7 @@ class TestWriteResponseShapes:
         # "id" here means the caller-supplied entry_id (lookup target),
         # NOT a server-generated entry id like other tools' responses
         "update_intention": {"id"},
+        "register_schema": set(),  # response is server-derived id + logical_key
     }
 
     # Tools registered on _srv.mcp that are NOT write tools — explicitly
@@ -4168,6 +4169,15 @@ class TestWriteResponseShapes:
                 entry_id=eid,
                 state="fired",
                 reason=s(sentinels, "reason"),
+            )
+        if tool_name == "register_schema":
+            return await server_mod.register_schema(
+                source=s(sentinels, "src"),
+                tags=[s(sentinels, "tag")],
+                description=s(sentinels, "desc"),
+                family="schema:sentinel-test",
+                version="1.0.0",
+                schema={"type": "object"},
             )
         raise ValueError(f"Unknown tool in registry: {tool_name}")
 

@@ -530,6 +530,111 @@ async def remember(
 
 @_srv.mcp.tool()
 @_timed
+async def register_schema(
+    source: str,
+    tags: list[str],
+    description: str,
+    family: str,
+    version: str,
+    schema: dict[str, Any],
+    learned_from: str = "conversation",
+    language: str | None = None,
+) -> str:
+    """Register a new JSON Schema entry for later use by records.
+
+    Validates the schema body against JSON Schema Draft 2020-12 meta-schema
+    on write. Family + version are combined into the entry's logical_key
+    (family:version); each version is a separate entry. Schemas are
+    absolutely immutable once registered — to change one, register a new
+    version and (if no records reference the old one) delete it.
+
+    Returns:
+        JSON: {"status": "ok", "id": "<uuid>", "logical_key": "<family:version>"}
+
+    If you receive an unstructured error, the failure is in the transport
+    or platform layer, not in awareness."""
+    import psycopg.errors
+    from jsonschema import exceptions as jse  # type: ignore[import-untyped]
+
+    from mcp_awareness.validation import compose_schema_logical_key, validate_schema_body
+
+    # Validate inputs
+    if not family:
+        _error_response(
+            "invalid_parameter",
+            "family must be a non-empty string",
+            retryable=False,
+            param="family",
+        )
+    if not version:
+        _error_response(
+            "invalid_parameter",
+            "version must be a non-empty string",
+            retryable=False,
+            param="version",
+        )
+
+    # Meta-schema validation
+    try:
+        validate_schema_body(schema)
+    except jse.SchemaError as e:
+        _error_response(
+            "invalid_schema",
+            f"Schema does not conform to JSON Schema Draft 2020-12: {e.message}",
+            retryable=False,
+        )
+
+    logical_key = compose_schema_logical_key(family, version)
+
+    now = now_utc()
+    data: dict[str, Any] = {
+        "family": family,
+        "version": version,
+        "schema": schema,
+        "description": description,
+        "learned_from": learned_from,
+    }
+    text_for_detect = compose_detection_text("schema", data)
+    resolved_lang = resolve_language(explicit=language, text_for_detection=text_for_detect)
+    _check_unsupported_language(text_for_detect, resolved_lang)
+
+    entry = Entry(
+        id=make_id(),
+        type=EntryType.SCHEMA,
+        source=source,
+        tags=tags,
+        created=now,
+        expires=None,
+        data=data,
+        logical_key=logical_key,
+        language=resolved_lang,
+    )
+
+    try:
+        _srv.store.add(_srv._owner_id(), entry)
+    except psycopg.errors.UniqueViolation:
+        _error_response(
+            "schema_already_exists",
+            f"Schema {logical_key} already exists in source {source!r}",
+            retryable=False,
+        )
+    except Exception as e:
+        # Fallback: detect unique constraint via message for non-psycopg wrappers
+        msg = str(e).lower()
+        if "unique" in msg or "duplicate" in msg or "23505" in msg:
+            _error_response(
+                "schema_already_exists",
+                f"Schema {logical_key} already exists in source {source!r}",
+                retryable=False,
+            )
+        raise
+
+    _srv._generate_embedding(entry)
+    return json.dumps({"status": "ok", "id": entry.id, "logical_key": logical_key})
+
+
+@_srv.mcp.tool()
+@_timed
 async def update_entry(
     entry_id: str,
     description: str | None = None,
