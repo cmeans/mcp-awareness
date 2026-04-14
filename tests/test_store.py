@@ -3389,3 +3389,18 @@ def test_count_records_referencing_caps_id_list_at_ten(store):
     count, ids = store.count_records_referencing(TEST_OWNER, "s:test:1.0.0")
     assert count == 15
     assert len(ids) == 10
+
+
+def test_system_user_exists_after_migration_idempotent(store):
+    """The conftest fixture inserts _system — verifies ON CONFLICT DO NOTHING semantics."""
+    with store._pool.connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO users (id, display_name) VALUES ('_system', 'Re-insert') "
+            "ON CONFLICT (id) DO NOTHING"
+        )
+        conn.commit()
+        cur.execute("SELECT COUNT(*) FROM users WHERE id = '_system'")
+        row = cur.fetchone()
+        # Cursor may be dict_row — handle both styles
+        count = row["count"] if isinstance(row, dict) else row[0]
+        assert count == 1
