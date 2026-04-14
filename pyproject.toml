@@ -25,6 +25,7 @@ mcp-awareness-migrate = "mcp_awareness.migrate:main"
 mcp-awareness-user = "mcp_awareness.cli:user_main"
 mcp-awareness-token = "mcp_awareness.cli:token_main"
 mcp-awareness-secret = "mcp_awareness.cli:secret_main"
+mcp-awareness-register-schema = "mcp_awareness.cli_register_schema:main"
 
 [project.optional-dependencies]
 dev = [
