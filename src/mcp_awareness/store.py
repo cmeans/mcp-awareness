@@ -341,6 +341,24 @@ class Store(Protocol):
         """Find entries whose data.related_ids contains the given entry_id."""
         ...
 
+    def find_schema(self, owner_id: str, logical_key: str) -> Entry | None:
+        """Look up a schema entry by logical_key, preferring caller-owned over _system.
+
+        Returns the caller's own schema if present; falls back to the _system-owned
+        version if one exists. Returns None if not found or soft-deleted.
+        """
+        ...
+
+    def count_records_referencing(
+        self, owner_id: str, schema_logical_key: str
+    ) -> tuple[int, list[str]]:
+        """Return (total_count, first_N_ids) of non-deleted records referencing a schema.
+
+        The schema_logical_key is composed as f"{schema_ref}:{schema_version}".
+        Caller uses total_count for the error payload and ids for the blocker list.
+        """
+        ...
+
     def clear(self, owner_id: str) -> None:
         """Delete all entries, reads, actions, and embeddings for an owner."""
         ...

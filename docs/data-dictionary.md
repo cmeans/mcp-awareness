@@ -46,7 +46,7 @@ The UNIQUE constraint is on `canonical_email`, not `email`. Users see and use th
 |--------|------|----------|-------------|
 | `id` | TEXT | No | Primary key. UUID v4, generated via `uuid.uuid4()`. |
 | `owner_id` | TEXT | No | Owner identifier. References the user who owns this entry. All queries are scoped by `owner_id`. |
-| `type` | TEXT | No | Entry type. One of: `status`, `alert`, `pattern`, `suppression`, `context`, `preference`, `note`, `intention`. |
+| `type` | TEXT | No | Entry type. One of: `status`, `alert`, `pattern`, `suppression`, `context`, `preference`, `note`, `intention`, `schema`, `record`. |
 | `source` | TEXT | No | Origin identifier. Describes the subject, not the owner (e.g., `"personal"`, `"synology-nas"`, `"mcp-awareness-project"`). |
 | `created` | TIMESTAMPTZ | No | UTC timestamp. Set once when the entry is first created. |
 | `updated` | TIMESTAMPTZ | Yes | UTC timestamp. Updated on every upsert or `update_entry` call. `NULL` until first update. |
@@ -176,6 +176,34 @@ Written by agents via `set_preference`. Keyed by `key` + `scope` (upserted). Por
 | `key` | string | Yes | Preference name (e.g., `"alert_verbosity"`, `"check_frequency"`). |
 | `value` | string | Yes | Preference value (e.g., `"one_sentence_warnings"`, `"first_turn_only"`). |
 | `scope` | string | Yes | Scope of the preference. Default: `"global"`. |
+
+### `schema` — JSON Schema definitions
+
+Written by operators or agents via `register_schema`. Immutable after registration. Schema body lives in `data.schema`; family + version in `data.family` + `data.version`; `logical_key` derived as `{family}:{version}`. Used by `record` entries for typed validation.
+
+**`data` fields:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `family` | string | Yes | Schema family identifier (e.g., `schema:edge-manifest`, `schema:config`). Used as the reference key. |
+| `version` | string | Yes | Schema version (user-chosen semantic or sequential, e.g., `"1.0.0"`, `"1"`). |
+| `schema` | object | Yes | JSON Schema Draft 2020-12 body. Defines the validation rules and structure. |
+| `description` | string | No | Human-readable description of what this schema validates. |
+| `learned_from` | string | No | Platform that registered the schema (e.g., `"claude-code"`, `"operator"`). Default: `"conversation"`. |
+
+### `record` — Validated data entries
+
+Written by agents via `create_record`. Content in `data.content`; pinned schema reference in `data.schema_ref` + `data.schema_version` (exact version, no "latest" aliasing). Re-validated on content update via `update_entry`.
+
+**`data` fields:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `schema_ref` | string | Yes | Target schema family (e.g., `schema:edge-manifest`). Used to look up the schema definition. |
+| `schema_version` | string | Yes | Target schema version (exact pin, e.g., `"1.0.0"`). Pinned at write time; determines which schema is used for validation on updates. |
+| `content` | any | Yes | Validated payload — any JSON value (object, array, string, number, boolean, null). Must conform to the pinned schema. |
+| `description` | string | No | Human-readable description of what this record represents. |
+| `learned_from` | string | No | Platform that created the record (e.g., `"claude-code"`, edge provider name). Default: `"conversation"`. |
 
 ## Lifecycle
 

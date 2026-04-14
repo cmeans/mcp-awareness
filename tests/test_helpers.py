@@ -153,6 +153,57 @@ class TestDsnToSqlalchemyUrl:
         assert "sslmode=verify-full" in result
         assert "connect_timeout=10" in result
 
+
+class TestErrorResponseExtras:
+    """Test that _error_response merges **extras into the error envelope."""
+
+    def test_extras_appear_in_payload(self):
+        """Extra keyword arguments must be present in the raised ToolError JSON."""
+        from mcp.server.fastmcp.exceptions import ToolError
+
+        with pytest.raises(ToolError) as excinfo:
+            _error_response(
+                "schema_not_found",
+                "No matching schema",
+                retryable=False,
+                schema_ref="schema:thing",
+                schema_version="1.0.0",
+                searched_owners=["alice", "_system"],
+            )
+        payload = json.loads(str(excinfo.value))
+        err = payload["error"]
+        assert err["code"] == "schema_not_found"
+        assert err["schema_ref"] == "schema:thing"
+        assert err["schema_version"] == "1.0.0"
+        assert err["searched_owners"] == ["alice", "_system"]
+
+    def test_extras_do_not_override_fixed_fields(self):
+        """Extras cannot clobber the mandatory fixed fields."""
+        from mcp.server.fastmcp.exceptions import ToolError
+
+        with pytest.raises(ToolError) as excinfo:
+            _error_response(
+                "some_error",
+                "Some message",
+                retryable=True,
+                extra_field="extra_value",
+            )
+        err = json.loads(str(excinfo.value))["error"]
+        assert err["code"] == "some_error"
+        assert err["message"] == "Some message"
+        assert err["retryable"] is True
+        assert err["extra_field"] == "extra_value"
+
+    def test_no_extras_still_works(self):
+        """Calling without extras should behave as before."""
+        from mcp.server.fastmcp.exceptions import ToolError
+
+        with pytest.raises(ToolError) as excinfo:
+            _error_response("plain_error", "Plain message", retryable=False)
+        err = json.loads(str(excinfo.value))["error"]
+        assert err["code"] == "plain_error"
+        assert "schema_ref" not in err
+
     def test_unix_socket_host(self):
         """Unix socket path goes in query string, not netloc."""
         dsn = "host=/var/run/postgresql dbname=db user=u"

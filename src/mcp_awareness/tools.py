@@ -530,6 +530,211 @@ async def remember(
 
 @_srv.mcp.tool()
 @_timed
+async def register_schema(
+    source: str,
+    tags: list[str],
+    description: str,
+    family: str,
+    version: str,
+    schema: dict[str, Any],
+    learned_from: str = "conversation",
+    language: str | None = None,
+) -> str:
+    """Register a new JSON Schema entry for later use by records.
+
+    Validates the schema body against JSON Schema Draft 2020-12 meta-schema
+    on write. Family + version are combined into the entry's logical_key
+    (family:version); each version is a separate entry. Schemas are
+    absolutely immutable once registered — to change one, register a new
+    version and (if no records reference the old one) delete it.
+
+    Returns:
+        JSON: {"status": "ok", "id": "<uuid>", "logical_key": "<family:version>"}
+
+    If you receive an unstructured error, the failure is in the transport
+    or platform layer, not in awareness."""
+    import psycopg.errors
+    from jsonschema import exceptions as jse
+
+    from mcp_awareness.validation import compose_schema_logical_key, validate_schema_body
+
+    # Validate inputs
+    if not family:
+        _error_response(
+            "invalid_parameter",
+            "family must be a non-empty string",
+            retryable=False,
+            param="family",
+        )
+    if not version:
+        _error_response(
+            "invalid_parameter",
+            "version must be a non-empty string",
+            retryable=False,
+            param="version",
+        )
+
+    # Meta-schema validation
+    try:
+        validate_schema_body(schema)
+    except jse.SchemaError as e:
+        _error_response(
+            "invalid_schema",
+            f"Schema does not conform to JSON Schema Draft 2020-12: {e.message}",
+            retryable=False,
+        )
+
+    logical_key = compose_schema_logical_key(family, version)
+
+    now = now_utc()
+    data: dict[str, Any] = {
+        "family": family,
+        "version": version,
+        "schema": schema,
+        "description": description,
+        "learned_from": learned_from,
+    }
+    text_for_detect = compose_detection_text("schema", data)
+    resolved_lang = resolve_language(explicit=language, text_for_detection=text_for_detect)
+    _check_unsupported_language(text_for_detect, resolved_lang)
+
+    entry = Entry(
+        id=make_id(),
+        type=EntryType.SCHEMA,
+        source=source,
+        tags=tags,
+        created=now,
+        expires=None,
+        data=data,
+        logical_key=logical_key,
+        language=resolved_lang,
+    )
+
+    try:
+        _srv.store.add(_srv._owner_id(), entry)
+    except psycopg.errors.UniqueViolation:
+        # Surface the structured fields promised by the error-code table
+        # (design doc §Error codes): logical_key and existing_id. existing_id
+        # is best-effort — if the lookup fails for any reason we still return
+        # a useful error rather than raising over the original error.
+        _existing = _srv.store.find_schema(_srv._owner_id(), logical_key)
+        _existing_id = _existing.id if _existing is not None else None
+        _error_response(
+            "schema_already_exists",
+            f"Schema {logical_key} already exists in source {source!r}",
+            retryable=False,
+            logical_key=logical_key,
+            existing_id=_existing_id,
+        )
+
+    _srv._generate_embedding(entry)
+    return json.dumps({"status": "ok", "id": entry.id, "logical_key": logical_key})
+
+
+@_srv.mcp.tool()
+@_timed
+async def create_record(
+    source: str,
+    tags: list[str],
+    description: str,
+    logical_key: str,
+    schema_ref: str,
+    schema_version: str,
+    content: Any,
+    learned_from: str = "conversation",
+    language: str | None = None,
+) -> str:
+    """Create or upsert a record validated against a registered schema.
+
+    Resolves the target schema by schema_ref + schema_version (prefers
+    caller-owned, falls back to _system). Validates content against the
+    schema on write; rejects with a structured validation_failed error
+    listing every validation error. Upserts on matching (source, logical_key)
+    — same logical_key means update in place with changelog.
+
+    Returns:
+        JSON: {"status": "ok", "id": "<uuid>", "action": "created" | "updated"}
+
+    If you receive an unstructured error, the failure is in the transport
+    or platform layer, not in awareness."""
+    from mcp_awareness.validation import resolve_schema, validate_record_content
+
+    resolved = resolve_schema(_srv.store, _srv._owner_id(), schema_ref, schema_version)
+    if resolved is None:
+        _error_response(
+            "schema_not_found",
+            f"No schema {schema_ref}:{schema_version} in your namespace or _system",
+            retryable=False,
+            schema_ref=schema_ref,
+            schema_version=schema_version,
+            searched_owners=[_srv._owner_id(), "_system"],
+        )
+
+    schema_body = resolved.data["schema"]
+    try:
+        errors = validate_record_content(schema_body, content)
+    except Exception as e:
+        _error_response(
+            "validation_error",
+            f"Unexpected content validation error: {e}",
+            retryable=False,
+        )
+
+    if errors:
+        # Detect truncation sentinel (always last item when present)
+        truncated = errors[-1].get("truncated") is True
+        total_errors = errors[-1]["total_errors"] if truncated else len(errors)
+        validation_errors = errors[:-1] if truncated else errors
+        vf_extras: dict[str, Any] = {
+            "schema_ref": schema_ref,
+            "schema_version": schema_version,
+            "validation_errors": validation_errors,
+        }
+        if truncated:
+            vf_extras["truncated"] = True
+            vf_extras["total_errors"] = total_errors
+        _error_response(
+            "validation_failed",
+            (
+                f"Record content does not conform to schema"
+                f" {schema_ref}:{schema_version} ({total_errors} errors)"
+            ),
+            retryable=False,
+            **vf_extras,
+        )
+
+    now = now_utc()
+    data: dict[str, Any] = {
+        "schema_ref": schema_ref,
+        "schema_version": schema_version,
+        "content": content,
+        "description": description,
+        "learned_from": learned_from,
+    }
+    text_for_detect = compose_detection_text("record", data)
+    resolved_lang = resolve_language(explicit=language, text_for_detection=text_for_detect)
+    _check_unsupported_language(text_for_detect, resolved_lang)
+
+    entry = Entry(
+        id=make_id(),
+        type=EntryType.RECORD,
+        source=source,
+        tags=tags,
+        created=now,
+        expires=None,
+        data=data,
+        logical_key=logical_key,
+        language=resolved_lang,
+    )
+
+    saved, created = _srv.store.upsert_by_logical_key(_srv._owner_id(), source, logical_key, entry)
+    _srv._generate_embedding(saved)
+    action = "created" if created else "updated"
+    return json.dumps({"status": "ok", "id": saved.id, "action": action})
+
+
+@_srv.mcp.tool()
+@_timed
 async def update_entry(
     entry_id: str,
     description: str | None = None,
@@ -554,17 +759,16 @@ async def update_entry(
         updates["tags"] = tags
     if source is not None:
         updates["source"] = source
-    if content is not None:
-        if not isinstance(content, str):
-            content = json.dumps(content)
-        updates["content"] = content
     if content_type is not None:
         updates["content_type"] = content_type
     if language is not None:
         from .language import iso_to_regconfig
 
         updates["language"] = iso_to_regconfig(language)
-    if not updates:
+    # Content is normalized below once the entry type is known: RECORD entries
+    # keep native JSON shape (dict/list/primitive) so the wire shape matches the
+    # create path; other knowledge types stringify non-string content as before.
+    if content is None and not updates:
         _error_response(
             "invalid_parameter",
             "No fields to update — provide at least one of: "
@@ -572,6 +776,61 @@ async def update_entry(
             retryable=False,
             param="content",
         )
+    # --- New: type-specific branching for schema and record entries ---
+    from mcp_awareness.schema import EntryType as _EntryType
+    from mcp_awareness.validation import resolve_schema, validate_record_content
+
+    _existing = _srv.store.get_entry_by_id(_srv._owner_id(), entry_id)
+    if _existing is not None:
+        if _existing.type == _EntryType.SCHEMA:
+            _error_response(
+                "schema_immutable",
+                "Schemas cannot be updated. Register a new version instead.",
+                retryable=False,
+            )
+        if _existing.type == _EntryType.RECORD and content is not None:
+            _schema_ref = _existing.data["schema_ref"]
+            _schema_version = _existing.data["schema_version"]
+            _resolved = resolve_schema(_srv.store, _srv._owner_id(), _schema_ref, _schema_version)
+            if _resolved is None:
+                _error_response(
+                    "schema_not_found",
+                    f"Cannot re-validate: schema {_schema_ref}:{_schema_version} not found",
+                    retryable=False,
+                    schema_ref=_schema_ref,
+                    schema_version=_schema_version,
+                    searched_owners=[_srv._owner_id(), "_system"],
+                )
+            _content_to_validate: Any = json.loads(content) if isinstance(content, str) else content
+            _errors = validate_record_content(_resolved.data["schema"], _content_to_validate)
+            if _errors:
+                _truncated = _errors[-1].get("truncated") is True
+                _total_errors = _errors[-1]["total_errors"] if _truncated else len(_errors)
+                _validation_errors = _errors[:-1] if _truncated else _errors
+                _vf_extras: dict[str, Any] = {
+                    "schema_ref": _schema_ref,
+                    "schema_version": _schema_version,
+                    "validation_errors": _validation_errors,
+                }
+                if _truncated:
+                    _vf_extras["truncated"] = True
+                    _vf_extras["total_errors"] = _total_errors
+                _error_response(
+                    "validation_failed",
+                    (
+                        f"Record content does not conform to schema"
+                        f" {_schema_ref}:{_schema_version} ({_total_errors} errors)"
+                    ),
+                    retryable=False,
+                    **_vf_extras,
+                )
+            # RECORD content is stored as native JSON to match the create path.
+            updates["content"] = _content_to_validate
+    # --- end branching ---
+    if content is not None and "content" not in updates:
+        # Non-record knowledge types (note/pattern/context/preference) persist
+        # content as a string; stringify non-string payloads for consistency.
+        updates["content"] = content if isinstance(content, str) else json.dumps(content)
     result = _srv.store.update_entry(_srv._owner_id(), entry_id, updates)
     if result is None:
         _error_response(
@@ -748,6 +1007,26 @@ async def delete_entry(
     Returns JSON with status and count. If you receive an unstructured
     error, the failure is in the transport or platform layer, not in awareness."""
     if entry_id:
+        from mcp_awareness.schema import EntryType
+        from mcp_awareness.validation import SchemaInUseError, assert_schema_deletable
+
+        _candidate = _srv.store.get_entry_by_id(_srv._owner_id(), entry_id)
+        if (
+            _candidate is not None
+            and _candidate.type == EntryType.SCHEMA
+            and _candidate.logical_key is not None
+        ):
+            try:
+                assert_schema_deletable(_srv.store, _srv._owner_id(), _candidate.logical_key)
+            except SchemaInUseError as e:
+                _error_response(
+                    "schema_in_use",
+                    f"Cannot delete schema {_candidate.logical_key}:"
+                    f" {e.total_count} record(s) reference it",
+                    retryable=False,
+                    referencing_records=e.referencing_records,
+                    total_count=e.total_count,
+                )
         _srv.store.soft_delete_by_id(_srv._owner_id(), entry_id)
         return json.dumps(
             {
@@ -758,6 +1037,9 @@ async def delete_entry(
             }
         )
     if tags:
+        # NOTE: bulk-delete by tags does NOT currently consult assert_schema_deletable;
+        # a schema referenced by live records can be soft-deleted here, unlike the
+        # single-id path above. Tracked as a follow-up — see issue #288.
         if not confirm:
             # Use AND logic to match soft_delete_by_tags behavior
             all_entries = _srv.store.get_entries(_srv._owner_id(), tags=tags)
@@ -787,6 +1069,9 @@ async def delete_entry(
             retryable=False,
         )
     et = _parse_entry_type(entry_type)
+    # NOTE: bulk-delete by source (± entry_type) does NOT consult
+    # assert_schema_deletable; schemas referenced by live records can still be
+    # soft-deleted here, unlike the single-id path above. Tracked by issue #288.
     if not confirm:
         entries = _srv.store.get_entries(_srv._owner_id(), entry_type=et, source=source)
         return json.dumps(

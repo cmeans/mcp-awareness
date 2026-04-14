@@ -3260,3 +3260,159 @@ def test_get_all_patterns(store):
     result = store.get_all_patterns(TEST_OWNER)
     assert "nas" in result
     assert "" in result
+
+
+# ------------------------------------------------------------------
+# find_schema tests
+# ------------------------------------------------------------------
+
+SYSTEM_OWNER = "_system"
+
+
+def _make_schema_entry(logical_key: str, schema_body: dict) -> Entry:
+    return Entry(
+        id=make_id(),
+        type=EntryType.SCHEMA,
+        source="test",
+        tags=[],
+        created=now_utc(),
+        data={
+            "family": logical_key.rsplit(":", 1)[0] if ":" in logical_key else logical_key,
+            "version": logical_key.rsplit(":", 1)[1] if ":" in logical_key else "1.0.0",
+            "schema": schema_body,
+            "description": "test schema",
+            "learned_from": "test",
+        },
+        logical_key=logical_key,
+    )
+
+
+def test_find_schema_returns_caller_owned(store):
+    """find_schema returns an entry when caller owns it."""
+    entry = _make_schema_entry("s:test:1.0.0", {"type": "object"})
+    store.add(TEST_OWNER, entry)
+    found = store.find_schema(TEST_OWNER, "s:test:1.0.0")
+    assert found is not None
+    assert found.data["family"] == "s:test"
+    assert found.data["schema"] == {"type": "object"}
+
+
+def test_find_schema_system_fallback(store):
+    """find_schema falls back to _system-owned schema when caller has none."""
+    entry = _make_schema_entry("s:test:1.0.0", {"type": "object"})
+    store.add(SYSTEM_OWNER, entry)
+    found = store.find_schema(TEST_OWNER, "s:test:1.0.0")
+    assert found is not None
+    assert found.data["schema"] == {"type": "object"}
+
+
+def test_find_schema_caller_wins_over_system(store):
+    """find_schema prefers caller's schema over _system's when both exist."""
+    system_entry = _make_schema_entry("s:test:1.0.0", {"type": "object"})
+    caller_entry = _make_schema_entry("s:test:1.0.0", {"type": "string"})
+    store.add(SYSTEM_OWNER, system_entry)
+    store.add(TEST_OWNER, caller_entry)
+    found = store.find_schema(TEST_OWNER, "s:test:1.0.0")
+    assert found is not None
+    assert found.data["schema"] == {"type": "string"}
+
+
+def test_find_schema_returns_none_when_missing(store):
+    """find_schema returns None when no matching schema exists for caller or _system."""
+    assert store.find_schema(TEST_OWNER, "s:nonexistent:1.0.0") is None
+
+
+def test_find_schema_excludes_soft_deleted(store):
+    """find_schema does not return soft-deleted entries."""
+    entry = _make_schema_entry("s:test:1.0.0", {"type": "object"})
+    stored = store.add(TEST_OWNER, entry)
+    store.soft_delete_by_id(TEST_OWNER, stored.id)
+    assert store.find_schema(TEST_OWNER, "s:test:1.0.0") is None
+
+
+# ------------------------------------------------------------------
+# count_records_referencing tests
+# ------------------------------------------------------------------
+
+
+def _make_record_entry(logical_key: str, schema_ref: str, schema_version: str, content) -> Entry:
+    return Entry(
+        id=make_id(),
+        type=EntryType.RECORD,
+        source="test",
+        tags=[],
+        created=now_utc(),
+        data={
+            "schema_ref": schema_ref,
+            "schema_version": schema_version,
+            "content": content,
+            "description": "test record",
+            "learned_from": "test",
+        },
+        logical_key=logical_key,
+    )
+
+
+def test_count_records_referencing_returns_zero_when_none(store):
+    count, ids = store.count_records_referencing(TEST_OWNER, "s:test:1.0.0")
+    assert count == 0
+    assert ids == []
+
+
+def test_count_records_referencing_counts_matching_records(store):
+    for i in range(3):
+        store.add(TEST_OWNER, _make_record_entry(f"rec-{i}", "s:test", "1.0.0", {"i": i}))
+    count, ids = store.count_records_referencing(TEST_OWNER, "s:test:1.0.0")
+    assert count == 3
+    assert len(ids) == 3
+
+
+def test_count_records_referencing_excludes_soft_deleted(store):
+    entry = _make_record_entry("rec-1", "s:test", "1.0.0", {})
+    store.add(TEST_OWNER, entry)
+    store.soft_delete_by_id(TEST_OWNER, entry.id)
+    count, ids = store.count_records_referencing(TEST_OWNER, "s:test:1.0.0")
+    assert count == 0
+    assert ids == []
+
+
+def test_count_records_referencing_ignores_other_versions(store):
+    store.add(TEST_OWNER, _make_record_entry("rec-1", "s:test", "1.0.0", {}))
+    store.add(TEST_OWNER, _make_record_entry("rec-2", "s:test", "2.0.0", {}))
+    count, _ = store.count_records_referencing(TEST_OWNER, "s:test:1.0.0")
+    assert count == 1
+
+
+def test_count_records_referencing_caps_id_list_at_ten(store):
+    for i in range(15):
+        store.add(TEST_OWNER, _make_record_entry(f"rec-{i}", "s:test", "1.0.0", {"i": i}))
+    count, ids = store.count_records_referencing(TEST_OWNER, "s:test:1.0.0")
+    assert count == 15
+    assert len(ids) == 10
+
+
+def test_count_records_referencing_rejects_malformed_key(store):
+    """The store boundary asserts the ref:version invariant for defense-in-depth."""
+    import pytest
+
+    with pytest.raises(AssertionError, match="must contain ':'"):
+        store.count_records_referencing(TEST_OWNER, "no-colon")
+    with pytest.raises(AssertionError, match="empty version"):
+        store.count_records_referencing(TEST_OWNER, "s:test:")
+    with pytest.raises(AssertionError, match="empty ref"):
+        store.count_records_referencing(TEST_OWNER, ":1.0.0")
+
+
+def test_system_user_exists_after_migration_idempotent(store):
+    """The conftest fixture inserts _system — verifies ON CONFLICT DO NOTHING semantics."""
+    with store._pool.connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO users (id, display_name) VALUES ('_system', 'Re-insert') "
+            "ON CONFLICT (id) DO NOTHING"
+        )
+        conn.commit()
+        cur.execute("SELECT COUNT(*) FROM users WHERE id = '_system'")
+        row = cur.fetchone()
+        # Cursor may be dict_row — handle both styles
+        count = row["count"] if isinstance(row, dict) else row[0]
+        assert count == 1

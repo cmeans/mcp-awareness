@@ -1375,6 +1375,51 @@ class PostgresStore:
             (json.dumps([entry_id]),),
         )
 
+    def find_schema(self, owner_id: str, logical_key: str) -> Entry | None:
+        """Look up a schema, preferring caller-owned over _system-owned.
+
+        Single query with CASE-based ORDER BY for predictable override
+        semantics: caller's own version wins, _system is fallback.
+        Soft-deleted entries are excluded.
+        """
+        with self._pool.connection() as conn, conn.transaction(), conn.cursor() as cur:
+            self._set_rls_context(cur, owner_id)
+            cur.execute(
+                _load_sql("find_schema"),
+                (logical_key, owner_id, owner_id),
+            )
+            row = cur.fetchone()
+        return self._row_to_entry(row) if row else None
+
+    def count_records_referencing(
+        self, owner_id: str, schema_logical_key: str
+    ) -> tuple[int, list[str]]:
+        """Count and sample-id records referencing a schema version.
+
+        Splits schema_logical_key on the last ':' to obtain schema_ref and version.
+        schema_ref may itself contain ':' (e.g. "schema:edge-manifest:1.0.0").
+        Matches data.schema_ref and data.schema_version in the record entries' JSONB.
+
+        Invariant: schema_logical_key must be a `ref:version` composed by
+        ``compose_schema_logical_key``. Empty ref or empty version would split
+        into a non-matching query; empty version is blocked at register_schema,
+        but we assert here as defense-in-depth since the store API is public.
+        """
+        ref, sep, version = schema_logical_key.rpartition(":")
+        assert sep == ":", f"schema_logical_key must contain ':': {schema_logical_key!r}"
+        assert ref, f"schema_logical_key has empty ref component: {schema_logical_key!r}"
+        assert version, f"schema_logical_key has empty version component: {schema_logical_key!r}"
+        with self._pool.connection() as conn, conn.transaction(), conn.cursor() as cur:
+            self._set_rls_context(cur, owner_id)
+            cur.execute(_load_sql("count_records_referencing"), (owner_id, ref, version))
+            count_row = cur.fetchone()
+            count = int(count_row["cnt"]) if count_row else 0
+            if count == 0:
+                return (0, [])
+            cur.execute(_load_sql("list_records_referencing_ids"), (owner_id, ref, version))
+            ids = [str(r["id"]) for r in cur.fetchall()]
+        return (count, ids)
+
     # ------------------------------------------------------------------
     # User operations (for OAuth auto-provisioning)
     # ------------------------------------------------------------------

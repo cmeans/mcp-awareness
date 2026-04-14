@@ -8,6 +8,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Two new entry types: `schema` (JSON Schema Draft 2020-12 definition) and `record` (validated payload conforming to a schema). Tools: `register_schema`, `create_record`. Schemas are absolutely immutable after registration; records re-validate on content update. Schema deletion is blocked while live records reference a version. Per-owner storage with a shared `_system` fallback namespace for built-in schemas.
+- New CLI: `mcp-awareness-register-schema` for operators to seed `_system`-owned schemas at deploy time.
+- New migration: `_system` user seed (idempotent).
+- `_error_response()` helper now accepts `**extras` kwargs so tools can include structured fields in error envelopes beyond the fixed set (e.g., `validation_errors`, `schema_ref`, `referencing_records`).
+
+### Fixed
+- **RLS carve-out for `_system`-owned schema reads** — migration `n9i0j1k2l3m4` alters the `entries.owner_isolation` policy: `USING` now allows reads where `owner_id = '_system' AND type = 'schema'`, while an **explicit** `WITH CHECK (owner_id = current_user)` keeps writes strictly owner-scoped. Before this change, the strict `owner_id = current_user` USING clause filtered out `_system`-owned rows for non-superuser DB roles, making the `find_schema` fallback (and the whole CLI bootstrap pattern for built-in schemas) a no-op in production. The WITH CHECK clause is explicit because a `FOR ALL` permissive policy without one reuses `USING` for INSERT/UPDATE — without it the read carve-out would leak into the write path and let non-privileged owners stamp `_system`-owned schema rows.
+- **`schema_already_exists` error envelope** — register_schema now returns `logical_key` and a best-effort `existing_id` as structured fields alongside the human-readable message (matches the design-doc error-code table; callers no longer have to parse the message to locate the conflicting entry).
+- **RECORD content shape preserved across `update_entry`** — previously `update_entry` stringified non-string content via `json.dumps()` before handing it to the store, causing RECORD entries to drift from a native JSON object/array/primitive (how they are stored on create) to a JSON-encoded string after any content update. `update_entry` now branches on the existing entry's type: RECORD entries persist native JSON content to match the create path, while other knowledge types (note / pattern / context / preference) retain the existing stringify-on-write behavior.
+- **Bulk-delete paths (`delete_entry` by tags/source) still do not consult `schema_in_use`** — single-id schema deletion is protected; bulk paths are explicitly flagged in the code and tracked by [#288](https://github.com/cmeans/mcp-awareness/issues/288). Not changed in this PR (out of scope per the design), but documented where the gap lives.
+- **`count_records_referencing` store boundary hardening** — `schema_logical_key` parsing now asserts the `ref:version` invariant (non-empty ref + non-empty version after the last `:`). Empty version is blocked at `register_schema`, but the store API is public, so we fail loudly here rather than silently running a non-matching query.
+- **`_system` user downgrade no-op** — `m8h9i0j1k2l3.downgrade()` now checks for referencing entries before `DELETE`. If any exist, it logs a warning and returns rather than FK-failing the whole transaction. Operators can soft-delete or re-home the referenced entries and re-run downgrade.
+- **CLI language resolution** — `mcp-awareness-register-schema` now runs the description through `resolve_language()` (same chain as the MCP path) instead of pinning every CLI-seeded schema to `english`. Auto-detection falls back to `simple` for short/unknown-language descriptions.
+- **Dead-code cleanup in `register_schema`** — removed the string-matching fallback (`"unique"` / `"duplicate"` / `"23505"` in the exception message) in favor of the psycopg-native `UniqueViolation` branch. The fallback was unreachable under the `psycopg`-direct driver the project uses.
+- **Mypy override cleanup** — dropped the no-op `ignore_errors = true` from the `jsonschema.*` override in `pyproject.toml`. `ignore_missing_imports = true` alone covers the import; there is no project code under `jsonschema.*` to silence.
+
+### Dependencies
+- Added `jsonschema>=4.26.0` as a runtime dependency.
+
 ## [0.17.0] - 2026-04-13
 
 ### Added
