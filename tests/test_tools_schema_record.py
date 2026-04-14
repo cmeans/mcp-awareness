@@ -46,7 +46,7 @@ def _parse_tool_error(excinfo):
     return json.loads(str(excinfo.value))
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_register_schema_happy_path(configured_server):
     from mcp_awareness.tools import register_schema
 
@@ -64,7 +64,7 @@ async def test_register_schema_happy_path(configured_server):
     assert "id" in body
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_register_schema_rejects_invalid_schema(configured_server):
     from mcp.server.fastmcp.exceptions import ToolError
 
@@ -83,7 +83,7 @@ async def test_register_schema_rejects_invalid_schema(configured_server):
     assert err["code"] == "invalid_schema"
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_register_schema_rejects_duplicate_family_version(configured_server):
     from mcp.server.fastmcp.exceptions import ToolError
 
@@ -110,14 +110,13 @@ async def test_register_schema_rejects_duplicate_family_version(configured_serve
     assert err["code"] == "schema_already_exists"
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_register_schema_generic_unique_exception_fallback(configured_server, monkeypatch):
     """register_schema catches generic exceptions whose message contains 'unique'."""
     from mcp.server.fastmcp.exceptions import ToolError
 
-    from mcp_awareness.tools import register_schema
-
     import mcp_awareness.server as srv
+    from mcp_awareness.tools import register_schema
 
     original_add = srv.store.add
 
@@ -141,12 +140,11 @@ async def test_register_schema_generic_unique_exception_fallback(configured_serv
     monkeypatch.setattr(srv.store, "add", original_add)
 
 
-@pytest.mark.asyncio
-async def test_register_schema_generic_non_unique_exception_reraises(configured_server, monkeypatch):
+@pytest.mark.anyio
+async def test_register_schema_reraises_non_unique_exception(configured_server, monkeypatch):
     """register_schema re-raises generic exceptions that are not unique violations."""
-    from mcp_awareness.tools import register_schema
-
     import mcp_awareness.server as srv
+    from mcp_awareness.tools import register_schema
 
     original_add = srv.store.add
 
@@ -168,7 +166,7 @@ async def test_register_schema_generic_non_unique_exception_reraises(configured_
     monkeypatch.setattr(srv.store, "add", original_add)
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_create_record_validate_raises_unexpected_error(configured_server, monkeypatch):
     """create_record reports validation_error if validate_record_content raises unexpectedly."""
     from mcp.server.fastmcp.exceptions import ToolError
@@ -207,7 +205,7 @@ async def test_create_record_validate_raises_unexpected_error(configured_server,
     assert "internal jsonschema error" in err["message"]
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_register_schema_rejects_empty_family(configured_server):
     from mcp.server.fastmcp.exceptions import ToolError
 
@@ -226,7 +224,7 @@ async def test_register_schema_rejects_empty_family(configured_server):
     assert err["code"] == "invalid_parameter"
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_register_schema_rejects_empty_version(configured_server):
     from mcp.server.fastmcp.exceptions import ToolError
 
@@ -245,7 +243,7 @@ async def test_register_schema_rejects_empty_version(configured_server):
     assert err["code"] == "invalid_parameter"
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_create_record_happy_path(configured_server):
     from mcp_awareness.tools import create_record, register_schema
 
@@ -272,7 +270,7 @@ async def test_create_record_happy_path(configured_server):
     assert "id" in body
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_create_record_rejects_unknown_schema(configured_server):
     from mcp.server.fastmcp.exceptions import ToolError
 
@@ -293,7 +291,7 @@ async def test_create_record_rejects_unknown_schema(configured_server):
     assert err["searched_owners"] == [TEST_OWNER, "_system"]
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_create_record_surfaces_validation_errors(configured_server):
     from mcp.server.fastmcp.exceptions import ToolError
 
@@ -328,7 +326,7 @@ async def test_create_record_surfaces_validation_errors(configured_server):
     assert "type" in validators
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_create_record_upsert_on_same_logical_key(configured_server):
     from mcp_awareness.tools import create_record, register_schema
 
@@ -367,7 +365,7 @@ async def test_create_record_upsert_on_same_logical_key(configured_server):
     assert r2["id"] == r1["id"]
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_create_record_uses_system_schema_fallback(configured_server, store):
     """A record can reference a schema owned by _system, not the caller."""
     from mcp_awareness.schema import Entry, make_id, now_utc
@@ -408,7 +406,7 @@ async def test_create_record_uses_system_schema_fallback(configured_server, stor
     assert body["action"] == "created"
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_update_entry_rejects_schema_update(configured_server):
     from mcp.server.fastmcp.exceptions import ToolError
 
@@ -430,7 +428,7 @@ async def test_update_entry_rejects_schema_update(configured_server):
     assert err["code"] == "schema_immutable"
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_update_entry_record_content_revalidates_valid(configured_server):
     from mcp_awareness.tools import create_record, register_schema, update_entry
 
@@ -457,7 +455,7 @@ async def test_update_entry_record_content_revalidates_valid(configured_server):
     await update_entry(entry_id=r["id"], content={"name": "still-good"})
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_update_entry_record_content_rejects_invalid(configured_server):
     from mcp.server.fastmcp.exceptions import ToolError
 
@@ -488,7 +486,7 @@ async def test_update_entry_record_content_rejects_invalid(configured_server):
     assert err["code"] == "validation_failed"
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_update_entry_record_non_content_skips_revalidation(configured_server):
     from mcp_awareness.tools import create_record, register_schema, update_entry
 
@@ -515,7 +513,7 @@ async def test_update_entry_record_non_content_skips_revalidation(configured_ser
     await update_entry(entry_id=r["id"], description="updated desc")
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_delete_entry_schema_with_no_records_succeeds(configured_server):
     from mcp_awareness.tools import delete_entry, register_schema
 
@@ -535,7 +533,7 @@ async def test_delete_entry_schema_with_no_records_succeeds(configured_server):
     assert configured_server.store.find_schema(TEST_OWNER, "schema:thing:1.0.0") is None
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_delete_entry_schema_with_records_rejected(configured_server):
     from mcp.server.fastmcp.exceptions import ToolError
 
@@ -568,7 +566,7 @@ async def test_delete_entry_schema_with_records_rejected(configured_server):
     assert err["total_count"] == 1
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_delete_entry_schema_allowed_after_records_deleted(configured_server):
     from mcp_awareness.tools import create_record, delete_entry, register_schema
 
@@ -599,7 +597,7 @@ async def test_delete_entry_schema_allowed_after_records_deleted(configured_serv
     await delete_entry(entry_id=schema_resp["id"])
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_cross_owner_schema_invisible(configured_server, store, monkeypatch):
     """Owner A registers a schema; Owner B cannot resolve it."""
     from mcp.server.fastmcp.exceptions import ToolError
@@ -633,7 +631,7 @@ async def test_cross_owner_schema_invisible(configured_server, store, monkeypatc
     assert err["code"] == "schema_not_found"
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_both_owners_see_system_schema(configured_server, store, monkeypatch):
     """Both A and B can use a _system schema."""
     import mcp_awareness.server as srv
@@ -691,7 +689,7 @@ async def test_both_owners_see_system_schema(configured_server, store, monkeypat
     assert b_resp["status"] == "ok"
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_caller_schema_overrides_system(configured_server, store, monkeypatch):
     """When both _system and caller have the same logical_key, caller's version wins."""
 
@@ -760,7 +758,7 @@ async def test_caller_schema_overrides_system(configured_server, store, monkeypa
     assert err["code"] == "validation_failed"
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_create_record_validation_truncation(configured_server, monkeypatch):
     """When validate_record_content returns a truncated list, create_record reports truncation."""
     from mcp.server.fastmcp.exceptions import ToolError
@@ -802,7 +800,7 @@ async def test_create_record_validation_truncation(configured_server, monkeypatc
     assert err["total_errors"] == 99
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_update_entry_record_schema_gone(configured_server, store):
     """update_entry re-validation returns schema_not_found if schema was deleted."""
     from mcp.server.fastmcp.exceptions import ToolError
@@ -841,7 +839,7 @@ async def test_update_entry_record_schema_gone(configured_server, store):
     assert err["code"] == "schema_not_found"
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_update_entry_record_revalidation_truncation(configured_server, monkeypatch):
     """update_entry re-validation reports truncation when many errors are returned."""
     from mcp.server.fastmcp.exceptions import ToolError

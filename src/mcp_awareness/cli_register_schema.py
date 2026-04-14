@@ -90,7 +90,7 @@ def main() -> None:
         sys.exit(1)
 
     # Meta-schema validation
-    from jsonschema import exceptions as jse  # type: ignore[import-untyped]
+    from jsonschema import exceptions as jse
 
     from mcp_awareness.validation import compose_schema_logical_key, validate_schema_body
 
