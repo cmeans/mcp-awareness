@@ -4001,6 +4001,7 @@ class TestWriteResponseShapes:
         # NOT a server-generated entry id like other tools' responses
         "update_intention": {"id"},
         "register_schema": set(),  # response is server-derived id + logical_key
+        "create_record": set(),  # response contains only server-derived fields
     }
 
     # Tools registered on _srv.mcp that are NOT write tools — explicitly
@@ -4178,6 +4179,22 @@ class TestWriteResponseShapes:
                 family="schema:sentinel-test",
                 version="1.0.0",
                 schema={"type": "object"},
+            )
+        if tool_name == "create_record":
+            # Register a schema first (not sentinel-wrapped — it's a prerequisite)
+            await server_mod.register_schema(
+                source="setup", tags=[], description="setup",
+                family="schema:sentinel-record-test", version="1.0.0",
+                schema={"type": "object"},
+            )
+            return await server_mod.create_record(
+                source=s(sentinels, "src"),
+                tags=[s(sentinels, "tag")],
+                description=s(sentinels, "desc"),
+                logical_key="sentinel-record-key",
+                schema_ref="schema:sentinel-record-test",
+                schema_version="1.0.0",
+                content={"key": "value"},
             )
         raise ValueError(f"Unknown tool in registry: {tool_name}")
 

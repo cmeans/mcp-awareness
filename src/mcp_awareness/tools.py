@@ -635,6 +635,111 @@ async def register_schema(
 
 @_srv.mcp.tool()
 @_timed
+async def create_record(
+    source: str,
+    tags: list[str],
+    description: str,
+    logical_key: str,
+    schema_ref: str,
+    schema_version: str,
+    content: Any,
+    learned_from: str = "conversation",
+    language: str | None = None,
+) -> str:
+    """Create or upsert a record validated against a registered schema.
+
+    Resolves the target schema by schema_ref + schema_version (prefers
+    caller-owned, falls back to _system). Validates content against the
+    schema on write; rejects with a structured validation_failed error
+    listing every validation error. Upserts on matching (source, logical_key)
+    — same logical_key means update in place with changelog.
+
+    Returns:
+        JSON: {"status": "ok", "id": "<uuid>", "action": "created" | "updated"}
+
+    If you receive an unstructured error, the failure is in the transport
+    or platform layer, not in awareness."""
+    from mcp.server.fastmcp.exceptions import ToolError
+    from jsonschema import exceptions as jse  # type: ignore[import-untyped]
+
+    from mcp_awareness.validation import resolve_schema, validate_record_content
+
+    resolved = resolve_schema(_srv.store, _srv._owner_id(), schema_ref, schema_version)
+    if resolved is None:
+        raise ToolError(json.dumps({
+            "status": "error",
+            "error": {
+                "code": "schema_not_found",
+                "message": f"No schema {schema_ref}:{schema_version} in your namespace or _system",
+                "retryable": False,
+                "schema_ref": schema_ref,
+                "schema_version": schema_version,
+                "searched_owners": [_srv._owner_id(), "_system"],
+            },
+        }))
+
+    schema_body = resolved.data["schema"]  # type: ignore[union-attr]
+    try:
+        errors = validate_record_content(schema_body, content)
+    except jse.JsonSchemaException as e:
+        _error_response(
+            "validation_error",
+            f"Unexpected content validation error: {e}",
+            retryable=False,
+        )
+
+    if errors:
+        # Detect truncation sentinel (always last item when present)
+        truncated = errors[-1].get("truncated") is True
+        total_errors = errors[-1]["total_errors"] if truncated else len(errors)
+        validation_errors = errors[:-1] if truncated else errors
+        err_body: dict[str, Any] = {
+            "code": "validation_failed",
+            "message": f"Record content does not conform to schema {schema_ref}:{schema_version} ({total_errors} errors)",
+            "retryable": False,
+            "schema_ref": schema_ref,
+            "schema_version": schema_version,
+            "validation_errors": validation_errors,
+        }
+        if truncated:
+            err_body["truncated"] = True
+            err_body["total_errors"] = total_errors
+        raise ToolError(json.dumps({"status": "error", "error": err_body}))
+
+    now = now_utc()
+    data: dict[str, Any] = {
+        "schema_ref": schema_ref,
+        "schema_version": schema_version,
+        "content": content,
+        "description": description,
+        "learned_from": learned_from,
+    }
+    text_for_detect = compose_detection_text("record", data)
+    resolved_lang = resolve_language(explicit=language, text_for_detection=text_for_detect)
+    _check_unsupported_language(text_for_detect, resolved_lang)
+
+    entry = Entry(
+        id=make_id(),
+        type=EntryType.RECORD,
+        source=source,
+        tags=tags,
+        created=now,
+        expires=None,
+        data=data,
+        logical_key=logical_key,
+        language=resolved_lang,
+    )
+
+    saved, created = _srv.store.upsert_by_logical_key(
+        _srv._owner_id(), source, logical_key, entry
+    )
+    _srv._generate_embedding(saved)
+    action = "created" if created else "updated"
+    return json.dumps({"status": "ok", "id": saved.id, "action": action})
+
+
+@_srv.mcp.tool()
+@_timed
 async def update_entry(
     entry_id: str,
     description: str | None = None,

@@ -146,3 +146,120 @@ async def test_register_schema_rejects_empty_version(configured_server):
         )
     err = _parse_tool_error(excinfo)["error"]
     assert err["code"] == "invalid_parameter"
+
+
+@pytest.mark.asyncio
+async def test_create_record_happy_path(configured_server):
+    from mcp_awareness.tools import create_record, register_schema
+
+    await register_schema(
+        source="test", tags=[], description="s",
+        family="schema:thing", version="1.0.0",
+        schema={"type": "object", "properties": {"name": {"type": "string"}}, "required": ["name"]},
+    )
+    response = await create_record(
+        source="test", tags=[], description="a thing",
+        logical_key="thing-one",
+        schema_ref="schema:thing", schema_version="1.0.0",
+        content={"name": "widget"},
+    )
+    body = json.loads(response)
+    assert body["status"] == "ok"
+    assert body["action"] == "created"
+    assert "id" in body
+
+
+@pytest.mark.asyncio
+async def test_create_record_rejects_unknown_schema(configured_server):
+    from mcp.server.fastmcp.exceptions import ToolError
+    from mcp_awareness.tools import create_record
+
+    with pytest.raises(ToolError) as excinfo:
+        await create_record(
+            source="test", tags=[], description="orphan",
+            logical_key="thing-one",
+            schema_ref="schema:does-not-exist", schema_version="1.0.0",
+            content={"name": "widget"},
+        )
+    err = json.loads(str(excinfo.value))["error"]
+    assert err["code"] == "schema_not_found"
+    assert err["searched_owners"] == [TEST_OWNER, "_system"]
+
+
+@pytest.mark.asyncio
+async def test_create_record_surfaces_validation_errors(configured_server):
+    from mcp.server.fastmcp.exceptions import ToolError
+    from mcp_awareness.tools import create_record, register_schema
+
+    await register_schema(
+        source="test", tags=[], description="s",
+        family="schema:person", version="1.0.0",
+        schema={"type": "object", "properties": {"name": {"type": "string"}, "age": {"type": "integer"}}, "required": ["name"]},
+    )
+    with pytest.raises(ToolError) as excinfo:
+        await create_record(
+            source="test", tags=[], description="bad person",
+            logical_key="p1",
+            schema_ref="schema:person", schema_version="1.0.0",
+            content={"age": "thirty"},
+        )
+    err = json.loads(str(excinfo.value))["error"]
+    assert err["code"] == "validation_failed"
+    validators = {ve["validator"] for ve in err["validation_errors"]}
+    assert "required" in validators
+    assert "type" in validators
+
+
+@pytest.mark.asyncio
+async def test_create_record_upsert_on_same_logical_key(configured_server):
+    from mcp_awareness.tools import create_record, register_schema
+
+    await register_schema(
+        source="test", tags=[], description="s",
+        family="schema:thing", version="1.0.0",
+        schema={"type": "object"},
+    )
+    r1 = json.loads(await create_record(
+        source="test", tags=[], description="v1",
+        logical_key="thing-one",
+        schema_ref="schema:thing", schema_version="1.0.0",
+        content={"v": 1},
+    ))
+    assert r1["action"] == "created"
+    r2 = json.loads(await create_record(
+        source="test", tags=[], description="v2",
+        logical_key="thing-one",
+        schema_ref="schema:thing", schema_version="1.0.0",
+        content={"v": 2},
+    ))
+    assert r2["action"] == "updated"
+    assert r2["id"] == r1["id"]
+
+
+@pytest.mark.asyncio
+async def test_create_record_uses_system_schema_fallback(configured_server, store):
+    """A record can reference a schema owned by _system, not the caller."""
+    from mcp_awareness.schema import Entry, make_id, now_utc
+    from mcp_awareness.tools import create_record
+
+    # Seed _system schema directly via store (not via tool — tool writes caller's owner)
+    store.add("_system", Entry(
+        id=make_id(), type=EntryType.SCHEMA, source="system",
+        tags=["system"], created=now_utc(), expires=None,
+        data={
+            "family": "schema:system-thing", "version": "1.0.0",
+            "schema": {"type": "object"},
+            "description": "system-seeded", "learned_from": "cli-bootstrap",
+        },
+        logical_key="schema:system-thing:1.0.0",
+    ))
+
+    response = await create_record(
+        source="test", tags=[], description="mine",
+        logical_key="mine-1",
+        schema_ref="schema:system-thing", schema_version="1.0.0",
+        content={"any": "thing"},
+    )
+    body = json.loads(response)
+    assert body["status"] == "ok"
+    assert body["action"] == "created"
