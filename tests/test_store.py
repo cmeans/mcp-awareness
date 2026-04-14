@@ -3391,6 +3391,18 @@ def test_count_records_referencing_caps_id_list_at_ten(store):
     assert len(ids) == 10
 
 
+def test_count_records_referencing_rejects_malformed_key(store):
+    """The store boundary asserts the ref:version invariant for defense-in-depth."""
+    import pytest
+
+    with pytest.raises(AssertionError, match="must contain ':'"):
+        store.count_records_referencing(TEST_OWNER, "no-colon")
+    with pytest.raises(AssertionError, match="empty version"):
+        store.count_records_referencing(TEST_OWNER, "s:test:")
+    with pytest.raises(AssertionError, match="empty ref"):
+        store.count_records_referencing(TEST_OWNER, ":1.0.0")
+
+
 def test_system_user_exists_after_migration_idempotent(store):
     """The conftest fixture inserts _system — verifies ON CONFLICT DO NOTHING semantics."""
     with store._pool.connection() as conn, conn.cursor() as cur:

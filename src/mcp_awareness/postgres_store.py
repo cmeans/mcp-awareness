@@ -1399,8 +1399,16 @@ class PostgresStore:
         Splits schema_logical_key on the last ':' to obtain schema_ref and version.
         schema_ref may itself contain ':' (e.g. "schema:edge-manifest:1.0.0").
         Matches data.schema_ref and data.schema_version in the record entries' JSONB.
+
+        Invariant: schema_logical_key must be a `ref:version` composed by
+        ``compose_schema_logical_key``. Empty ref or empty version would split
+        into a non-matching query; empty version is blocked at register_schema,
+        but we assert here as defense-in-depth since the store API is public.
         """
-        ref, _, version = schema_logical_key.rpartition(":")
+        ref, sep, version = schema_logical_key.rpartition(":")
+        assert sep == ":", f"schema_logical_key must contain ':': {schema_logical_key!r}"
+        assert ref, f"schema_logical_key has empty ref component: {schema_logical_key!r}"
+        assert version, f"schema_logical_key has empty version component: {schema_logical_key!r}"
         with self._pool.connection() as conn, conn.transaction(), conn.cursor() as cur:
             self._set_rls_context(cur, owner_id)
             cur.execute(_load_sql("count_records_referencing"), (owner_id, ref, version))

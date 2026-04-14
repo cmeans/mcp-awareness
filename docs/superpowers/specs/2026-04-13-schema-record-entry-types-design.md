@@ -267,6 +267,7 @@ All errors route through existing `_error_response()` helper (`helpers.py:214`) 
 | `schema_immutable` | `update_entry` on schema | false | — |
 | `record_schema_pin_immutable` | record update tries to change pin fields | false | `param` |
 | `schema_in_use` | `delete_entry` on referenced schema | false | `referencing_records`, `total_count?` |
+| `validation_error` | unexpected exception from the validator (belt-and-suspenders — schemas are meta-validated on register, so this should be unreachable in practice) | false | — |
 
 ### Validation error envelope shape
 

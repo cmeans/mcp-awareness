@@ -14,6 +14,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - New migration: `_system` user seed (idempotent).
 - `_error_response()` helper now accepts `**extras` kwargs so tools can include structured fields in error envelopes beyond the fixed set (e.g., `validation_errors`, `schema_ref`, `referencing_records`).
 
+### Fixed
+- **RECORD content shape preserved across `update_entry`** — previously `update_entry` stringified non-string content via `json.dumps()` before handing it to the store, causing RECORD entries to drift from a native JSON object/array/primitive (how they are stored on create) to a JSON-encoded string after any content update. `update_entry` now branches on the existing entry's type: RECORD entries persist native JSON content to match the create path, while other knowledge types (note / pattern / context / preference) retain the existing stringify-on-write behavior.
+- **Bulk-delete paths (`delete_entry` by tags/source) still do not consult `schema_in_use`** — single-id schema deletion is protected; bulk paths are explicitly flagged in the code and tracked by [#288](https://github.com/cmeans/mcp-awareness/issues/288). Not changed in this PR (out of scope per the design), but documented where the gap lives.
+- **`count_records_referencing` store boundary hardening** — `schema_logical_key` parsing now asserts the `ref:version` invariant (non-empty ref + non-empty version after the last `:`). Empty version is blocked at `register_schema`, but the store API is public, so we fail loudly here rather than silently running a non-matching query.
+- **`_system` user downgrade no-op** — `m8h9i0j1k2l3.downgrade()` now checks for referencing entries before `DELETE`. If any exist, it logs a warning and returns rather than FK-failing the whole transaction. Operators can soft-delete or re-home the referenced entries and re-run downgrade.
+
 ### Dependencies
 - Added `jsonschema>=4.26.0` as a runtime dependency.
 

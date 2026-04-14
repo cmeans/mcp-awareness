@@ -761,19 +761,16 @@ async def update_entry(
         updates["tags"] = tags
     if source is not None:
         updates["source"] = source
-    # Preserve the raw content value for re-validation before stringifying it.
-    _raw_content: Any = content
-    if content is not None:
-        if not isinstance(content, str):
-            content = json.dumps(content)
-        updates["content"] = content
     if content_type is not None:
         updates["content_type"] = content_type
     if language is not None:
         from .language import iso_to_regconfig
 
         updates["language"] = iso_to_regconfig(language)
-    if not updates:
+    # Content is normalized below once the entry type is known: RECORD entries
+    # keep native JSON shape (dict/list/primitive) so the wire shape matches the
+    # create path; other knowledge types stringify non-string content as before.
+    if content is None and not updates:
         _error_response(
             "invalid_parameter",
             "No fields to update — provide at least one of: "
@@ -793,7 +790,7 @@ async def update_entry(
                 "Schemas cannot be updated. Register a new version instead.",
                 retryable=False,
             )
-        if _existing.type == _EntryType.RECORD and _raw_content is not None:
+        if _existing.type == _EntryType.RECORD and content is not None:
             _schema_ref = _existing.data["schema_ref"]
             _schema_version = _existing.data["schema_version"]
             _resolved = resolve_schema(_srv.store, _srv._owner_id(), _schema_ref, _schema_version)
@@ -806,9 +803,7 @@ async def update_entry(
                     schema_version=_schema_version,
                     searched_owners=[_srv._owner_id(), "_system"],
                 )
-            _content_to_validate = (
-                json.loads(_raw_content) if isinstance(_raw_content, str) else _raw_content
-            )
+            _content_to_validate: Any = json.loads(content) if isinstance(content, str) else content
             _errors = validate_record_content(_resolved.data["schema"], _content_to_validate)
             if _errors:
                 _truncated = _errors[-1].get("truncated") is True
@@ -831,7 +826,13 @@ async def update_entry(
                     retryable=False,
                     **_vf_extras,
                 )
+            # RECORD content is stored as native JSON to match the create path.
+            updates["content"] = _content_to_validate
     # --- end branching ---
+    if content is not None and "content" not in updates:
+        # Non-record knowledge types (note/pattern/context/preference) persist
+        # content as a string; stringify non-string payloads for consistency.
+        updates["content"] = content if isinstance(content, str) else json.dumps(content)
     result = _srv.store.update_entry(_srv._owner_id(), entry_id, updates)
     if result is None:
         _error_response(
@@ -1038,6 +1039,9 @@ async def delete_entry(
             }
         )
     if tags:
+        # NOTE: bulk-delete by tags does NOT currently consult assert_schema_deletable;
+        # a schema referenced by live records can be soft-deleted here, unlike the
+        # single-id path above. Tracked as a follow-up — see issue #288.
         if not confirm:
             # Use AND logic to match soft_delete_by_tags behavior
             all_entries = _srv.store.get_entries(_srv._owner_id(), tags=tags)
@@ -1067,6 +1071,9 @@ async def delete_entry(
             retryable=False,
         )
     et = _parse_entry_type(entry_type)
+    # NOTE: bulk-delete by source (± entry_type) does NOT consult
+    # assert_schema_deletable; schemas referenced by live records can still be
+    # soft-deleted here, unlike the single-id path above. Tracked by issue #288.
     if not confirm:
         entries = _srv.store.get_entries(_srv._owner_id(), entry_type=et, source=source)
         return json.dumps(

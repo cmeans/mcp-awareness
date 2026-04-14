@@ -24,9 +24,12 @@ Create Date: 2026-04-13 00:00:00.000000
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Sequence
 
 from alembic import op
+
+logger = logging.getLogger("alembic.runtime.migration")
 
 revision: str = "m8h9i0j1k2l3"
 down_revision: str | Sequence[str] | None = "l7g8h9i0j1k2"
@@ -48,9 +51,23 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    """Remove the _system user.
+    """Remove the _system user, if safe to do so.
 
-    Will fail if any entries still reference owner_id='_system'. Operators
-    must soft-delete or re-home such entries before downgrade.
+    This downgrade is a no-op when `_system`-owned entries still exist (schemas
+    seeded via ``mcp-awareness-register-schema --system``, for example). A hard
+    DELETE would FK-fail and abort the entire downgrade transaction — masking
+    any subsequent downgrade steps from surfacing. The warning surfaces the
+    manual step required: operators who really want to remove `_system` must
+    first soft-delete or re-home the referenced entries, then re-run downgrade.
     """
+    conn = op.get_bind()
+    referenced = conn.exec_driver_sql(
+        "SELECT 1 FROM entries WHERE owner_id = '_system' LIMIT 1"
+    ).fetchone()
+    if referenced is not None:
+        logger.warning(
+            "Skipping delete of users._system — entries still reference it. "
+            "Soft-delete or re-home those entries, then re-run downgrade."
+        )
+        return
     op.execute("DELETE FROM users WHERE id = '_system'")

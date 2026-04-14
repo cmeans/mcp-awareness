@@ -453,6 +453,43 @@ async def test_update_entry_record_content_revalidates_valid(configured_server):
     )
     # Valid content update — passes re-validation
     await update_entry(entry_id=r["id"], content={"name": "still-good"})
+    # Content shape must remain native JSON (dict), not a JSON-encoded string —
+    # matches the create path so downstream consumers see a stable wire shape.
+    stored = configured_server.store.get_entry_by_id(TEST_OWNER, r["id"])
+    assert stored is not None
+    assert stored.data["content"] == {"name": "still-good"}
+    assert isinstance(stored.data["content"], dict)
+
+
+@pytest.mark.anyio
+async def test_update_entry_record_preserves_primitive_content_shape(configured_server):
+    """Primitive (int/array) record content must also keep native JSON shape after update."""
+    from mcp_awareness.tools import create_record, register_schema, update_entry
+
+    await register_schema(
+        source="test",
+        tags=[],
+        description="s",
+        family="schema:counter",
+        version="1.0.0",
+        schema={"type": "integer"},
+    )
+    r = json.loads(
+        await create_record(
+            source="test",
+            tags=[],
+            description="c",
+            logical_key="c1",
+            schema_ref="schema:counter",
+            schema_version="1.0.0",
+            content=42,
+        )
+    )
+    await update_entry(entry_id=r["id"], content=99)
+    stored = configured_server.store.get_entry_by_id(TEST_OWNER, r["id"])
+    assert stored is not None
+    assert stored.data["content"] == 99
+    assert isinstance(stored.data["content"], int)
 
 
 @pytest.mark.anyio
