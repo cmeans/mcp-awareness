@@ -1375,6 +1375,22 @@ class PostgresStore:
             (json.dumps([entry_id]),),
         )
 
+    def find_schema(self, owner_id: str, logical_key: str) -> Entry | None:
+        """Look up a schema, preferring caller-owned over _system-owned.
+
+        Single query with CASE-based ORDER BY for predictable override
+        semantics: caller's own version wins, _system is fallback.
+        Soft-deleted entries are excluded.
+        """
+        with self._pool.connection() as conn, conn.transaction(), conn.cursor() as cur:
+            self._set_rls_context(cur, owner_id)
+            cur.execute(
+                _load_sql("find_schema"),
+                (logical_key, owner_id, owner_id),
+            )
+            row = cur.fetchone()
+        return self._row_to_entry(row) if row else None
+
     # ------------------------------------------------------------------
     # User operations (for OAuth auto-provisioning)
     # ------------------------------------------------------------------

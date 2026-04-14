@@ -26,6 +26,7 @@ from testcontainers.postgres import PostgresContainer
 from mcp_awareness.postgres_store import PostgresStore
 
 TEST_OWNER = "test-owner"
+SYSTEM_OWNER = "_system"
 
 # Set default owner for all tests before any module imports read it.
 os.environ["AWARENESS_DEFAULT_OWNER"] = TEST_OWNER
@@ -61,5 +62,13 @@ def pg_dsn(pg_container):
 def store(pg_dsn):
     """Fresh PostgresStore for each test — tables created, then cleared after."""
     s = PostgresStore(pg_dsn)
+    # Ensure _system user exists for cross-owner schema tests.
+    with s._pool.connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO users (id, display_name) VALUES ('_system', 'System-managed schemas') "
+            "ON CONFLICT (id) DO NOTHING"
+        )
+        conn.commit()
     yield s
     s.clear(TEST_OWNER)
+    s.clear(SYSTEM_OWNER)

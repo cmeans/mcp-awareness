@@ -3260,3 +3260,71 @@ def test_get_all_patterns(store):
     result = store.get_all_patterns(TEST_OWNER)
     assert "nas" in result
     assert "" in result
+
+
+# ------------------------------------------------------------------
+# find_schema tests
+# ------------------------------------------------------------------
+
+SYSTEM_OWNER = "_system"
+
+
+def _make_schema_entry(logical_key: str, schema_body: dict) -> Entry:
+    return Entry(
+        id=make_id(),
+        type=EntryType.SCHEMA,
+        source="test",
+        tags=[],
+        created=now_utc(),
+        data={
+            "family": logical_key.rsplit(":", 1)[0] if ":" in logical_key else logical_key,
+            "version": logical_key.rsplit(":", 1)[1] if ":" in logical_key else "1.0.0",
+            "schema": schema_body,
+            "description": "test schema",
+            "learned_from": "test",
+        },
+        logical_key=logical_key,
+    )
+
+
+def test_find_schema_returns_caller_owned(store):
+    """find_schema returns an entry when caller owns it."""
+    entry = _make_schema_entry("s:test:1.0.0", {"type": "object"})
+    store.add(TEST_OWNER, entry)
+    found = store.find_schema(TEST_OWNER, "s:test:1.0.0")
+    assert found is not None
+    assert found.data["family"] == "s:test"
+    assert found.data["schema"] == {"type": "object"}
+
+
+def test_find_schema_system_fallback(store):
+    """find_schema falls back to _system-owned schema when caller has none."""
+    entry = _make_schema_entry("s:test:1.0.0", {"type": "object"})
+    store.add(SYSTEM_OWNER, entry)
+    found = store.find_schema(TEST_OWNER, "s:test:1.0.0")
+    assert found is not None
+    assert found.data["schema"] == {"type": "object"}
+
+
+def test_find_schema_caller_wins_over_system(store):
+    """find_schema prefers caller's schema over _system's when both exist."""
+    system_entry = _make_schema_entry("s:test:1.0.0", {"type": "object"})
+    caller_entry = _make_schema_entry("s:test:1.0.0", {"type": "string"})
+    store.add(SYSTEM_OWNER, system_entry)
+    store.add(TEST_OWNER, caller_entry)
+    found = store.find_schema(TEST_OWNER, "s:test:1.0.0")
+    assert found is not None
+    assert found.data["schema"] == {"type": "string"}
+
+
+def test_find_schema_returns_none_when_missing(store):
+    """find_schema returns None when no matching schema exists for caller or _system."""
+    assert store.find_schema(TEST_OWNER, "s:nonexistent:1.0.0") is None
+
+
+def test_find_schema_excludes_soft_deleted(store):
+    """find_schema does not return soft-deleted entries."""
+    entry = _make_schema_entry("s:test:1.0.0", {"type": "object"})
+    stored = store.add(TEST_OWNER, entry)
+    store.soft_delete_by_id(TEST_OWNER, stored.id)
+    assert store.find_schema(TEST_OWNER, "s:test:1.0.0") is None
