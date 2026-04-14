@@ -416,3 +416,63 @@ async def test_update_entry_record_non_content_skips_revalidation(configured_ser
     )
     # Description-only update skips re-validation
     await update_entry(entry_id=r["id"], description="updated desc")
+
+
+@pytest.mark.asyncio
+async def test_delete_entry_schema_with_no_records_succeeds(configured_server):
+    from mcp_awareness.tools import delete_entry, register_schema
+
+    resp = json.loads(await register_schema(
+        source="test", tags=[], description="s",
+        family="schema:thing", version="1.0.0",
+        schema={"type": "object"},
+    ))
+    # No records → soft-delete succeeds
+    await delete_entry(entry_id=resp["id"])
+    # Verify soft-deleted: find_schema returns None
+    assert configured_server.store.find_schema(TEST_OWNER, "schema:thing:1.0.0") is None
+
+
+@pytest.mark.asyncio
+async def test_delete_entry_schema_with_records_rejected(configured_server):
+    from mcp.server.fastmcp.exceptions import ToolError
+    from mcp_awareness.tools import create_record, delete_entry, register_schema
+
+    resp = json.loads(await register_schema(
+        source="test", tags=[], description="s",
+        family="schema:thing", version="1.0.0",
+        schema={"type": "object"},
+    ))
+    await create_record(
+        source="test", tags=[], description="r",
+        logical_key="r1",
+        schema_ref="schema:thing", schema_version="1.0.0",
+        content={},
+    )
+    with pytest.raises(ToolError) as excinfo:
+        await delete_entry(entry_id=resp["id"])
+    err = json.loads(str(excinfo.value))["error"]
+    assert err["code"] == "schema_in_use"
+    assert len(err["referencing_records"]) == 1
+    assert err["total_count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_delete_entry_schema_allowed_after_records_deleted(configured_server):
+    from mcp_awareness.tools import create_record, delete_entry, register_schema
+
+    schema_resp = json.loads(await register_schema(
+        source="test", tags=[], description="s",
+        family="schema:thing", version="1.0.0",
+        schema={"type": "object"},
+    ))
+    record_resp = json.loads(await create_record(
+        source="test", tags=[], description="r",
+        logical_key="r1",
+        schema_ref="schema:thing", schema_version="1.0.0",
+        content={},
+    ))
+    # Soft-delete the record first
+    await delete_entry(entry_id=record_resp["id"])
+    # Now schema delete succeeds
+    await delete_entry(entry_id=schema_resp["id"])
