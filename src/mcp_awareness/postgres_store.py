@@ -1391,6 +1391,27 @@ class PostgresStore:
             row = cur.fetchone()
         return self._row_to_entry(row) if row else None
 
+    def count_records_referencing(
+        self, owner_id: str, schema_logical_key: str
+    ) -> tuple[int, list[str]]:
+        """Count and sample-id records referencing a schema version.
+
+        Splits schema_logical_key on the last ':' to obtain schema_ref and version.
+        schema_ref may itself contain ':' (e.g. "schema:edge-manifest:1.0.0").
+        Matches data.schema_ref and data.schema_version in the record entries' JSONB.
+        """
+        ref, _, version = schema_logical_key.rpartition(":")
+        with self._pool.connection() as conn, conn.transaction(), conn.cursor() as cur:
+            self._set_rls_context(cur, owner_id)
+            cur.execute(_load_sql("count_records_referencing"), (owner_id, ref, version))
+            count_row = cur.fetchone()
+            count = int(count_row["cnt"]) if count_row else 0
+            if count == 0:
+                return (0, [])
+            cur.execute(_load_sql("list_records_referencing_ids"), (owner_id, ref, version))
+            ids = [str(r["id"]) for r in cur.fetchall()]
+        return (count, ids)
+
     # ------------------------------------------------------------------
     # User operations (for OAuth auto-provisioning)
     # ------------------------------------------------------------------

@@ -3328,3 +3328,64 @@ def test_find_schema_excludes_soft_deleted(store):
     stored = store.add(TEST_OWNER, entry)
     store.soft_delete_by_id(TEST_OWNER, stored.id)
     assert store.find_schema(TEST_OWNER, "s:test:1.0.0") is None
+
+
+# ------------------------------------------------------------------
+# count_records_referencing tests
+# ------------------------------------------------------------------
+
+
+def _make_record_entry(logical_key: str, schema_ref: str, schema_version: str, content) -> Entry:
+    return Entry(
+        id=make_id(),
+        type=EntryType.RECORD,
+        source="test",
+        tags=[],
+        created=now_utc(),
+        data={
+            "schema_ref": schema_ref,
+            "schema_version": schema_version,
+            "content": content,
+            "description": "test record",
+            "learned_from": "test",
+        },
+        logical_key=logical_key,
+    )
+
+
+def test_count_records_referencing_returns_zero_when_none(store):
+    count, ids = store.count_records_referencing(TEST_OWNER, "s:test:1.0.0")
+    assert count == 0
+    assert ids == []
+
+
+def test_count_records_referencing_counts_matching_records(store):
+    for i in range(3):
+        store.add(TEST_OWNER, _make_record_entry(f"rec-{i}", "s:test", "1.0.0", {"i": i}))
+    count, ids = store.count_records_referencing(TEST_OWNER, "s:test:1.0.0")
+    assert count == 3
+    assert len(ids) == 3
+
+
+def test_count_records_referencing_excludes_soft_deleted(store):
+    entry = _make_record_entry("rec-1", "s:test", "1.0.0", {})
+    store.add(TEST_OWNER, entry)
+    store.soft_delete_by_id(TEST_OWNER, entry.id)
+    count, ids = store.count_records_referencing(TEST_OWNER, "s:test:1.0.0")
+    assert count == 0
+    assert ids == []
+
+
+def test_count_records_referencing_ignores_other_versions(store):
+    store.add(TEST_OWNER, _make_record_entry("rec-1", "s:test", "1.0.0", {}))
+    store.add(TEST_OWNER, _make_record_entry("rec-2", "s:test", "2.0.0", {}))
+    count, _ = store.count_records_referencing(TEST_OWNER, "s:test:1.0.0")
+    assert count == 1
+
+
+def test_count_records_referencing_caps_id_list_at_ten(store):
+    for i in range(15):
+        store.add(TEST_OWNER, _make_record_entry(f"rec-{i}", "s:test", "1.0.0", {"i": i}))
+    count, ids = store.count_records_referencing(TEST_OWNER, "s:test:1.0.0")
+    assert count == 15
+    assert len(ids) == 10
