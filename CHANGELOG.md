@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-04-15
+
 ### Added
 - **Schema + Record user guide** — new `docs/schema-record-guide.md` walks through why typed data matters, a full music-collection worked example (register schema → create record → validation failure → update → delete blocked), the Tag Taxonomy (Layer C) tie-in, and six collapsible use cases: reading list, recipes, home inventory, subscriptions, edge provider manifests, meeting/bug templates. Linked from README "Design docs". README also updates the CLI tools list to include `mcp-awareness-register-schema`.
 - **Language support guide** — new `docs/language-guide.md` covers per-entry language detection (explicit parameter or auto-detect via lingua), supported languages (28 Postgres snowball regconfigs), querying by language (`get_knowledge` language filter), how hybrid search handles cross-language queries, unsupported-language alerts as a demand signal, and deployment notes (lingua install, backfill migration, regconfig validation cache). Linked from README "Design docs".
@@ -540,7 +542,8 @@ Initial implementation.
 - **Dockerfile** for container deployment
 - Design docs: core spec and collation layer
 
-[Unreleased]: https://github.com/cmeans/mcp-awareness/compare/v0.17.0...HEAD
+[Unreleased]: https://github.com/cmeans/mcp-awareness/compare/v0.18.0...HEAD
+[0.18.0]: https://github.com/cmeans/mcp-awareness/compare/v0.17.0...v0.18.0
 [0.17.0]: https://github.com/cmeans/mcp-awareness/compare/v0.16.2...v0.17.0
 [0.16.2]: https://github.com/cmeans/mcp-awareness/compare/v0.16.1...v0.16.2
 [0.16.1]: https://github.com/cmeans/mcp-awareness/compare/v0.16.0...v0.16.1
