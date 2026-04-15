@@ -18,10 +18,29 @@ the ability to offer both the open-source AGPL and commercial license options.
 It does **not** transfer your copyright — you retain full ownership of your
 contribution.
 
+The full CLA text lives in [`CLA.md`](CLA.md).
+
 ### How to sign
 
-When you open your first pull request, you will be asked to sign the CLA.
-This is a one-time requirement.
+Signing is automated via the [CLA Assistant](https://cla-assistant.io) bot.
+The first time you open a pull request, the bot will:
+
+1. Post a comment with a link to read the CLA and a sign-in prompt.
+2. Set a pull request status check (`license/cla`) that blocks merge until
+   you sign.
+
+To sign, comment on the pull request with the **exact phrase** the bot
+provides, which is:
+
+> I have read the CLA Document and I hereby sign the CLA
+
+The bot will re-check, mark the status green, and allow the PR to proceed.
+Signing is a one-time action — the same signature applies to all your
+future pull requests.
+
+Your GitHub username and the timestamp of your signature are recorded in a
+public Gist owned by the maintainer; see [`docs/cla.md`](docs/cla.md) for
+the signature record location.
 
 ## Development setup
 
