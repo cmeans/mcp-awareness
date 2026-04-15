@@ -43,8 +43,10 @@ PRs auto-pass the check. The whitelist is configured in the dashboard, not
 in this repository. Currently exempt:
 
 - `cmeans` (maintainer)
-- Bots that open PRs against the repo (e.g., `dependabot[bot]`,
-  `claude[bot]`)
+- Project bots that open PRs against the repo. The current list lives in
+  the cla-assistant dashboard, not here — copying bot names into code is
+  a maintenance trap. To see or update the list, sign in to
+  cla-assistant.io and open the repository settings.
 
 To update the whitelist, sign in at https://cla-assistant.io, open the
 linked repository, and edit the settings.
