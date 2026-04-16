@@ -3,13 +3,25 @@
 
 New in v0.17.0. This guide explains how mcp-awareness handles
 multilingual content — per-entry language detection, language-specific
-full-text search, and what happens when you write in a language the
-server doesn't yet have a Postgres regconfig for.
+full-text search, and vector search across languages.
 
-- Design context:
-  [Hybrid Retrieval + Multilingual](design/hybrid-retrieval-multilingual.md).
-- Data Dictionary: the `language` column is documented in the
-  [common envelope](data-dictionary.md).
+## Contents
+
+### Adding and maintaining data
+- [How it works](#how-it-works) — the language resolution chain
+- [Supported FTS languages](#supported-fts-languages) — 28 Postgres regconfigs
+- [Embedding model languages](#embedding-model-languages) — 12 natively trained + ~100 via XLM-RoBERTa
+- [Writing in a specific language](#writing-in-a-specific-language) — explicit, auto-detected, override
+- [Unsupported-language alerts](#unsupported-language-alerts) — demand signals for new languages
+
+### Searching and retrieving data
+- [Querying by language](#querying-by-language) — filter by language
+- [Hybrid search across languages](#hybrid-search-across-languages) — how vector + FTS work together
+
+### Operations
+- [Deployment notes](#deployment-notes) — lingua install, backfill, regconfig cache
+- [What's next](#whats-next) — Phases 2–3, data sovereignty
+- [Reference](#reference)
 
 ---
 
@@ -59,10 +71,11 @@ inflected forms) or the `simple` fallback (exact-token matching only).
 
 ---
 
-## Supported languages
+## Supported FTS languages
 
 28 languages have a Postgres snowball regconfig mapped in
-mcp-awareness:
+mcp-awareness. These get **language-specific stemming** in full-text
+search — inflected forms like "serveurs" match "serveur":
 
 | ISO code | Regconfig | | ISO code | Regconfig |
 |----------|------------|-|----------|-----------|
@@ -83,9 +96,45 @@ mcp-awareness:
 | `id` | indonesian | | | |
 
 Languages not in this list (e.g., Chinese, Japanese, Korean, Hebrew)
-fall back to `simple`. Phase 3 of the hybrid retrieval design covers
-non-Western language support via Postgres extensions (`pgroonga`,
+fall back to `simple` for FTS. Phase 3 of the hybrid retrieval design
+covers non-Western FTS support via Postgres extensions (`pgroonga`,
 `zhparser`, etc.), but that hasn't shipped yet.
+
+---
+
+## Embedding model languages
+
+The default embedding model
+([granite-embedding:278m](https://huggingface.co/ibm-granite/granite-embedding-278m-multilingual))
+is a multilingual model trained on **12 languages**:
+
+| Language | Language | Language |
+|----------|----------|----------|
+| Arabic | English | Japanese |
+| Chinese | French | Korean |
+| Czech | German | Dutch |
+| Italian | Portuguese | Spanish |
+
+The model is built on XLM-RoBERTa, which covers approximately **100
+languages** in its vocabulary. Languages outside the 12 training
+languages still produce usable embeddings — cross-lingual retrieval
+will work, just with lower recall than for the trained set.
+
+**Why this matters even without FTS stemming.** Languages like
+Japanese, Korean, and Chinese have no Postgres regconfig in our
+mapping — FTS falls back to `simple` (whitespace tokenization, no
+stemming). But the embedding model *was* trained on these languages,
+so the **vector branch of hybrid search still works well for them**.
+A Japanese query will find Japanese entries via vector similarity
+even though FTS can't stem the text. This is why enabling the
+embedding provider is especially valuable for multilingual use.
+
+| Language | FTS stemming | Vector search |
+|----------|:---:|:---:|
+| English, French, German, ... (28 FTS languages) | ✓ | ✓ |
+| Japanese, Korean, Chinese, Czech (in embedding model, no regconfig) | ✗ (simple fallback) | ✓ |
+| Other XLM-RoBERTa languages (not in embedding training set) | ✗ (simple fallback) | partial |
+| Languages outside XLM-RoBERTa vocabulary | ✗ (simple fallback) | ✗ |
 
 ---
 
@@ -123,7 +172,7 @@ as `german` regconfig. Without lingua, it falls back to `simple`.
 
 ```
 update_entry(
-    id="<entry-id>",
+    entry_id="<entry-id>",
     language="de"
 )
 ```
@@ -133,62 +182,14 @@ lingua was installed), you can update the language explicitly.
 
 ---
 
-## Querying by language
-
-### Filter `get_knowledge` to a single language
-
-```
-get_knowledge(tags=["infra"], language="fr")
-```
-
-Returns only French-language entries matching the tag filter. The
-`language` parameter accepts an ISO 639-1 code (`"fr"`) or the
-special value `"simple"` (entries with no detected language).
-
-### Hybrid search across languages
-
-```mermaid
-flowchart LR
-    Q["search(query)"] --> V["Vector branch\n(language-agnostic)"]
-    Q --> F["FTS branch\n(per-entry regconfig)"]
-    V --> RRF["Reciprocal Rank\nFusion (k=60)"]
-    F --> RRF
-    RRF --> R["Merged results"]
-```
-
-```
-search(query="NAS server basement", tags=["infra"])
-```
-
-The `search` tool runs two branches:
-
-- **Vector branch** — if an embedding provider is configured,
-  compares the query's embedding against entry embeddings. This is
-  language-agnostic (the embedding model handles cross-lingual
-  similarity internally).
-- **FTS branch** — runs a Postgres `ts_query` against the
-  `tsv` column, using the *query's* resolved language for
-  stemming. This means a French query stems French terms, matching
-  entries stored with `language = 'french'`.
-
-Results from both branches are fused via Reciprocal Rank Fusion
-(RRF, k=60). In practice:
-
-- Same-language queries get strong matches from both branches.
-- Cross-language queries rely more heavily on the vector branch
-  (embedding similarity crosses language barriers; FTS stemming
-  doesn't). This is why the embedding provider matters most for
-  multilingual use — FTS alone only finds same-language matches.
-
----
-
 ## Unsupported-language alerts
 
 When you write an entry and lingua detects a language that has no
 Postgres regconfig (e.g., Chinese, Japanese, Korean), mcp-awareness:
 
 1. Stores the entry with `language = 'simple'` (FTS still works,
-   just without stemming).
+   just without stemming; vector search still works if the language
+   is in the embedding model's training set).
 2. Fires an **info-level structural alert** with the tag
    `unsupported-language-{iso}` (e.g., `unsupported-language-zh`).
 
@@ -206,6 +207,85 @@ search(query="unsupported language", entry_type="alert")
 
 Or browse all active alerts with `get_alerts()` and look for alert IDs
 starting with `unsupported-language-`.
+
+---
+
+## Querying by language
+
+### Filter `get_knowledge` to a single language
+
+```
+get_knowledge(tags=["infra"], language="fr")
+```
+
+Returns only French-language entries matching the tag filter. The
+`language` parameter accepts an ISO 639-1 code (`"fr"`) or the
+special value `"simple"` (entries with no detected language).
+
+---
+
+## Hybrid search across languages
+
+```mermaid
+flowchart TD
+    Q["search(query, ...)"] --> P["Resolve query language"]
+    P --> V["Vector branch\n(HNSW index)"]
+    P --> F["FTS branch\n(GIN index)"]
+
+    V --> V1["Embed query text\n(granite-embedding)"]
+    V1 --> V2["Cosine similarity\nagainst entry embeddings"]
+    V2 --> V3["Top N by vector score"]
+
+    F --> F1["Parse query as ts_query\n(using query's regconfig)"]
+    F1 --> F2["Match against entry tsvector\n(per-entry language stemming)"]
+    F2 --> F3["Rank by ts_rank_cd"]
+
+    V3 --> RRF["Reciprocal Rank Fusion\n(k=60)"]
+    F3 --> RRF
+    RRF --> R["Merged results\n(best of both branches)"]
+
+    style V fill:#e8f4e8
+    style F fill:#e8e8f4
+    style RRF fill:#f4e8e8
+```
+
+```
+search(query="NAS server basement", tags=["infra"])
+```
+
+The `search` tool runs two branches in parallel:
+
+- **Vector branch** (green above) — if an embedding provider is
+  configured, embeds the query and compares it against stored entry
+  embeddings via cosine similarity. This is **language-agnostic** —
+  the multilingual embedding model handles cross-lingual matching
+  internally. A French query can find English entries and vice versa.
+- **FTS branch** (blue above) — parses the query as a Postgres
+  `ts_query` using the query's resolved language for stemming, then
+  matches against entries' `tsv` column (which uses each entry's own
+  language for stemming). This is **language-specific** — French
+  stemming matches French entries, English matches English.
+
+Results from both branches are fused via **Reciprocal Rank Fusion**
+(red above, k=60). RRF doesn't care about absolute scores — it
+combines rankings, so an entry that ranks highly in *either* branch
+surfaces in the final results.
+
+### What this means in practice
+
+| Scenario | Vector branch | FTS branch | Result |
+|----------|:---:|:---:|--------|
+| Same-language query (e.g., English → English) | ✓ strong | ✓ strong | Best recall — both branches contribute |
+| Cross-language query (e.g., French → English) | ✓ strong | ✗ miss | Vector carries the match; still works |
+| Rare identifier or exact term | ✗ weak | ✓ strong | FTS rescues the match |
+| Long document (>500 chars) | ✗ partial (first 500 chars embedded) | ✓ full text indexed | FTS rescues buried terms |
+| No embedding provider configured | ✗ skipped | ✓ only branch | FTS-only mode, still functional |
+
+**Graceful degradation:** if no embedding provider is configured,
+search runs FTS only. If an entry has no embedding (new entry,
+backfill not yet run), it still participates in FTS. If the query
+text is too short for meaningful FTS (stop words only), the vector
+branch carries. Each branch compensates for the other's gaps.
 
 ---
 
@@ -255,7 +335,7 @@ generated `tsv` column.
 ## What's next
 
 - **Phase 2: Cross-lingual vector model** — swap the embedding model
-  to one with strong cross-lingual properties (e.g., multilingual-e5
+  to one with stronger cross-lingual properties (e.g., multilingual-e5
   or similar). Tracked at
   [#239](https://github.com/cmeans/mcp-awareness/issues/239).
 - **Phase 3: Non-Western language support** — install Postgres
@@ -278,3 +358,5 @@ generated `tsv` column.
   — how regconfigs work.
 - [lingua-py](https://github.com/pemistahl/lingua-py) — the
   language detection library.
+- [granite-embedding:278m](https://huggingface.co/ibm-granite/granite-embedding-278m-multilingual)
+  — the default embedding model (IBM, multilingual, 768 dimensions).
