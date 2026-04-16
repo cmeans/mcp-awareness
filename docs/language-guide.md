@@ -194,6 +194,10 @@ multilingual use.
 
 ### Explicit language
 
+Two reasonable ways this gets used in practice:
+
+**A primarily English-speaking user who also writes in another language** — for example, you own a property in France and keep notes about it in French:
+
 ```
 remember(
     description="Le serveur NAS est dans le placard du sous-sol.",
@@ -203,11 +207,32 @@ remember(
 )
 ```
 
-The entry is stored with `language = 'french'`. FTS will stem
-French inflections correctly — a search for "serveurs" will match
-"serveur".
+**A primarily French-speaking user keeping their own notes in French** — in this case it's natural to also use French-language values for `source` and `tags`, since they're just labels you'll search by later:
+
+```
+remember(
+    description="Le serveur NAS est dans le placard du sous-sol.",
+    source="personnel",
+    tags=["infrastructure", "nas", "maison"],
+    language="fr"
+)
+```
+
+In both cases the entry is stored with `language = 'french'`. FTS
+will stem French inflections correctly — a search for "serveurs" will
+match "serveur". Symmetrically, a French-speaking user can keep
+entries in English (or any other supported language) whenever that's
+more convenient — `language="en"` would store the same content with
+English stemming.
+
+> Note: the MCP tool names and parameters themselves (`remember`,
+> `description`, etc.) are currently English-only. A future
+> localization pass for tool metadata is out of scope — the values
+> you write are free to be in any language the model supports.
 
 ### Auto-detected language
+
+If you don't pass `language`, lingua-py is used to auto-detect:
 
 ```
 remember(
@@ -447,3 +472,7 @@ is due:
   dilution-bug root cause.
 - [Data Dictionary](data-dictionary.md) — `language` and `tsv`
   column definitions.
+
+---
+
+Part of the [<img src="../docs/branding/awareness-logo-32.svg" alt="Awareness logo — a stylized eye with radiating signal lines" height="20"> Awareness](https://github.com/cmeans/mcp-awareness) ecosystem. © 2026 Chris Means

@@ -177,8 +177,19 @@ The write is rejected with a structured error:
 }
 ```
 
-All failures are reported at once — you don't fix one and discover the
-next on the retry.
+All failures are reported at once — you don't fix one and discover
+the next on the retry.
+
+> **Heads-up:** the message text comes straight from the underlying
+> JSON Schema library. It's accurate but not always as actionable as
+> it could be — the quote-vs-no-quote distinction between `"2000"` (a
+> string) and `2000` (an integer) is subtle, and no fix is suggested.
+> Richer, typed error envelopes (with `expected_type`, `actual_type`,
+> and fix suggestions where mechanical) are tracked in
+> [#301](https://github.com/cmeans/mcp-awareness/issues/301). If
+> you're an agent, pre-validating client-side by fetching the schema
+> first (`get_knowledge(tags=["schema"])`) avoids the round-trip
+> entirely.
 
 ### 4. Update with re-validation
 
@@ -498,6 +509,9 @@ powerful:
   tool.
 - **Record-version migration** ([#293](https://github.com/cmeans/mcp-awareness/issues/293))
   — a first-class way to move records from `album:1` to `album:2`.
+- **Structured, actionable validation errors** ([#301](https://github.com/cmeans/mcp-awareness/issues/301))
+  — typed error envelopes with `expected_type`, `actual_type`, and
+  fix suggestions for the common keyword failures.
 
 ---
 
@@ -509,3 +523,7 @@ powerful:
   — the design this implementation shipped from.
 - [JSON Schema Draft 2020-12](https://json-schema.org/draft/2020-12)
   — the external spec schemas conform to.
+
+---
+
+Part of the [<img src="../docs/branding/awareness-logo-32.svg" alt="Awareness logo — a stylized eye with radiating signal lines" height="20"> Awareness](https://github.com/cmeans/mcp-awareness) ecosystem. © 2026 Chris Means
