@@ -21,7 +21,7 @@ full-text search, and vector search across languages.
 ### Operations
 - [Deployment notes](#deployment-notes) — lingua install, backfill, regconfig cache
 - [What's next](#whats-next) — Phases 2–3, data sovereignty
-- [Reference](#reference)
+- [Reference and credits](#reference-and-credits) — upstream projects we depend on
 
 ---
 
@@ -104,36 +104,88 @@ covers non-Western FTS support via Postgres extensions (`pgroonga`,
 
 ## Embedding model languages
 
-The default embedding model
-([granite-embedding:278m](https://huggingface.co/ibm-granite/granite-embedding-278m-multilingual))
-is a multilingual model trained on **12 languages**:
+The default embedding model is
+[granite-embedding:278m-multilingual](https://huggingface.co/ibm-granite/granite-embedding-278m-multilingual),
+from the [IBM Granite](https://www.ibm.com/granite) family
+([paper](https://arxiv.org/html/2502.20204v1)), served locally via
+[Ollama](https://ollama.com/library/granite-embedding). We chose it
+because it is open-weight, enterprise-licensed, produces 768-dim
+vectors that fit our HNSW index, and runs well on modest hardware.
+If you're using the default configuration, you're using this model;
+see the [embedding provider docs](deployment-guide.md#embedding-provider)
+for alternatives.
 
-| Language | Language | Language |
-|----------|----------|----------|
-| Arabic | English | Japanese |
-| Chinese | French | Korean |
-| Czech | German | Dutch |
-| Italian | Portuguese | Spanish |
+### Natively trained (12 languages)
 
-The model is built on XLM-RoBERTa, which covers approximately **100
-languages** in its vocabulary. Languages outside the 12 training
-languages still produce usable embeddings — cross-lingual retrieval
-will work, just with lower recall than for the trained set.
+The Granite team fine-tuned the model on retrieval pairs in 12
+languages. These get the strongest embedding quality:
 
-**Why this matters even without FTS stemming.** Languages like
-Japanese, Korean, and Chinese have no Postgres regconfig in our
-mapping — FTS falls back to `simple` (whitespace tokenization, no
-stemming). But the embedding model *was* trained on these languages,
-so the **vector branch of hybrid search still works well for them**.
-A Japanese query will find Japanese entries via vector similarity
-even though FTS can't stem the text. This is why enabling the
-embedding provider is especially valuable for multilingual use.
+- Arabic
+- Chinese
+- Czech
+- Dutch
+- English
+- French
+- German
+- Italian
+- Japanese
+- Korean
+- Portuguese
+- Spanish
 
-| Language | FTS stemming | Vector search |
-|----------|:---:|:---:|
-| English, French, German, ... (28 FTS languages) | ✓ | ✓ |
-| Japanese, Korean, Chinese, Czech (in embedding model, no regconfig) | ✗ (simple fallback) | ✓ |
-| Other XLM-RoBERTa languages (not in embedding training set) | ✗ (simple fallback) | partial |
+### Inherited from XLM-RoBERTa (~100 languages)
+
+Granite's embedding model is built on top of
+[XLM-RoBERTa](https://huggingface.co/FacebookAI/xlm-roberta-base)
+([paper](https://arxiv.org/pdf/1911.02116), from Meta AI's
+[FAIR team](https://ai.meta.com/research/)), which was pre-trained
+on 2.5 TB of Common Crawl data covering ~100 languages. Languages
+outside the 12 fine-tuned set still produce usable embeddings — recall
+is lower than for trained languages but usable for cross-lingual
+retrieval.
+
+<details>
+<summary><strong>Full list of ~100 XLM-RoBERTa languages</strong></summary>
+
+Afrikaans, Albanian, Amharic, Arabic, Armenian, Assamese, Azerbaijani,
+Basque, Belarusian, Bengali, Bengali (Romanized), Bosnian, Breton,
+Bulgarian, Burmese, Burmese (zawgyi font), Catalan, Chinese
+(Simplified), Chinese (Traditional), Croatian, Czech, Danish, Dutch,
+English, Esperanto, Estonian, Filipino, Finnish, French, Galician,
+Georgian, German, Greek, Gujarati, Hausa, Hebrew, Hindi, Hindi
+(Romanized), Hungarian, Icelandic, Indonesian, Irish, Italian,
+Japanese, Javanese, Kannada, Kazakh, Khmer, Korean, Kurdish
+(Kurmanji), Kyrgyz, Lao, Latin, Latvian, Lithuanian, Macedonian,
+Malagasy, Malay, Malayalam, Marathi, Mongolian, Nepali, Norwegian,
+Oriya, Oromo, Pashto, Persian, Polish, Portuguese, Punjabi, Romanian,
+Russian, Sanskrit, Scottish Gaelic, Serbian, Sindhi, Sinhala, Slovak,
+Slovenian, Somali, Spanish, Sundanese, Swahili, Swedish, Tamil, Tamil
+(Romanized), Telugu, Telugu (Romanized), Thai, Turkish, Ukrainian,
+Urdu, Urdu (Romanized), Uyghur, Uzbek, Vietnamese, Welsh, Western
+Frisian, Xhosa, Yiddish.
+
+Source: [fairseq XLM-R docs](https://github.com/facebookresearch/fairseq/tree/main/examples/xlmr).
+
+</details>
+
+### Why this matters even without FTS stemming
+
+Languages like Japanese, Korean, and Chinese have no Postgres
+regconfig in our mapping — FTS falls back to `simple` (whitespace
+tokenization, no stemming). But the embedding model *was* trained on
+these languages, so the **vector branch of hybrid search still works
+well for them**. A Japanese query will find Japanese entries via
+vector similarity even though FTS can't stem the text. This is why
+enabling the embedding provider is especially valuable for
+multilingual use.
+
+### Coverage summary
+
+| Language category | FTS stemming | Vector search |
+|------------------|:---:|:---:|
+| 28 mapped FTS languages (e.g., English, French, German) | ✓ | ✓ |
+| In Granite's 12 fine-tuned languages, no FTS regconfig (Chinese, Japanese, Korean, Czech) | ✗ (simple fallback) | ✓ (strong) |
+| Other XLM-RoBERTa languages (e.g., Swahili, Thai, Vietnamese) | ✗ (simple fallback) | ✓ (partial) |
 | Languages outside XLM-RoBERTa vocabulary | ✗ (simple fallback) | ✗ |
 
 ---
@@ -347,16 +399,51 @@ generated `tsv` column.
 
 ---
 
-## Reference
+## Reference and credits
+
+Multilingual support in mcp-awareness stands on the shoulders of a
+number of open-source and open-weight projects. Credit where credit
+is due:
+
+### Projects we depend on
+
+- **[IBM Granite](https://www.ibm.com/granite)** — the Granite
+  Embedding team trained the 278m multilingual model we use by
+  default. Released under an Apache-2.0 license on
+  [Hugging Face](https://huggingface.co/ibm-granite/granite-embedding-278m-multilingual),
+  with a
+  [detailed model paper](https://arxiv.org/html/2502.20204v1).
+- **[Meta AI (FAIR team)](https://ai.meta.com/research/)** — authors
+  of [XLM-RoBERTa](https://huggingface.co/FacebookAI/xlm-roberta-base)
+  (Conneau et al.,
+  [*Unsupervised Cross-lingual Representation Learning at Scale*](https://arxiv.org/pdf/1911.02116)),
+  the multilingual transformer backbone that makes Granite's ~100-
+  language coverage possible. Trained on the CC-100 corpus they also
+  curated.
+- **[Ollama](https://ollama.com)** — makes it trivial to run embedding
+  models locally. We pull `granite-embedding:278m` from
+  [ollama.com/library/granite-embedding](https://ollama.com/library/granite-embedding).
+- **[lingua-py](https://github.com/pemistahl/lingua-py)** (Peter
+  M. Stahl) — the language detection library that powers
+  auto-detection. Fast, accurate, works offline, supports 75+
+  languages.
+- **[Hugging Face](https://huggingface.co)** — hosts the model
+  weights, model cards, and community around both Granite and
+  XLM-RoBERTa.
+- **[PostgreSQL](https://www.postgresql.org)** — the
+  [text search infrastructure](https://www.postgresql.org/docs/17/textsearch-configuration.html)
+  (regconfigs, tsvector, ts_rank_cd) we lean on for FTS.
+- **[pgvector](https://github.com/pgvector/pgvector)** (Andrew
+  Kane) — the Postgres extension that gives us HNSW-indexed vector
+  search alongside everything else in the same database.
+- **[Snowball](https://snowballstem.org)** (Martin Porter et al.) —
+  the stemmers behind the 28 FTS regconfigs listed above, most of
+  which ship with Postgres by default.
+
+### Internal references
 
 - [Hybrid Retrieval + Multilingual design](design/hybrid-retrieval-multilingual.md)
   — full design doc covering Layers 1–3, data sovereignty, and the
   dilution-bug root cause.
 - [Data Dictionary](data-dictionary.md) — `language` and `tsv`
   column definitions.
-- [Postgres text search configs](https://www.postgresql.org/docs/17/textsearch-configuration.html)
-  — how regconfigs work.
-- [lingua-py](https://github.com/pemistahl/lingua-py) — the
-  language detection library.
-- [granite-embedding:278m](https://huggingface.co/ibm-granite/granite-embedding-278m-multilingual)
-  — the default embedding model (IBM, multilingual, 768 dimensions).
