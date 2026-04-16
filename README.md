@@ -463,6 +463,7 @@ Read the full vision: **[What Knowledge Becomes When It's Ambient](docs/vision.m
 - [Collation Layer](docs/collation-layer.md) — briefing resource, token optimization, escalation logic
 - [Data Dictionary](docs/data-dictionary.md) — database schema, entry types, data field structures, lifecycle rules
 - [Schema + Record Guide](docs/schema-record-guide.md) — how to define typed data contracts with JSON Schema, with worked examples (music collection, reading list, recipes, home inventory, subscriptions, edge manifests, tag taxonomy)
+- [Language Support Guide](docs/language-guide.md) — per-entry language detection, language-specific FTS stemming, supported languages, querying by language, unsupported-language alerts, deployment notes
 - [Memory Prompts](docs/memory-prompts.md) — how to configure your AI to use awareness (platform memory, global CLAUDE.md, project CLAUDE.md)
 - [Changelog](CHANGELOG.md) — version history
 
