@@ -8,7 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.18.0] - 2026-04-15
+## [0.18.0] - 2026-04-16
 
 ### Added
 - **Schema + Record user guide** — new `docs/schema-record-guide.md` walks through why typed data matters, a full music-collection worked example (register schema → create record → validation failure → update → delete blocked), the Tag Taxonomy (Layer C) tie-in, and six collapsible use cases: reading list, recipes, home inventory, subscriptions, edge provider manifests, meeting/bug templates. Linked from README "Design docs". README also updates the CLI tools list to include `mcp-awareness-register-schema`.
