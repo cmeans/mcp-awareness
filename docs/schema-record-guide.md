@@ -35,7 +35,7 @@ later.
 
 ### The Tag Taxonomy tie-in
 
-The [Tag Taxonomy v2 design](#) (Layer C) is built on top of
+The Tag Taxonomy v2 design (Layer C) is built on top of
 schema/record: a user-defined tag vocabulary is just a set of records
 validated against a `tag-taxonomy` schema. That layer isn't wired in
 yet, but it means the schema/record primitive in this release is doing
@@ -67,6 +67,23 @@ versioning so the contract can evolve without breaking consumers.
 
 ---
 
+## The lifecycle at a glance
+
+```mermaid
+flowchart LR
+    A["Register Schema\n(immutable)"] --> B["Create Record\n(validated)"]
+    B --> C{Valid?}
+    C -- Yes --> D["Stored ✓"]
+    C -- No --> E["Rejected ✗\n(all errors returned)"]
+    D --> F["Update Record"]
+    F --> C
+    G["Delete Schema"] --> H{Records\nexist?}
+    H -- Yes --> I["Blocked ✗"]
+    H -- No --> J["Deleted ✓"]
+```
+
+---
+
 ## Walk-through: a music collection
 
 Imagine you want to keep an inventory of albums you own. You care
@@ -78,6 +95,9 @@ the agent to reject `year: "nineteen ninety seven"` and
 
 ```
 register_schema(
+    source="personal",
+    tags=["music", "schema"],
+    description="A single album in my music collection.",
     family="album",
     version="1",
     schema={
@@ -92,8 +112,7 @@ register_schema(
             "notes":  {"type": "string"}
         },
         "additionalProperties": false
-    },
-    description="A single album in my music collection."
+    }
 )
 ```
 
@@ -112,6 +131,10 @@ A few things are happening:
 
 ```
 create_record(
+    source="personal",
+    tags=["music", "album", "90s"],
+    description="OK Computer by Radiohead (1997)",
+    logical_key="album-ok-computer",
     schema_ref="album",
     schema_version="1",
     content={
@@ -120,8 +143,7 @@ create_record(
         "year":   1997,
         "rating": 5,
         "notes":  "Still the reference"
-    },
-    tags=["music", "album", "90s"]
+    }
 )
 ```
 
@@ -133,6 +155,10 @@ any other entry.
 
 ```
 create_record(
+    source="personal",
+    tags=["music", "album"],
+    description="Kid A by Radiohead (2000)",
+    logical_key="album-kid-a",
     schema_ref="album",
     schema_version="1",
     content={"title": "Kid A", "artist": "Radiohead", "year": "2000"}
@@ -158,7 +184,7 @@ next on the retry.
 
 ```
 update_entry(
-    id="<the record id>",
+    entry_id="<the record id>",
     content={"title": "OK Computer", "artist": "Radiohead", "year": 1997, "rating": 4, "notes": "Downgraded after fresh listen"}
 )
 ```
@@ -200,6 +226,9 @@ Register a `tag-definition` schema:
 
 ```
 register_schema(
+    source="personal",
+    tags=["tag-definition", "schema"],
+    description="A human-defined tag with description, synonyms, and display name.",
     family="tag-definition",
     version="1",
     schema={
@@ -213,23 +242,30 @@ register_schema(
             "display":     {"type": "string"}
         },
         "additionalProperties": false
-    },
-    description="A human-defined tag with description, synonyms, and display name."
+    }
 )
 ```
 
 Then seed a few records:
 
 ```
-create_record(schema_ref="tag-definition", schema_version="1",
-    content={"path": "music/genre/rock/alternative",
-             "description": "Rock that deliberately departs from mainstream rock conventions; 90s onward.",
-             "synonyms": ["alt rock", "alternative"],
-             "display":  "Alternative Rock"},
-    tags=["tag-definition", "music"])
+create_record(
+    source="personal",
+    tags=["tag-definition", "music"],
+    description="Tag definition: music/genre/rock/alternative",
+    logical_key="tag-music-genre-rock-alternative",
+    schema_ref="tag-definition",
+    schema_version="1",
+    content={
+        "path": "music/genre/rock/alternative",
+        "description": "Rock that deliberately departs from mainstream rock conventions; 90s onward.",
+        "synonyms": ["alt rock", "alternative"],
+        "display":  "Alternative Rock"
+    }
+)
 ```
 
-Once the [Tag Taxonomy Layer C](#) work lands, the awareness server
+Once the Tag Taxonomy Layer C work lands, the awareness server
 will automatically consume these records to disambiguate cross-user
 tags, provide display names in shared views, and power prefix-aware
 tag searches. Today they serve as self-documenting tag definitions
@@ -238,6 +274,12 @@ that future tooling will leverage.
 ---
 
 ## More use cases
+
+> **Note:** The examples below show only the schema body for brevity.
+> In practice, every `register_schema` call also requires `source`,
+> `tags`, and `description` (as shown in the primary walk-through
+> above), and every `create_record` call also requires `source`,
+> `tags`, `description`, and `logical_key`.
 
 <details>
 <summary><strong>Reading list</strong> — books you're reading, finished, or gave up on</summary>

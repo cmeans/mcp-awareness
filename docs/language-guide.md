@@ -15,6 +15,21 @@ server doesn't yet have a Postgres regconfig for.
 
 ## How it works
 
+```mermaid
+flowchart TD
+    A["Entry written"] --> B{language\nparam?}
+    B -- "Yes (e.g. 'fr')" --> C["Map ISO → regconfig\n(fr → french)"]
+    B -- No --> D{lingua\ninstalled?}
+    D -- Yes --> E["Auto-detect language"]
+    E --> F{Regconfig\nexists?}
+    F -- Yes --> C
+    F -- No --> G["Use 'simple'\n+ fire unsupported-language alert"]
+    D -- No --> H["Use 'simple'"]
+    C --> I["Store entry with\nlanguage-specific FTS"]
+    G --> I
+    H --> I
+```
+
 Every entry has a `language` column that stores a Postgres
 [regconfig](https://www.postgresql.org/docs/17/textsearch-configuration.html)
 name (e.g., `english`, `french`, `german`). This regconfig controls
@@ -132,6 +147,15 @@ special value `"simple"` (entries with no detected language).
 
 ### Hybrid search across languages
 
+```mermaid
+flowchart LR
+    Q["search(query)"] --> V["Vector branch\n(language-agnostic)"]
+    Q --> F["FTS branch\n(per-entry regconfig)"]
+    V --> RRF["Reciprocal Rank\nFusion (k=60)"]
+    F --> RRF
+    RRF --> R["Merged results"]
+```
+
 ```
 search(query="NAS server basement", tags=["infra"])
 ```
@@ -174,11 +198,14 @@ demand signal: if `unsupported-language-ja` fires, the operator
 knows users are writing in Japanese and should consider installing
 Phase 3 language support when it ships.
 
-You can see current unsupported-language alerts via:
+You can find current unsupported-language alerts via:
 
 ```
-get_alerts(tags=["language", "unsupported"])
+search(query="unsupported language", entry_type="alert")
 ```
+
+Or browse all active alerts with `get_alerts()` and look for alert IDs
+starting with `unsupported-language-`.
 
 ---
 
