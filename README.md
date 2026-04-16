@@ -14,7 +14,7 @@
 > **Your AI's memory shouldn't be locked to one app. It should follow you everywhere.**
 
 > [!NOTE]
-> Early-stage but actively deployed — 16 releases, in daily use across Claude.ai, Claude Code, and Claude Desktop. See [Current status](#current-status) for what's working and what's planned.
+> Early-stage but actively deployed — 17 releases, in daily use across Claude.ai, Claude Code, and Claude Desktop. See [Current status](#current-status) for what's working and what's planned.
 
 ## What this is
 
@@ -369,6 +369,7 @@ For single-user deployments, secret path + WAF is sufficient. For multi-user, en
 - Delete and restore by tags with AND logic
 - Pagination (`limit`/`offset`) on all list queries
 - Entry relationships via `related_ids` convention + `get_related` bidirectional traversal
+- **Schema + record entry types** — typed data contracts via JSON Schema Draft 2020-12 (`register_schema`), with records (`create_record`) that validate on write and re-validate on update. Schemas are immutable; family + version form the `logical_key`. Per-owner storage with a shared `_system` namespace for built-in shapes. Schema deletion blocked while live records reference a version
 
 ### Hybrid search
 - `search` tool — hybrid vector + full-text search fused via Reciprocal Rank Fusion (RRF, k=60). Finds entries by meaning *and* by exact terms — long documents are rescued by lexical matches, rare identifiers are found by FTS, semantic queries still use vector similarity
@@ -390,7 +391,7 @@ For single-user deployments, secret path + WAF is sufficient. For multi-user, en
 - Read/action tracking for audit and activity feeds
 
 ### MCP interface
-- Full MCP API: 6 resources + 30 tools + 5 prompts
+- Full MCP API: 6 resources + 32 tools + 5 prompts
 - Read tool mirrors for tools-only clients
 - User-defined custom prompts from store entries with `{{var}}` templates
 - Streamable HTTP + stdio transports
