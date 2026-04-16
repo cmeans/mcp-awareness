@@ -354,7 +354,7 @@ For single-user deployments, secret path + WAF is sufficient. For multi-user, en
 - **One-line demo install** — `curl | bash` sets up Awareness + Postgres + Cloudflare quick tunnel with pre-loaded demo data and a `getting-started` prompt that personalizes your instance
 - **Published Docker images** — `ghcr.io/cmeans/mcp-awareness` (GHCR) and Docker Hub, auto-built on release tags
 - **Optional embedding provider** — add `AWARENESS_EMBEDDING_PROVIDER=ollama` and `docker compose --profile embeddings up -d` to enable the vector branch of hybrid search. FTS works without it
-- **CLI tools** — `mcp-awareness-user` (user management), `mcp-awareness-token` (JWT generation), `mcp-awareness-secret` (signing secret generation)
+- **CLI tools** — `mcp-awareness-user` (user management), `mcp-awareness-token` (JWT generation), `mcp-awareness-secret` (signing secret generation), `mcp-awareness-register-schema` (seed `_system`-owned schemas at deploy time)
 
 ### Knowledge store
 - `remember`, `learn_pattern`, `add_context`, `set_preference` with filtered retrieval
@@ -462,6 +462,8 @@ Read the full vision: **[What Knowledge Becomes When It's Ambient](docs/vision.m
 - [From Metrics to Mental Models](docs/from-metrics-to-mental-models.md) — core spec: three-layer detection model, API design, data schema
 - [Collation Layer](docs/collation-layer.md) — briefing resource, token optimization, escalation logic
 - [Data Dictionary](docs/data-dictionary.md) — database schema, entry types, data field structures, lifecycle rules
+- [Schema + Record Guide](docs/schema-record-guide.md) — how to define typed data contracts with JSON Schema, with worked examples (music collection, reading list, recipes, home inventory, subscriptions, edge manifests, tag taxonomy)
+- [Language Support Guide](docs/language-guide.md) — per-entry language detection, language-specific FTS stemming, supported languages, querying by language, unsupported-language alerts, deployment notes
 - [Memory Prompts](docs/memory-prompts.md) — how to configure your AI to use awareness (platform memory, global CLAUDE.md, project CLAUDE.md)
 - [Changelog](CHANGELOG.md) — version history
 
