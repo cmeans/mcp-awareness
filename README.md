@@ -346,6 +346,10 @@ The awareness store may contain personal information. Securing the endpoint is n
 
 For single-user deployments, secret path + WAF is sufficient. For multi-user, enable OAuth — see the [Auth Setup Guide](docs/auth-setup.md).
 
+### Vulnerability Disclosure
+
+If you discover a security vulnerability, please refer to our [Security Policy](SECURITY.md) for reporting instructions and disclosure timeline.
+
 ## Current status
 
 **Working end-to-end** — deployed on `mcpawareness.com` via Cloudflare Tunnel with WAF protection. Tested with Claude (all platforms), Cursor, and VS Code.
