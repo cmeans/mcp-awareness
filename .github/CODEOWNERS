@@ -1,0 +1,9 @@
+# CODEOWNERS — auto-requested reviewers on every PR.
+#
+# Syntax: https://docs.github.com/en/repositories/managing-your-repositories-settings-and-features/customizing-your-repository/about-code-owners
+#
+# The last matching pattern wins per GitHub's evaluation order, so the
+# wildcard below assigns the maintainer as default reviewer; add more
+# specific patterns above it to delegate ownership of particular paths.
+
+* @cmeans
