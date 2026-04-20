@@ -413,6 +413,10 @@ If you believe you've found a security issue in `mcp-awareness`, please do **not
 - Request timing instrumentation and `/health` endpoint
 - Comprehensive test suite (all against real Postgres + Ollama in CI), strict type checking, CI pipeline with coverage, QA gate
 
+### Backups
+
+Self-hosters persist real data — knowledge, intentions, alerts, embeddings. See [`docs/backup.md`](docs/backup.md) for a pg_dump/restore flow, sample cron and systemd-timer snippets, off-host retention guidance, how to skip (and later regenerate) the `embeddings` table for smaller dumps, and a restore-drill checklist.
+
 ### Upgrading
 
 When upgrading to a release with hybrid retrieval (Layer 1), running `mcp-awareness-migrate` applies two migrations:
