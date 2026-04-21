@@ -60,24 +60,38 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      # Note: the image's ENTRYPOINT is ./docker-entrypoint.sh which runs
+      # migrations requiring AWARENESS_DATABASE_URL. For import smokes we
+      # override ENTRYPOINT with --entrypoint so we go straight to python
+      # / bash without touching the migration path.
+
       - name: Import smoke — top-level package
         run: >
-          docker run --rm mcp-awareness:pr-smoke
-          python -c "import mcp_awareness; print('import mcp_awareness: ok')"
+          docker run --rm --entrypoint python mcp-awareness:pr-smoke
+          -c "import mcp_awareness; print('import mcp_awareness: ok')"
 
       - name: Import smoke — server module
         run: >
-          docker run --rm mcp-awareness:pr-smoke
-          python -c "from mcp_awareness import server; print('import mcp_awareness.server: ok')"
+          docker run --rm --entrypoint python mcp-awareness:pr-smoke
+          -c "from mcp_awareness import server; print('import mcp_awareness.server: ok')"
 
       - name: Import smoke — CLI entry points resolve
         run: |
-          docker run --rm mcp-awareness:pr-smoke bash -c '
+          docker run --rm --entrypoint bash mcp-awareness:pr-smoke -c '
             set -euo pipefail
             for bin in mcp-awareness mcp-awareness-migrate mcp-awareness-user mcp-awareness-token mcp-awareness-secret mcp-awareness-register-schema; do
               command -v "$bin" > /dev/null || { echo "missing entry point: $bin"; exit 1; }
             done
             echo "all entry points resolved"
+          '
+
+      - name: Import smoke — entrypoint script is executable and first-line shebang is sane
+        run: |
+          docker run --rm --entrypoint bash mcp-awareness:pr-smoke -c '
+            set -euo pipefail
+            test -x ./docker-entrypoint.sh
+            head -1 ./docker-entrypoint.sh | grep -qE "^#!/.*\b(bash|sh)\b"
+            echo "docker-entrypoint.sh: executable with valid shebang"
           '
 
       - name: Report image details
