@@ -83,8 +83,11 @@ updates:
 
   # docker-compose — images in docker-compose.yaml. Dependabot skips
   # :latest tags (pgvector/pgvector:pg17 is the one currently pinned and
-  # eligible for updates). Grouped so Ollama / Postgres / Cloudflared
-  # bumps don't fan out when multiple pins move at once.
+  # eligible for updates). Grouped minor + patch only so Ollama / Postgres /
+  # Cloudflared bumps don't fan out when multiple pins move at once, while
+  # majors (e.g., pgvector:pg17 -> pg18 is a data-migration event) land
+  # as their own PRs where they can be reviewed with the coordination they
+  # deserve.
   - package-ecosystem: "docker-compose"
     directory: "/"
     schedule:
@@ -102,3 +105,6 @@ updates:
         applies-to: version-updates
         patterns:
           - "*"
+        update-types:
+          - "minor"
+          - "patch"
