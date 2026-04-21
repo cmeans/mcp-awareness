@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **`SECURITY.md` vulnerability disclosure policy** — new `SECURITY.md` at the repo root documents how to report security vulnerabilities (GitHub Private Vulnerability Reporting preferred, maintainer email as fallback), response-time expectations (72h acknowledgement / 14-day triage / up to 90-day coordinated disclosure), scope (in: server code + published images + deployment docs; out: upstream deps, hosted instances, edge repos), safe-harbor terms for good-faith research, credit policy (advisory + release-notes attribution; no standalone Hall of Fame, no paid bounty, no formal CVE program), and a "What's not covered" section that explicitly forecloses bug-bounty claims. README's `## Security` section gains a `### Reporting a vulnerability` subsection linking to the policy. Closes [#309](https://github.com/cmeans/mcp-awareness/issues/309).
 - **`CODEOWNERS` file** — `.github/CODEOWNERS` now assigns `@cmeans` as the default reviewer on every PR. GitHub will auto-request the maintainer on any new PR, which closes the "drive-by PR slips past review when the maintainer isn't looking" gap and makes review-assignment state explicit rather than implicit. Wildcard-only for now; add path-specific ownership rules above the wildcard as the contributor base grows.
 
 ### Security
