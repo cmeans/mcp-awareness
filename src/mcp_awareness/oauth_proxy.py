@@ -40,10 +40,16 @@ from urllib.parse import parse_qs
 
 from starlette.types import ASGIApp, Receive, Scope, Send
 
+from .helpers import safe_url_for_log
+
 logger = logging.getLogger(__name__)
 
-# Default trusted-header chain — Cloudflare environment
+# Default trusted-header chain — Cloudflare environment.
+# Literal strings here (not computed from env) so they can be logged
+# directly without taint-flow concerns.
 _DEFAULT_IP_HEADERS = ["CF-Connecting-IP", "X-Real-IP"]
+_DEFAULT_IP_HEADER_DISPLAY = "CF-Connecting-IP → X-Real-IP → ASGI client"
+
 
 # Patterns that indicate injection attempts in parameter values
 _INJECTION_PATTERNS = re.compile(
@@ -222,7 +228,11 @@ def discover_oidc_endpoints(issuer: str) -> dict[str, str | None] | None:
         with urllib.request.urlopen(discovery_url, timeout=10) as resp:
             config = json.loads(resp.read())
     except Exception as exc:
-        logger.error("OAuth proxy: OIDC discovery failed for %s: %s", discovery_url, exc)
+        logger.error(
+            "OAuth proxy: OIDC discovery failed for %s: %s",
+            safe_url_for_log(discovery_url),
+            exc,
+        )
         return None
 
     authorization_endpoint = config.get("authorization_endpoint")
@@ -241,9 +251,9 @@ def discover_oidc_endpoints(issuer: str) -> dict[str, str | None] | None:
 
     logger.info(
         "OAuth proxy: discovered endpoints — authorize=%s, token=%s, register=%s",
-        authorization_endpoint,
-        token_endpoint,
-        registration_endpoint or "(not available)",
+        safe_url_for_log(authorization_endpoint),
+        safe_url_for_log(token_endpoint),
+        safe_url_for_log(registration_endpoint) if registration_endpoint else "(not available)",
     )
 
     return {
@@ -306,11 +316,25 @@ class OAuthProxyMiddleware:
         self._ip_header_miss_count = 0
         self._ip_header_warned = False
 
-        header_chain = ip_headers or _DEFAULT_IP_HEADERS
-        logger.info(
-            "OAuth proxy: IP header chain = %s",
-            " → ".join(header_chain) + " → ASGI client",
-        )
+        # Log the header-chain configuration. When using defaults, log the
+        # literal header-name display so operators can verify their config.
+        # When operator-overridden via env var, log only the *count* — the
+        # names are contributor-controlled (env var), so we don't funnel
+        # them into a log sink (avoids CodeQL's clear-text-logging-sensitive
+        # flag on values that cross the config/log boundary).
+        if ip_headers is None:
+            logger.info(
+                "OAuth proxy: IP header chain = %s (default)",
+                _DEFAULT_IP_HEADER_DISPLAY,
+            )
+        else:
+            logger.info(
+                "OAuth proxy: IP header chain has %d custom entr%s → ASGI client "
+                "(override via AWARENESS_OAUTH_PROXY_IP_HEADERS; inspect env var "
+                "to see configured names)",
+                len(ip_headers),
+                "y" if len(ip_headers) == 1 else "ies",
+            )
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         """ASGI entry point."""
