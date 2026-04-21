@@ -93,6 +93,13 @@ class TestSafeUrlForLog:
             == "https://example.com/deeply/nested/path/with.dots/and-dashes"
         )
 
+    def test_invalid_port_returns_placeholder(self):
+        """An out-of-range port makes `parsed.port` raise ValueError — don't crash."""
+        # urllib.parse lazily validates the port; accessing `parsed.port` on
+        # a URL with port > 65535 raises. The outer `except Exception` in the
+        # helper is what covers this path.
+        assert safe_url_for_log("https://host:99999/path") == "<redacted url>"
+
 
 def test_default_query_limit_is_100():
     assert DEFAULT_QUERY_LIMIT == 100
