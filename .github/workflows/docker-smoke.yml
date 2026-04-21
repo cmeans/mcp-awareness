@@ -1,0 +1,88 @@
+# mcp-awareness — ambient system awareness for AI agents
+# Copyright (C) 2026 Chris Means
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Affero General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU Affero General Public License for more details.
+#
+# You should have received a copy of the GNU Affero General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+name: Docker Smoke
+
+# Validates the production Docker image on any PR that could affect the
+# build. Closes the gap that CI has no opinion on the image until
+# docker-publish.yml fires at tag push — which is the wrong side of the
+# merge to discover base-image regressions.
+#
+# This workflow builds and import-smokes the image; it does NOT push to
+# any registry. Registry publishes live in docker-publish.yml (tag-
+# triggered).
+#
+# Filed from cmeans/mcp-awareness#348 after PR #346
+# (python:3.12-slim -> 3.14-slim) surfaced the gap.
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "Dockerfile"
+      - "pyproject.toml"
+      - "uv.lock"
+      - ".dockerignore"
+      - ".github/workflows/docker-smoke.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  docker-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build image (no push)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          load: true
+          tags: mcp-awareness:pr-smoke
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Import smoke — top-level package
+        run: >
+          docker run --rm mcp-awareness:pr-smoke
+          python -c "import mcp_awareness; print('import mcp_awareness: ok')"
+
+      - name: Import smoke — server module
+        run: >
+          docker run --rm mcp-awareness:pr-smoke
+          python -c "from mcp_awareness import server; print('import mcp_awareness.server: ok')"
+
+      - name: Import smoke — CLI entry points resolve
+        run: |
+          docker run --rm mcp-awareness:pr-smoke bash -c '
+            set -euo pipefail
+            for bin in mcp-awareness mcp-awareness-migrate mcp-awareness-user mcp-awareness-token mcp-awareness-secret mcp-awareness-register-schema; do
+              command -v "$bin" > /dev/null || { echo "missing entry point: $bin"; exit 1; }
+            done
+            echo "all entry points resolved"
+          '
+
+      - name: Report image details
+        if: always()
+        run: |
+          docker image inspect mcp-awareness:pr-smoke --format \
+            'image: {{.RepoTags}} | size: {{.Size}} bytes' || true
+          docker image ls mcp-awareness:pr-smoke
