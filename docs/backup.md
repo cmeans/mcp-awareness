@@ -211,41 +211,54 @@ Without these, a restored Postgres dump is not reachable by the application even
 
 ## Practice the restore
 
-Backups that have never been restored are hopes, not backups. Schedule a restore drill at least once per quarter. The default `docker-compose.yaml` hardcodes the port mapping to `127.0.0.1:8420:8420`, so a naked second stack would collide with production. Use `docker-compose.qa.yaml` instead — it already maps the drill port to `127.0.0.1:8421:8420` and isolates drill data in a named volume (`awareness-qa-pg`) separate from production's bind mount.
+Backups that have never been restored are hopes, not backups. Schedule a restore drill at least once per quarter.
 
-**Important — the QA compose file uses different service and database names than production.** When you run §Restore against the drill stack, substitute the identifiers in every command:
+The drill uses the **production compose file** (`docker-compose.yaml`) with two env-var overrides: the host-side port (so the drill doesn't collide with the running production instance) and the Postgres data directory (so the drill's Postgres data stays isolated from production's bind mount).
 
-| §Restore command uses | Substitute for drill |
-|-----------------------|----------------------|
-| `docker compose` (implies `docker-compose.yaml`) | `docker compose -f docker-compose.qa.yaml` |
-| Service: `mcp-awareness` | `mcp-awareness-qa` |
-| Service: `postgres` | `postgres-qa` |
-| `--dbname=awareness` (and `psql --dbname=postgres`) | `--dbname=awareness_qa` (and `psql --dbname=postgres` unchanged) |
-| `DROP DATABASE … awareness` / `CREATE DATABASE awareness …` | `… awareness_qa` on both |
+**The drill requires production to be briefly stopped.** Production and drill share the same `container_name` values in `docker-compose.yaml`, so they can't run concurrently against each other. For a single-maintainer deployment this is fine: stop production, spin up the drill, verify, tear down the drill, restart production. Plan for ~10-15 minutes of downtime per drill.
 
 Drill procedure:
 
-1. Bring the drill stack up:
+1. Stop production:
    ```bash
-   docker compose -f docker-compose.qa.yaml up -d
+   docker compose down
    ```
-2. Restore the most recent dump into the drill stack, applying the substitutions above. For example, §Restore step 3 becomes:
+2. Bring the drill stack up on a different host port, with a separate Postgres data directory:
    ```bash
-   docker compose -f docker-compose.qa.yaml exec -T postgres-qa pg_restore \
-     --username=awareness --dbname=awareness_qa \
+   export AWARENESS_PORT=8421
+   export AWARENESS_PG_DATA=~/awareness-pg-drill
+   docker compose up -d
+   ```
+3. Restore the most recent dump into the drill's Postgres. §Restore's commands work as-written — no substitutions, same service names, same database name:
+   ```bash
+   docker compose stop mcp-awareness
+   docker compose exec -T postgres psql --username=awareness --dbname=postgres <<'SQL'
+   DROP DATABASE IF EXISTS awareness;
+   CREATE DATABASE awareness OWNER awareness;
+   SQL
+   docker compose exec -T postgres pg_restore \
+     --username=awareness --dbname=awareness \
      --no-owner --no-acl \
      < ~/backups/mcp-awareness/awareness-*.dump
+   docker compose start mcp-awareness
    ```
-3. Connect an MCP client to the drill instance on `http://127.0.0.1:8421/mcp` and call `get_stats()` and `get_briefing()`. Compare the counts to what the production instance reports at the same moment.
-4. Tear the drill stack down and remove the drill's named volume so the next drill starts from a clean slate:
+4. Connect an MCP client to the drill instance on `http://127.0.0.1:8421/mcp` and call `get_stats()` and `get_briefing()`. Compare the counts to what the most recent production dump reported — the drill should restore every row that made it into the backup.
+5. Tear the drill stack down and remove the drill data directory so the next drill starts from a clean slate:
    ```bash
-   docker compose -f docker-compose.qa.yaml down -v
+   docker compose down
+   rm -rf ~/awareness-pg-drill
+   unset AWARENESS_PORT AWARENESS_PG_DATA
    ```
-   The `-v` flag deletes the `awareness-qa-pg` and `awareness-qa-ollama` named volumes. Without it, the next `up -d` reuses the previous drill's data.
+6. Bring production back up:
+   ```bash
+   docker compose up -d
+   ```
 
-If step 3 surprises you (counts don't match, briefing is empty, restore hit unexpected errors), the instructions above drifted from reality — file an issue, fix the doc, try again. The point of a drill is to find the drift before you need the dump for real.
+If step 4 surprises you (counts don't match, briefing is empty, restore hit unexpected errors), the instructions above drifted from reality — file an issue, fix the doc, try again. The point of a drill is to find the drift before you need the dump for real.
 
-**Why not parameterize `docker-compose.yaml`'s port and keep production service names?** Today the production file hardcodes `127.0.0.1:8420:8420` and the QA file uses `-qa`-suffixed service/database names. Making the port a `${AWARENESS_PORT:-8420}` substitution and aligning the QA stack's names would let the drill use `docker-compose.yaml` directly with an env override and no identifier substitution — tracked in [#344](https://github.com/cmeans/mcp-awareness/issues/344). Until that lands, the substitution table above is the path.
+**Why the brief production downtime?** `docker-compose.yaml` sets fixed `container_name:` values (`mcp-awareness`, `awareness-postgres`, etc.) — Docker Compose uses those literal names regardless of project (`-p`) flag. Running a parallel drill stack against the same compose file would collide on those names. Aligning/parameterizing the container names to allow concurrent drills is a possible future enhancement; for a single-maintainer deployment, a 10-minute planned downtime per quarter is cheaper than the config complexity.
+
+**For concurrent-with-production drills** (CI, automated integration tests, or future multi-user deployments that can't easily stop production), use `docker-compose.qa.yaml` — it exposes `127.0.0.1:8421:8420`, uses `-qa`-suffixed service/database names, and isolates data in a named volume. The `-qa` name suffixes mean the §Restore commands need substitutions (`postgres` → `postgres-qa`, `mcp-awareness` → `mcp-awareness-qa`, `--dbname=awareness` → `--dbname=awareness_qa`) — so the production-compose-file pattern above is simpler and is preferred for the quarterly drill.
 
 ## Related
 

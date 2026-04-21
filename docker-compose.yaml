@@ -8,7 +8,12 @@ services:
     container_name: mcp-awareness
     restart: unless-stopped
     ports:
-      - "127.0.0.1:8420:8420"
+      # Host port is parameterized so operators can run an alternate-port
+      # stack (e.g., a restore-drill instance on :8421) without editing
+      # this file. Container-internal port stays 8420 regardless. Default
+      # matches the production pin so `docker compose up -d` with no env
+      # is unchanged.
+      - "127.0.0.1:${AWARENESS_PORT:-8420}:8420"
     environment:
       - AWARENESS_MOUNT_PATH=${AWARENESS_MOUNT_PATH:-}
       - AWARENESS_DATABASE_URL=${AWARENESS_DATABASE_URL:-}
