@@ -27,7 +27,7 @@ Usage (from repo root):
 Or via a temporary container on the same network:
     docker run --rm --network mcp-awareness_default \
       -v $(pwd):/app -w /app \
-      python:3.12-slim \
+      python:3.13-slim \
       bash -c "pip install -e '.[dev]' && python benchmarks/semantic_search_bench.py"
 """
 
