@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **`CODEOWNERS` file** — `.github/CODEOWNERS` now assigns `@cmeans` as the default reviewer on every PR. GitHub will auto-request the maintainer on any new PR, which closes the "drive-by PR slips past review when the maintainer isn't looking" gap and makes review-assignment state explicit rather than implicit. Wildcard-only for now; add path-specific ownership rules above the wildcard as the contributor base grows.
+
 ### Security
 - **Harden `pr-labels-ci.yml` against shell injection via fork-PR branch names.** Contributor-controlled values (`github.event.workflow_run.head_branch`, `.id`, `github.repository`) previously inlined directly into `run:` blocks as `${{ ... }}` expressions. Git refnames permit shell metacharacters (`$`, backtick, `;`, `&`, `|`), so a malicious fork branch name would render as executed shell after GHA's queue-time substitution. All such values now route through step-level `env:` and are referenced as shell variables (`"$HEAD_BRANCH"`, `"$REPO"`, `"$RUN_ID"`). Cascaded from [cmeans/mcp-clipboard#88](https://github.com/cmeans/mcp-clipboard/pull/88) hardening. Closes [#332](https://github.com/cmeans/mcp-awareness/issues/332).
 - **Pre-empt the "literal `${{ }}` in shell comments" parser trap** that would have surfaced the moment the hardening above landed with placeholder comments. GHA's queue-time parser substitutes `${{ ... }}` everywhere inside `run:` blocks — including inside shell `#` comments — and rejects empty expressions with `An expression was expected` on `workflow_dispatch` / fresh-repo registration. The hardening cascade uses comment wording that avoids literal `${{ }}` entirely. Root cause diagnosed in [cmeans/yt-dont-recommend#28](https://github.com/cmeans/yt-dont-recommend/issues/28); cascade source is [cmeans/mcp-clipboard#92](https://github.com/cmeans/mcp-clipboard/pull/92).
