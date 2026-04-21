@@ -27,6 +27,8 @@ import urllib.request
 import jwt
 from jwt import PyJWKClient
 
+from .helpers import safe_url_for_log
+
 logger = logging.getLogger(__name__)
 
 
@@ -70,19 +72,23 @@ class OAuthTokenValidator:
                 jwks = config.get("jwks_uri", "")
                 userinfo = config.get("userinfo_endpoint", "")
                 if jwks:
-                    logger.info("Discovered JWKS URI: %s", jwks)
+                    logger.info("Discovered JWKS URI: %s", safe_url_for_log(jwks))
                 if userinfo:
-                    logger.info("Discovered userinfo endpoint: %s", userinfo)
+                    logger.info("Discovered userinfo endpoint: %s", safe_url_for_log(userinfo))
                 return (
                     str(jwks) or f"{self.issuer}/.well-known/jwks.json",
                     str(userinfo),
                 )
         except Exception as exc:
-            logger.warning("OIDC discovery request failed for %s: %s", discovery_url, exc)
+            logger.warning(
+                "OIDC discovery request failed for %s: %s",
+                safe_url_for_log(discovery_url),
+                exc,
+            )
 
         logger.warning(
             "OIDC discovery failed for %s, using default JWKS path",
-            self.issuer,
+            safe_url_for_log(self.issuer),
         )
         return f"{self.issuer}/.well-known/jwks.json", ""
 

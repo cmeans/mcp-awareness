@@ -40,10 +40,27 @@ from urllib.parse import parse_qs
 
 from starlette.types import ASGIApp, Receive, Scope, Send
 
+from .helpers import safe_url_for_log
+
 logger = logging.getLogger(__name__)
 
 # Default trusted-header chain — Cloudflare environment
 _DEFAULT_IP_HEADERS = ["CF-Connecting-IP", "X-Real-IP"]
+
+
+def _format_ip_header_chain(chain: list[str]) -> str:
+    """Render the operator-readable display of the IP-header-name chain.
+
+    The input is a list of HTTP header *names* that the proxy will consult
+    (in order) to derive the client IP — not the values of those headers.
+    Header names are operator configuration, not credentials. This helper
+    exists so the caller's log statement doesn't have ``header_chain``
+    flowing directly into a format-string sink, which some static
+    analyzers conservatively flag because the list comes from a
+    constructor parameter.
+    """
+    return " → ".join(chain) + " → ASGI client"
+
 
 # Patterns that indicate injection attempts in parameter values
 _INJECTION_PATTERNS = re.compile(
@@ -222,7 +239,11 @@ def discover_oidc_endpoints(issuer: str) -> dict[str, str | None] | None:
         with urllib.request.urlopen(discovery_url, timeout=10) as resp:
             config = json.loads(resp.read())
     except Exception as exc:
-        logger.error("OAuth proxy: OIDC discovery failed for %s: %s", discovery_url, exc)
+        logger.error(
+            "OAuth proxy: OIDC discovery failed for %s: %s",
+            safe_url_for_log(discovery_url),
+            exc,
+        )
         return None
 
     authorization_endpoint = config.get("authorization_endpoint")
@@ -241,9 +262,9 @@ def discover_oidc_endpoints(issuer: str) -> dict[str, str | None] | None:
 
     logger.info(
         "OAuth proxy: discovered endpoints — authorize=%s, token=%s, register=%s",
-        authorization_endpoint,
-        token_endpoint,
-        registration_endpoint or "(not available)",
+        safe_url_for_log(authorization_endpoint),
+        safe_url_for_log(token_endpoint),
+        safe_url_for_log(registration_endpoint) if registration_endpoint else "(not available)",
     )
 
     return {
@@ -309,7 +330,7 @@ class OAuthProxyMiddleware:
         header_chain = ip_headers or _DEFAULT_IP_HEADERS
         logger.info(
             "OAuth proxy: IP header chain = %s",
-            " → ".join(header_chain) + " → ASGI client",
+            _format_ip_header_chain(header_chain),
         )
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:

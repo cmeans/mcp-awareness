@@ -29,7 +29,69 @@ from mcp_awareness.helpers import (
     _validate_enum,
     _validate_timestamp,
     dsn_to_sqlalchemy_url,
+    safe_url_for_log,
 )
+
+
+class TestSafeUrlForLog:
+    """Redaction helper for URLs that might carry credentials or tokens."""
+
+    def test_plain_https_preserved(self):
+        assert (
+            safe_url_for_log("https://api.workos.com/user_management/client_X")
+            == "https://api.workos.com/user_management/client_X"
+        )
+
+    def test_strips_userinfo(self):
+        """user:password@host would otherwise leak credentials into logs."""
+        assert (
+            safe_url_for_log("https://user:secret@auth.example.com/oauth/token")
+            == "https://auth.example.com/oauth/token"
+        )
+
+    def test_strips_query_string(self):
+        """OAuth authorization-code flow puts codes/PKCE verifiers in query."""
+        assert (
+            safe_url_for_log("https://auth.example.com/callback?code=secret_code&state=xyz")
+            == "https://auth.example.com/callback"
+        )
+
+    def test_strips_fragment(self):
+        """OAuth implicit flow (deprecated but possible) puts tokens in fragment."""
+        assert (
+            safe_url_for_log("https://auth.example.com/callback#access_token=secret_token")
+            == "https://auth.example.com/callback"
+        )
+
+    def test_strips_all_credential_carrying_parts_at_once(self):
+        assert (
+            safe_url_for_log("https://u:p@auth.example.com:8443/oauth?code=c&state=s#token=t")
+            == "https://auth.example.com:8443/oauth"
+        )
+
+    def test_preserves_non_default_port(self):
+        assert (
+            safe_url_for_log("https://localhost:8443/oauth/token")
+            == "https://localhost:8443/oauth/token"
+        )
+
+    def test_empty_string_returns_placeholder(self):
+        assert safe_url_for_log("") == "<redacted url>"
+
+    def test_unparseable_string_returns_placeholder(self):
+        """A URL with no scheme/host shouldn't make the logger crash."""
+        assert safe_url_for_log("not a url") == "<redacted url>"
+
+    def test_no_netloc_returns_placeholder(self):
+        """file:// URLs with no host or schemeless paths fall through safely."""
+        assert safe_url_for_log("/path/only/no/scheme") == "<redacted url>"
+
+    def test_path_preserved_exactly(self):
+        """The path component is operator-meaningful; don't modify it."""
+        assert (
+            safe_url_for_log("https://example.com/deeply/nested/path/with.dots/and-dashes")
+            == "https://example.com/deeply/nested/path/with.dots/and-dashes"
+        )
 
 
 def test_default_query_limit_is_100():

@@ -106,6 +106,48 @@ def dsn_to_sqlalchemy_url(dsn: str) -> str:
     return base
 
 
+def safe_url_for_log(url: str) -> str:
+    """Render a URL for logging with credential-carrying parts stripped.
+
+    Keeps ``scheme://host[:port]/path`` so an operator can still read the
+    log and identify the endpoint. Strips:
+
+    - ``userinfo`` (anything before ``@`` in the netloc) — RFC 3986 lets
+      URLs embed ``user:password@host``; an OAuth issuer URL
+      misconfigured that way would leak credentials through every log
+      line that mentioned it.
+    - ``query`` string — the OAuth authorization-code flow passes codes,
+      state, and PKCE verifiers here; anything on the query string is
+      a candidate to be secret.
+    - ``fragment`` — the OAuth implicit flow (deprecated but still
+      occasionally seen) puts access tokens in fragments.
+
+    Defensive rather than currently-exploitable: the issuer URLs this
+    server consumes today are plain ``https://provider/...`` strings
+    with no userinfo / query / fragment. The helper exists so that if a
+    future misconfiguration, provider change, or redirect ever put a
+    credential into a URL that's about to be logged, we've already
+    redacted it.
+
+    Unparseable or empty inputs return ``"<redacted url>"`` rather than
+    raising — a log helper should never itself become a failure source.
+    """
+    from urllib.parse import urlparse, urlunparse
+
+    if not url:
+        return "<redacted url>"
+    try:
+        parsed = urlparse(url)
+        if not parsed.netloc:
+            return "<redacted url>"
+        # Rebuild netloc without the userinfo portion.
+        host = parsed.hostname or ""
+        netloc = f"{host}:{parsed.port}" if parsed.port else host
+        return urlunparse((parsed.scheme, netloc, parsed.path, "", "", ""))
+    except Exception:
+        return "<redacted url>"
+
+
 def canonical_email(email: str) -> str:
     """Normalize email for uniqueness: strip +tags, dots for gmail, lowercase."""
     email = email.lower().strip()
