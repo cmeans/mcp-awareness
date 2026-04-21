@@ -1,16 +1,104 @@
-version: 2
-updates:
-  - package-ecosystem: pip
-    directory: "/"
-    schedule:
-      interval: weekly
-    labels:
-      - dependencies
-    open-pull-requests-limit: 5
+# mcp-awareness — ambient system awareness for AI agents
+# Copyright (C) 2026 Chris Means
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# Dependabot configuration — docs: https://docs.github.com/en/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file
+#
+# Philosophy:
+#   - Security updates are never batched (Dependabot opens an individual
+#     PR per CVE regardless of what appears below); the groups below only
+#     apply to version-updates (non-security).
+#   - Version updates run once per week, grouped by ecosystem, to keep
+#     PR volume low on a solo-maintained repo.
+#   - Labels route to the existing `dependencies` label so Dependabot PRs
+#     sort alongside manual dependency work.
 
-  - package-ecosystem: github-actions
+version: 2
+
+updates:
+  # Python — runtime and dev dependencies declared in pyproject.toml.
+  # Split production vs development so a noisy dev-tool bump (ruff, mypy)
+  # doesn't land in the same PR as a runtime-critical bump (psycopg, mcp).
+  - package-ecosystem: "pip"
     directory: "/"
     schedule:
-      interval: weekly
+      interval: "weekly"
+      day: "monday"
+      time: "03:00"
+      timezone: "America/Chicago"
+    open-pull-requests-limit: 5
     labels:
-      - dependencies
+      - "dependencies"
+    commit-message:
+      prefix: "chore(deps)"
+      include: "scope"
+    groups:
+      python-production:
+        applies-to: version-updates
+        dependency-type: "production"
+        update-types:
+          - "minor"
+          - "patch"
+      python-development:
+        applies-to: version-updates
+        dependency-type: "development"
+        update-types:
+          - "minor"
+          - "patch"
+
+  # GitHub Actions — workflow step versions (actions/checkout@vN, etc.).
+  # Always group: these bumps are mechanical and low-risk.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "03:00"
+      timezone: "America/Chicago"
+    labels:
+      - "dependencies"
+    commit-message:
+      prefix: "chore(deps)"
+      include: "scope"
+    groups:
+      github-actions:
+        applies-to: version-updates
+        patterns:
+          - "*"
+
+  # Docker — base image in the repo's Dockerfile.
+  # One file, typically one image; no grouping needed.
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "03:00"
+      timezone: "America/Chicago"
+    labels:
+      - "dependencies"
+    commit-message:
+      prefix: "chore(deps)"
+      include: "scope"
+
+  # docker-compose — images in docker-compose.yaml. Dependabot skips
+  # :latest tags (pgvector/pgvector:pg17 is the one currently pinned and
+  # eligible for updates). Grouped so Ollama / Postgres / Cloudflared
+  # bumps don't fan out when multiple pins move at once.
+  - package-ecosystem: "docker-compose"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "03:00"
+      timezone: "America/Chicago"
+    labels:
+      - "dependencies"
+    commit-message:
+      prefix: "chore(deps)"
+      include: "scope"
+    groups:
+      docker-compose:
+        applies-to: version-updates
+        patterns:
+          - "*"
