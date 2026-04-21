@@ -107,24 +107,60 @@ These are starting points, not prescriptions — pick a cadence that matches how
 
 **Off-host storage is the real protection.** A backup on the same machine as Postgres is a backup of "yesterday's snapshot if someone accidentally runs `DROP TABLE entries`"; it is not a backup against disk failure, ransomware, or the machine catching fire. At minimum, `rsync` / `rclone` / S3-push the dump directory to a different device (NAS, cloud bucket, another host) on the same schedule as the dump runs.
 
-## Sample cron job
+## The backup script
 
-`crontab -e` as the user whose `~/backups/mcp-awareness` directory holds the dumps (not as root unless the directory lives in `/root`):
+Both the cron and systemd examples below call the same small shell script, so you only write the logic once. Save this as `~/bin/mcp-awareness-backup.sh` (or wherever you keep local scripts), make it executable, and point your scheduler at it.
 
-```cron
-# Daily at 03:15 local time — pg_dump excluding embeddings, retain 14 days.
-15 3 * * * cd /path/to/mcp-awareness && \
-  BACKUP_DIR=$HOME/backups/mcp-awareness && \
-  TS=$(date -u +\%Y\%m\%dT\%H\%M\%SZ) && \
-  docker compose exec -T postgres pg_dump --username=awareness --dbname=awareness --exclude-table-data=embeddings --format=custom --compress=9 > $BACKUP_DIR/awareness-$TS.dump && \
-  find $BACKUP_DIR -name 'awareness-*.dump' -mtime +14 -delete
+```bash
+#!/bin/bash
+# ~/bin/mcp-awareness-backup.sh — daily pg_dump of mcp-awareness
+#
+# Runs as the user whose ~/backups/mcp-awareness directory holds the
+# dumps. Skips the embeddings table for size (regenerate with
+# backfill_embeddings after restore). Keeps 14 days of history.
+set -euo pipefail
+
+BACKUP_DIR="${BACKUP_DIR:-$HOME/backups/mcp-awareness}"
+COMPOSE_DIR="${COMPOSE_DIR:-$HOME/mcp-awareness}"   # where docker-compose.yaml lives
+
+mkdir -p "$BACKUP_DIR"
+TS=$(date -u +%Y%m%dT%H%M%SZ)
+
+cd "$COMPOSE_DIR"
+docker compose exec -T postgres pg_dump \
+  --username=awareness --dbname=awareness \
+  --exclude-table-data=embeddings \
+  --format=custom --compress=9 \
+  > "$BACKUP_DIR/awareness-$TS.dump"
+
+# Rotate: delete dumps older than 14 days.
+find "$BACKUP_DIR" -name 'awareness-*.dump' -mtime +14 -delete
 ```
 
-The `\%` escapes are required: cron interprets `%` as end-of-command inside the job line, which would silently truncate everything after `+%Y`.
+Make executable and test by hand before wiring up a scheduler:
+
+```bash
+chmod +x ~/bin/mcp-awareness-backup.sh
+~/bin/mcp-awareness-backup.sh
+ls -la ~/backups/mcp-awareness/
+```
+
+Putting the logic in a script (instead of inline in the crontab or systemd unit) avoids two classes of bugs that bit earlier drafts of this doc: cron's interpretation of `%` as end-of-command, and systemd's `%`-specifier substitution inside `ExecStart=`. The script owns the logic; schedulers just invoke it.
+
+## Sample cron job
+
+Once `~/bin/mcp-awareness-backup.sh` exists and runs manually, `crontab -e` as the user who owns it:
+
+```
+# Daily at 03:15 local time — pg_dump excluding embeddings, retain 14 days.
+15 3 * * * /home/youruser/bin/mcp-awareness-backup.sh
+```
+
+Replace `youruser` with your actual Unix username. A single physical line is important — cron treats each non-blank line as a separate entry, so backslash-continuations across multiple lines do not work and silently leave broken entries behind.
 
 ## Sample systemd timer
 
-If you prefer systemd to cron, two unit files on the Postgres host:
+If you prefer systemd to cron, two unit files on the Postgres host. **Replace `youruser` with your actual Unix username** in both files — these are literal placeholders, not template specifiers.
 
 ```ini
 # /etc/systemd/system/mcp-awareness-backup.service
@@ -134,10 +170,8 @@ After=docker.service
 
 [Service]
 Type=oneshot
-User=%i
-WorkingDirectory=/path/to/mcp-awareness
-Environment=BACKUP_DIR=%h/backups/mcp-awareness
-ExecStart=/bin/sh -c 'mkdir -p "$BACKUP_DIR" && TS=$(date -u +%%Y%%m%%dT%%H%%M%%SZ) && docker compose exec -T postgres pg_dump --username=awareness --dbname=awareness --exclude-table-data=embeddings --format=custom --compress=9 > "$BACKUP_DIR/awareness-$TS.dump" && find "$BACKUP_DIR" -name "awareness-*.dump" -mtime +14 -delete'
+User=youruser
+ExecStart=/home/youruser/bin/mcp-awareness-backup.sh
 ```
 
 ```ini
@@ -162,6 +196,8 @@ sudo systemctl enable --now mcp-awareness-backup.timer
 systemctl list-timers mcp-awareness-backup.timer
 ```
 
+A note on why this uses a literal `User=youruser` instead of `User=%i`: the `%i` specifier is the *instance* specifier, which only resolves inside template units (files ending in `@.service`). The service file above is not a template, so `%i` would resolve to an empty string and `User=` would become invalid. If you want a template, rename the file to `mcp-awareness-backup@.service`, use `User=%i`, and enable as `mcp-awareness-backup@youruser.service` — but the single-user form above is simpler for a personal deployment.
+
 ## `.env` and secrets
 
 Don't back up `.env` into the same untrusted directory as the database dump. Keep it in a password manager or secrets vault (Bitwarden, 1Password, age-encrypted file in a private repo, HashiCorp Vault — any of these are fine). Secrets to preserve:
@@ -175,14 +211,24 @@ Without these, a restored Postgres dump is not reachable by the application even
 
 ## Practice the restore
 
-Backups that have never been restored are hopes, not backups. Schedule a restore drill at least once per quarter:
+Backups that have never been restored are hopes, not backups. Schedule a restore drill at least once per quarter. The default `docker-compose.yaml` hardcodes the port mapping to `127.0.0.1:8420:8420`, so a naked second stack would collide with production. Use `docker-compose.qa.yaml` instead — it already maps the drill port to `127.0.0.1:8421:8420` and keeps the internal app port at 8420, which is the configuration the doc below assumes.
 
-1. Spin up a second Docker Compose stack on a different port (e.g., set `AWARENESS_PORT=8421` and `AWARENESS_PG_DATA=~/awareness-pg-drill`).
-2. Restore the most recent dump into it following the §Restore section.
-3. Connect an MCP client to the drill instance and call `get_stats()` and `get_briefing()`. Compare the counts to what the production instance reports at the same moment.
-4. Tear down the drill stack.
+1. Point at the QA compose file and use a separate Postgres data directory so the drill cannot touch production data:
+   ```bash
+   export AWARENESS_PG_DATA=~/awareness-pg-drill
+   docker compose -f docker-compose.qa.yaml up -d
+   ```
+2. Restore the most recent dump into the drill stack's Postgres following §Restore — the `docker compose` invocations in that section take an extra `-f docker-compose.qa.yaml` against the drill (e.g., `docker compose -f docker-compose.qa.yaml exec -T postgres pg_restore …`).
+3. Connect an MCP client to the drill instance on `http://127.0.0.1:8421/mcp` and call `get_stats()` and `get_briefing()`. Compare the counts to what the production instance reports at the same moment.
+4. Tear the drill stack down and remove the drill data directory:
+   ```bash
+   docker compose -f docker-compose.qa.yaml down
+   rm -rf ~/awareness-pg-drill
+   ```
 
 If step 3 surprises you (counts don't match, briefing is empty, restore hit unexpected errors), the instructions above drifted from reality — file an issue, fix the doc, try again. The point of a drill is to find the drift before you need the dump for real.
+
+**Why not parameterize `docker-compose.yaml`'s port?** Today the production file hardcodes `127.0.0.1:8420:8420`. Making the port a `${AWARENESS_PORT:-8420}` substitution would let this drill use the same compose file with an env override. That's a sensible follow-up (tracked separately); it's intentionally not in scope for this doc so that `docker-compose.yaml` stays a known-good production file.
 
 ## Related
 
