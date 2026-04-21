@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Python test matrix extended to include 3.13 and 3.14** — `ci.yml`'s `test` job matrix changes from `["3.10", "3.11", "3.12"]` to `["3.10", "3.11", "3.12", "3.13", "3.14"]`. `pyproject.toml` declares `requires-python = ">=3.10"`, so 3.13 and 3.14 were *allowed* by the package metadata but not *tested* — this closes the gap. Lint / typecheck / codecov jobs remain pinned to 3.12 (one representative version for static analysis is sufficient). Validates Python versions under `actions/setup-python` but does **not** validate the shipped Docker image — that's `docker-smoke.yml`'s job (#348). Full coverage needs both. Closes [#349](https://github.com/cmeans/mcp-awareness/issues/349).
+
 ### Changed
 - **`docker-compose.yaml`: host-side port is now parameterizable** — line 11 changes from `"127.0.0.1:8420:8420"` to `"127.0.0.1:${AWARENESS_PORT:-8420}:8420"`. Default behavior unchanged (operators running `docker compose up -d` with no env continue to get `8420:8420`). Setting `AWARENESS_PORT=8421` remaps the host side to `8421:8420` — the container-internal port stays 8420 regardless. Lets operators run alternate-port stacks (restore drill, dev-alongside-prod, port-conflict scenarios) without editing the production compose file. Container-name values remain fixed, so alternate-port stacks currently require the production stack to be stopped first; `docker-compose.qa.yaml` remains the path for concurrent-with-prod drills. `docs/backup.md` §Practice the restore rewritten to use the production compose file with env overrides, per the new single-file pattern, dropping the round-2 QA-compose-file substitution table. Closes [#344](https://github.com/cmeans/mcp-awareness/issues/344).
 
