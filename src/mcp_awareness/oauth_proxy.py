@@ -44,22 +44,11 @@ from .helpers import safe_url_for_log
 
 logger = logging.getLogger(__name__)
 
-# Default trusted-header chain — Cloudflare environment
+# Default trusted-header chain — Cloudflare environment.
+# Literal strings here (not computed from env) so they can be logged
+# directly without taint-flow concerns.
 _DEFAULT_IP_HEADERS = ["CF-Connecting-IP", "X-Real-IP"]
-
-
-def _format_ip_header_chain(chain: list[str]) -> str:
-    """Render the operator-readable display of the IP-header-name chain.
-
-    The input is a list of HTTP header *names* that the proxy will consult
-    (in order) to derive the client IP — not the values of those headers.
-    Header names are operator configuration, not credentials. This helper
-    exists so the caller's log statement doesn't have ``header_chain``
-    flowing directly into a format-string sink, which some static
-    analyzers conservatively flag because the list comes from a
-    constructor parameter.
-    """
-    return " → ".join(chain) + " → ASGI client"
+_DEFAULT_IP_HEADER_DISPLAY = "CF-Connecting-IP → X-Real-IP → ASGI client"
 
 
 # Patterns that indicate injection attempts in parameter values
@@ -327,11 +316,25 @@ class OAuthProxyMiddleware:
         self._ip_header_miss_count = 0
         self._ip_header_warned = False
 
-        header_chain = ip_headers or _DEFAULT_IP_HEADERS
-        logger.info(
-            "OAuth proxy: IP header chain = %s",
-            _format_ip_header_chain(header_chain),
-        )
+        # Log the header-chain configuration. When using defaults, log the
+        # literal header-name display so operators can verify their config.
+        # When operator-overridden via env var, log only the *count* — the
+        # names are contributor-controlled (env var), so we don't funnel
+        # them into a log sink (avoids CodeQL's clear-text-logging-sensitive
+        # flag on values that cross the config/log boundary).
+        if ip_headers is None:
+            logger.info(
+                "OAuth proxy: IP header chain = %s (default)",
+                _DEFAULT_IP_HEADER_DISPLAY,
+            )
+        else:
+            logger.info(
+                "OAuth proxy: IP header chain has %d custom entr%s → ASGI client "
+                "(override via AWARENESS_OAUTH_PROXY_IP_HEADERS; inspect env var "
+                "to see configured names)",
+                len(ip_headers),
+                "y" if len(ip_headers) == 1 else "ies",
+            )
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         """ASGI entry point."""
