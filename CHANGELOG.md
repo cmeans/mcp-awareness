@@ -8,6 +8,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+- **Third-party GitHub Actions pinned to full commit SHAs** (instead of floating `@vN` major-version tags). A moving major-version tag on a third-party action is an unreviewed supply-chain channel — the upstream owner can move the tag to any commit at any time, including after a repo compromise. Pinning to the commit SHA freezes the code under review. Affected references in `.github/workflows/`:
+  - `codecov/codecov-action@v6` → `@57e3a136…` (v6.0.0) in `ci.yml`
+  - `docker/setup-buildx-action@v3` → `@8d2750c6…` (v3.12.0) in `docker-smoke.yml`
+  - `docker/build-push-action@v6` → `@10e90e36…` (v6.19.2) in `docker-smoke.yml`
+  - `docker/setup-buildx-action@v4` → `@4d04d5d9…` (v4.0.0) in `docker-publish.yml`
+  - `docker/login-action@v4` → `@4907a6dd…` (v4.1.0) in `docker-publish.yml` (two invocations)
+  - `docker/build-push-action@v7` → `@bcafcacb…` (v7.1.0) in `docker-publish.yml`
+
+  Each pinned line carries a trailing `# <action> pinned to full commit SHA — <version>` comment so the human-readable version stays visible and Dependabot's `github-actions` ecosystem can still propose updates. First-party `actions/*` (checkout, setup-python) remain tag-pinned — GitHub's own actions are in a different trust boundary. Closes medium-severity gap #5 from the 2026-04-21 contribution-safety audit (`audit-contribution-safety-2026-04-21`).
+
 ### Added
 - **`.github/PULL_REQUEST_TEMPLATE.md`** — standard template for incoming PRs. Sections: linked-issue (engagement-first), summary, scope, AI-assistance disclosure checkboxes, `## QA` block (prerequisites + MCP-tool-driven manual tests), and a contributor checklist (CHANGELOG entry, README/data-dictionary updates, no-secrets affirmation, local CI, CLA signature). Mirrors the shape already expected by `CLAUDE.md` and `CONTRIBUTING.md` §"Pull request guidelines" — the template just makes it discoverable at PR-authoring time instead of requiring contributors to find the conventions themselves.
 - **README `## Contributing` section** — one paragraph between "How it's built" and "License" pointing at `CONTRIBUTING.md` for the PR flow and `SECURITY.md` for vulnerability reports. Previously neither was linked from the README, so contributors had to discover them by file listing.
