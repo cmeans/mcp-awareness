@@ -30,9 +30,12 @@ from sqlalchemy import create_engine, pool
 # Alembic Config object
 config = context.config
 
-# Set up logging from alembic.ini
+# Set up logging from alembic.ini.
+# disable_existing_loggers=False: fileConfig() defaults to True, which silences every logger
+# not listed in alembic.ini — fatal when alembic runs inside a long-lived host process
+# (tests, admin scripts) that already configured its own loggers.
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 target_metadata = None
 
@@ -41,7 +44,7 @@ database_url = os.environ.get("AWARENESS_DATABASE_URL", "")
 if not database_url:
     raise ValueError(
         "AWARENESS_DATABASE_URL environment variable is required. "
-        'Example (URL): postgresql+psycopg://user:pass@localhost:5432/awareness  '
+        "Example (URL): postgresql+psycopg://user:pass@localhost:5432/awareness  "
         'Example (DSN): "host=localhost dbname=awareness user=user password=pass"  '
         "Note: DSN values with spaces must be quoted in env files."
     )
