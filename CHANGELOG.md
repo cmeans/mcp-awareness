@@ -8,6 +8,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **`.github/PULL_REQUEST_TEMPLATE.md`** — standard template for incoming PRs. Sections: linked-issue (engagement-first), summary, scope, AI-assistance disclosure checkboxes, `## QA` block (prerequisites + MCP-tool-driven manual tests), and a contributor checklist (CHANGELOG entry, README/data-dictionary updates, no-secrets affirmation, local CI, CLA signature). Mirrors the shape already expected by `CLAUDE.md` and `CONTRIBUTING.md` §"Pull request guidelines" — the template just makes it discoverable at PR-authoring time instead of requiring contributors to find the conventions themselves.
+- **README `## Contributing` section** — one paragraph between "How it's built" and "License" pointing at `CONTRIBUTING.md` for the PR flow and `SECURITY.md` for vulnerability reports. Previously neither was linked from the README, so contributors had to discover them by file listing.
+
+### Changed
+- **`CONTRIBUTING.md` expanded with three new sections.**
+  - **"Before opening a pull request"** (above "Development setup") — engagement-first policy: file or link an issue before opening a PR, typo/doc fixes exempt, issues stay permissive so bug reporting isn't gated by this expectation.
+  - **"AI-assistance disclosure"** (after "Code style") — disclosure is requested, not prohibition; the PR template's checkboxes implement this; undisclosed AI work masquerading as hand-written is the anti-pattern.
+  - **"Do not commit secrets"** (after "AI-assistance disclosure") — explicit warning that the repo has no incoming-PR secret-scanning gate, so human review is the only defense. Includes rotate-on-accidental-push guidance.
+  Closes high-severity gaps in the 2026-04-21 contribution-safety audit (`audit-contribution-safety-2026-04-21`).
+
 ## [0.18.2] - 2026-04-21
 
 ### Changed

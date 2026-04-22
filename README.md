@@ -496,6 +496,10 @@ Claude Desktop surfaced a data pollution problem; the user directed the fix thro
 
 Each interaction generated a case study. Read them all: **[Case Studies — Awareness in Practice](docs/case-studies.md)**
 
+## Contributing
+
+Contributions welcome. Before opening a pull request, please file or link an issue so design intent is visible before code is written — see [CONTRIBUTING.md](CONTRIBUTING.md) for the full flow (CLA, PR expectations, AI-assistance disclosure, code style). Security issues go through [SECURITY.md](SECURITY.md) rather than public issues.
+
 ## License
 
 AGPL-3.0-or-later — see [LICENSE](LICENSE) for details.
