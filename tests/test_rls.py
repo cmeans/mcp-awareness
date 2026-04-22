@@ -514,3 +514,498 @@ class TestRLSFixtureGuardrail:
                         )
                         WITH CHECK (owner_id = current_setting('app.current_user', true))
                 """)
+
+
+# ---------------------------------------------------------------------------
+# R1 — extended cross-tenant leak coverage (issue #361)
+# ---------------------------------------------------------------------------
+# Each class below follows the same alice-owns-it, bob-can-not-reach-it shape
+# as the core TestRLS* classes above. The rls_store fixture at the top of
+# this file already switches to `rls_test_role` (NOSUPERUSER NOBYPASSRLS) on
+# every store call, so these tests exercise both layers of defense-in-depth:
+# the explicit `WHERE owner_id = %s` in each SQL file and the RLS policy
+# that would filter a row leaking through a dropped or broken WHERE clause.
+#
+# Deliberately out of scope for R1:
+# * `semantic_search` — needs an embedding provider; covered by a separate
+#   harness in a follow-on issue.
+# * `log_read` / `log_action` — already exercised in TestRLSReads /
+#   TestRLSActions above; would be duplicative here.
+
+
+class TestRLSExtendedReadPaths:
+    """R1: cross-tenant leak coverage for owner-scoped read methods."""
+
+    def test_get_sources_isolated(self, rls_store: PostgresStore) -> None:
+        rls_store.upsert_status("alice", "alice-src", [], {"state": "green"})
+        assert "alice-src" in rls_store.get_sources("alice")
+        assert rls_store.get_sources("bob") == []
+
+    def test_get_latest_status_isolated(self, rls_store: PostgresStore) -> None:
+        rls_store.upsert_status("alice", "alice-src", [], {"state": "green"})
+        assert rls_store.get_latest_status("alice", "alice-src") is not None
+        assert rls_store.get_latest_status("bob", "alice-src") is None
+
+    def test_get_all_statuses_isolated(self, rls_store: PostgresStore) -> None:
+        rls_store.upsert_status("alice", "alice-src", [], {"state": "green"})
+        assert "alice-src" in rls_store.get_all_statuses("alice")
+        assert rls_store.get_all_statuses("bob") == {}
+
+    def test_get_active_alerts_isolated(self, rls_store: PostgresStore) -> None:
+        rls_store.upsert_alert("alice", "alice-src", [], "a1", {"severity": "warning"})
+        assert len(rls_store.get_active_alerts("alice")) == 1
+        assert rls_store.get_active_alerts("bob") == []
+
+    def test_get_all_active_alerts_isolated(self, rls_store: PostgresStore) -> None:
+        rls_store.upsert_alert("alice", "alice-src", [], "a1", {"severity": "warning"})
+        assert "alice-src" in rls_store.get_all_active_alerts("alice")
+        assert rls_store.get_all_active_alerts("bob") == {}
+
+    def test_get_active_suppressions_isolated(self, rls_store: PostgresStore) -> None:
+        from mcp_awareness.schema import Entry
+
+        suppression = Entry(
+            id=make_id(),
+            type=EntryType.SUPPRESSION,
+            source="alice-src",
+            tags=[],
+            created=now_utc(),
+            expires=None,
+            data={"alert_id": "a1"},
+        )
+        rls_store.add("alice", suppression)
+        assert len(rls_store.get_active_suppressions("alice")) == 1
+        assert rls_store.get_active_suppressions("bob") == []
+
+    def test_get_all_active_suppressions_isolated(self, rls_store: PostgresStore) -> None:
+        from mcp_awareness.schema import Entry
+
+        suppression = Entry(
+            id=make_id(),
+            type=EntryType.SUPPRESSION,
+            source="alice-src",
+            tags=[],
+            created=now_utc(),
+            expires=None,
+            data={"alert_id": "a1"},
+        )
+        rls_store.add("alice", suppression)
+        assert "alice-src" in rls_store.get_all_active_suppressions("alice")
+        assert rls_store.get_all_active_suppressions("bob") == {}
+
+    def test_count_active_suppressions_isolated(self, rls_store: PostgresStore) -> None:
+        from mcp_awareness.schema import Entry
+
+        suppression = Entry(
+            id=make_id(),
+            type=EntryType.SUPPRESSION,
+            source="alice-src",
+            tags=[],
+            created=now_utc(),
+            expires=None,
+            data={"alert_id": "a1"},
+        )
+        rls_store.add("alice", suppression)
+        assert rls_store.count_active_suppressions("alice") == 1
+        assert rls_store.count_active_suppressions("bob") == 0
+
+    def test_get_patterns_isolated(self, rls_store: PostgresStore) -> None:
+        from mcp_awareness.schema import Entry
+
+        pattern = Entry(
+            id=make_id(),
+            type=EntryType.PATTERN,
+            source="alice-src",
+            tags=[],
+            created=now_utc(),
+            expires=None,
+            data={"description": "alice pattern"},
+        )
+        rls_store.add("alice", pattern)
+        assert len(rls_store.get_patterns("alice")) == 1
+        assert rls_store.get_patterns("bob") == []
+
+    def test_get_all_patterns_isolated(self, rls_store: PostgresStore) -> None:
+        from mcp_awareness.schema import Entry
+
+        pattern = Entry(
+            id=make_id(),
+            type=EntryType.PATTERN,
+            source="alice-src",
+            tags=[],
+            created=now_utc(),
+            expires=None,
+            data={"description": "alice pattern"},
+        )
+        rls_store.add("alice", pattern)
+        assert "alice-src" in rls_store.get_all_patterns("alice")
+        assert rls_store.get_all_patterns("bob") == {}
+
+    def test_get_tags_isolated(self, rls_store: PostgresStore) -> None:
+        from mcp_awareness.schema import Entry
+
+        entry = Entry(
+            id=make_id(),
+            type=EntryType.NOTE,
+            source="alice-src",
+            tags=["alice-only-tag"],
+            created=now_utc(),
+            expires=None,
+            data={"description": "alice entry"},
+        )
+        rls_store.add("alice", entry)
+        alice_tags = {t["tag"] for t in rls_store.get_tags("alice")}
+        bob_tags = {t["tag"] for t in rls_store.get_tags("bob")}
+        assert "alice-only-tag" in alice_tags
+        assert "alice-only-tag" not in bob_tags
+
+    def test_get_unread_isolated(self, rls_store: PostgresStore) -> None:
+        from mcp_awareness.schema import Entry
+
+        entry = Entry(
+            id=make_id(),
+            type=EntryType.NOTE,
+            source="alice-src",
+            tags=["rls-ext"],
+            created=now_utc(),
+            expires=None,
+            data={"description": "unread for alice"},
+        )
+        rls_store.add("alice", entry)
+        alice_unread_ids = [e.id for e in rls_store.get_unread("alice")]
+        bob_unread_ids = [e.id for e in rls_store.get_unread("bob")]
+        assert entry.id in alice_unread_ids
+        assert entry.id not in bob_unread_ids
+
+    def test_get_activity_isolated(self, rls_store: PostgresStore) -> None:
+        from mcp_awareness.schema import Entry
+
+        entry = Entry(
+            id=make_id(),
+            type=EntryType.NOTE,
+            source="alice-src",
+            tags=["rls-ext"],
+            created=now_utc(),
+            expires=None,
+            data={"description": "activity source"},
+        )
+        rls_store.add("alice", entry)
+        rls_store.log_read("alice", [entry.id], tool_used="test")
+        rls_store.log_action("alice", entry.id, action="tested", detail="rls")
+        alice_activity = rls_store.get_activity("alice")
+        bob_activity = rls_store.get_activity("bob")
+        assert any(r["entry_id"] == entry.id for r in alice_activity)
+        assert not any(r["entry_id"] == entry.id for r in bob_activity)
+
+    def test_get_read_counts_isolated(self, rls_store: PostgresStore) -> None:
+        from mcp_awareness.schema import Entry
+
+        entry = Entry(
+            id=make_id(),
+            type=EntryType.NOTE,
+            source="alice-src",
+            tags=["rls-ext"],
+            created=now_utc(),
+            expires=None,
+            data={"description": "counted reads"},
+        )
+        rls_store.add("alice", entry)
+        rls_store.log_read("alice", [entry.id], tool_used="test")
+        alice_counts = rls_store.get_read_counts("alice", [entry.id])
+        bob_counts = rls_store.get_read_counts("bob", [entry.id])
+        assert alice_counts.get(entry.id, {}).get("read_count", 0) >= 1
+        assert bob_counts == {}
+
+    def test_get_deleted_isolated(self, rls_store: PostgresStore) -> None:
+        from mcp_awareness.schema import Entry
+
+        entry = Entry(
+            id=make_id(),
+            type=EntryType.NOTE,
+            source="alice-src",
+            tags=["rls-ext-del"],
+            created=now_utc(),
+            expires=None,
+            data={"description": "soon-deleted"},
+        )
+        rls_store.add("alice", entry)
+        assert rls_store.soft_delete_by_id("alice", entry.id) is True
+        alice_deleted_ids = [e.id for e in rls_store.get_deleted("alice")]
+        bob_deleted_ids = [e.id for e in rls_store.get_deleted("bob")]
+        assert entry.id in alice_deleted_ids
+        assert entry.id not in bob_deleted_ids
+
+    def test_get_entry_by_id_isolated(self, rls_store: PostgresStore) -> None:
+        from mcp_awareness.schema import Entry
+
+        entry = Entry(
+            id=make_id(),
+            type=EntryType.NOTE,
+            source="alice-src",
+            tags=["rls-ext"],
+            created=now_utc(),
+            expires=None,
+            data={"description": "direct-fetch"},
+        )
+        rls_store.add("alice", entry)
+        assert rls_store.get_entry_by_id("alice", entry.id) is not None
+        assert rls_store.get_entry_by_id("bob", entry.id) is None
+
+    def test_get_entries_by_ids_isolated(self, rls_store: PostgresStore) -> None:
+        from mcp_awareness.schema import Entry
+
+        entry = Entry(
+            id=make_id(),
+            type=EntryType.NOTE,
+            source="alice-src",
+            tags=["rls-ext"],
+            created=now_utc(),
+            expires=None,
+            data={"description": "batch-fetch"},
+        )
+        rls_store.add("alice", entry)
+        assert len(rls_store.get_entries_by_ids("alice", [entry.id])) == 1
+        assert rls_store.get_entries_by_ids("bob", [entry.id]) == []
+
+    def test_get_fired_intentions_isolated(self, rls_store: PostgresStore) -> None:
+        from datetime import timedelta
+
+        from mcp_awareness.schema import Entry
+
+        past = now_utc() - timedelta(minutes=1)
+        intention = Entry(
+            id=make_id(),
+            type=EntryType.INTENTION,
+            source="alice-src",
+            tags=["rls-ext"],
+            created=now_utc(),
+            expires=None,
+            data={"state": "pending", "deliver_at": past.isoformat()},
+        )
+        rls_store.add("alice", intention)
+        alice_ids = [e.id for e in rls_store.get_fired_intentions("alice")]
+        bob_ids = [e.id for e in rls_store.get_fired_intentions("bob")]
+        assert intention.id in alice_ids
+        assert intention.id not in bob_ids
+
+    def test_get_referencing_entries_isolated(self, rls_store: PostgresStore) -> None:
+        from mcp_awareness.schema import Entry
+
+        target = Entry(
+            id=make_id(),
+            type=EntryType.NOTE,
+            source="alice-src",
+            tags=["rls-ext"],
+            created=now_utc(),
+            expires=None,
+            data={"description": "target"},
+        )
+        rls_store.add("alice", target)
+        referencer = Entry(
+            id=make_id(),
+            type=EntryType.NOTE,
+            source="alice-src",
+            tags=["rls-ext"],
+            created=now_utc(),
+            expires=None,
+            data={"description": "referrer", "related_ids": [target.id]},
+        )
+        rls_store.add("alice", referencer)
+        alice_refs = rls_store.get_referencing_entries("alice", target.id)
+        bob_refs = rls_store.get_referencing_entries("bob", target.id)
+        assert any(r.id == referencer.id for r in alice_refs)
+        assert bob_refs == []
+
+
+class TestRLSExtendedMutationPaths:
+    """R1: cross-tenant corruption coverage for owner-scoped mutation methods.
+
+    Every test below verifies the stronger invariant: bob cannot even
+    affect alice's rows (delete, restore, update) let alone read them.
+    """
+
+    def _alice_entry(self, rls_store: PostgresStore, *, tags: list[str] | None = None) -> Any:
+        from mcp_awareness.schema import Entry
+
+        entry = Entry(
+            id=make_id(),
+            type=EntryType.NOTE,
+            source="alice-src",
+            tags=tags or ["rls-mut"],
+            created=now_utc(),
+            expires=None,
+            data={"description": "alice's row"},
+        )
+        rls_store.add("alice", entry)
+        return entry
+
+    def test_update_entry_cannot_affect_other_owner(self, rls_store: PostgresStore) -> None:
+        entry = self._alice_entry(rls_store)
+        result = rls_store.update_entry("bob", entry.id, {"source": "bob-hijack"})
+        assert result is None
+        # Alice's copy unmodified
+        fresh = rls_store.get_entry_by_id("alice", entry.id)
+        assert fresh is not None and fresh.source == "alice-src"
+
+    def test_update_intention_state_cannot_affect_other_owner(
+        self, rls_store: PostgresStore
+    ) -> None:
+        from mcp_awareness.schema import Entry
+
+        intention = Entry(
+            id=make_id(),
+            type=EntryType.INTENTION,
+            source="alice-src",
+            tags=["rls-mut"],
+            created=now_utc(),
+            expires=None,
+            data={"state": "pending"},
+        )
+        rls_store.add("alice", intention)
+        result = rls_store.update_intention_state("bob", intention.id, "completed")
+        assert result is None
+        fresh = rls_store.get_entry_by_id("alice", intention.id)
+        assert fresh is not None and fresh.data["state"] == "pending"
+
+    def test_soft_delete_by_id_cannot_delete_other_owner(self, rls_store: PostgresStore) -> None:
+        entry = self._alice_entry(rls_store)
+        assert rls_store.soft_delete_by_id("bob", entry.id) is False
+        # Alice's row still alive (not soft-deleted)
+        assert rls_store.get_entry_by_id("alice", entry.id) is not None
+
+    def test_soft_delete_by_tags_only_affects_caller(self, rls_store: PostgresStore) -> None:
+        alice_entry = self._alice_entry(rls_store, tags=["shared-tag-soft"])
+        # Bob creates his own entry with the same tag
+        from mcp_awareness.schema import Entry
+
+        bob_entry = Entry(
+            id=make_id(),
+            type=EntryType.NOTE,
+            source="bob-src",
+            tags=["shared-tag-soft"],
+            created=now_utc(),
+            expires=None,
+            data={"description": "bob's row"},
+        )
+        rls_store.add("bob", bob_entry)
+        affected = rls_store.soft_delete_by_tags("bob", ["shared-tag-soft"])
+        assert affected == 1  # only bob's own
+        assert rls_store.get_entry_by_id("alice", alice_entry.id) is not None
+        assert rls_store.get_entry_by_id("bob", bob_entry.id) is None
+
+    def test_soft_delete_by_source_only_affects_caller(self, rls_store: PostgresStore) -> None:
+        alice_entry = self._alice_entry(rls_store)
+        # Bob creates an entry with the exact same source
+        from mcp_awareness.schema import Entry
+
+        bob_entry = Entry(
+            id=make_id(),
+            type=EntryType.NOTE,
+            source="alice-src",  # same source string as alice
+            tags=["rls-mut"],
+            created=now_utc(),
+            expires=None,
+            data={"description": "bob's row with same source"},
+        )
+        rls_store.add("bob", bob_entry)
+        affected = rls_store.soft_delete_by_source("bob", "alice-src")
+        assert affected == 1
+        assert rls_store.get_entry_by_id("alice", alice_entry.id) is not None
+        assert rls_store.get_entry_by_id("bob", bob_entry.id) is None
+
+    def test_restore_by_id_cannot_restore_other_owner(self, rls_store: PostgresStore) -> None:
+        entry = self._alice_entry(rls_store)
+        rls_store.soft_delete_by_id("alice", entry.id)
+        assert rls_store.restore_by_id("bob", entry.id) is False
+        # Alice's entry still soft-deleted (hasn't been restored by bob)
+        alice_deleted_ids = [e.id for e in rls_store.get_deleted("alice")]
+        assert entry.id in alice_deleted_ids
+
+    def test_restore_by_tags_only_affects_caller(self, rls_store: PostgresStore) -> None:
+        from mcp_awareness.schema import Entry
+
+        shared_tag = "shared-tag-restore"
+        alice_entry = self._alice_entry(rls_store, tags=[shared_tag])
+        bob_entry = Entry(
+            id=make_id(),
+            type=EntryType.NOTE,
+            source="bob-src",
+            tags=[shared_tag],
+            created=now_utc(),
+            expires=None,
+            data={"description": "bob's row"},
+        )
+        rls_store.add("bob", bob_entry)
+        rls_store.soft_delete_by_id("alice", alice_entry.id)
+        rls_store.soft_delete_by_id("bob", bob_entry.id)
+        affected = rls_store.restore_by_tags("bob", [shared_tag])
+        assert affected == 1  # only bob's
+        # Alice's entry still in trash
+        assert alice_entry.id in [e.id for e in rls_store.get_deleted("alice")]
+        # Bob's entry restored
+        assert rls_store.get_entry_by_id("bob", bob_entry.id) is not None
+
+
+class TestRLSExtendedUpsertPaths:
+    """R1: cross-tenant isolation for upsert methods — two owners upserting
+    against the same logical key must land as two separate rows, each only
+    visible to its owner.
+    """
+
+    def test_upsert_status_isolated_per_owner(self, rls_store: PostgresStore) -> None:
+        rls_store.upsert_status("alice", "shared-src", [], {"state": "green"})
+        rls_store.upsert_status("bob", "shared-src", [], {"state": "red"})
+        alice_status = rls_store.get_latest_status("alice", "shared-src")
+        bob_status = rls_store.get_latest_status("bob", "shared-src")
+        assert alice_status is not None and alice_status.data["state"] == "green"
+        assert bob_status is not None and bob_status.data["state"] == "red"
+        assert alice_status.id != bob_status.id
+
+    def test_upsert_alert_isolated_per_owner(self, rls_store: PostgresStore) -> None:
+        rls_store.upsert_alert("alice", "shared-src", [], "a1", {"severity": "warning"})
+        rls_store.upsert_alert("bob", "shared-src", [], "a1", {"severity": "critical"})
+        alice_alerts = rls_store.get_active_alerts("alice", source="shared-src")
+        bob_alerts = rls_store.get_active_alerts("bob", source="shared-src")
+        assert len(alice_alerts) == 1 and alice_alerts[0].data["severity"] == "warning"
+        assert len(bob_alerts) == 1 and bob_alerts[0].data["severity"] == "critical"
+        assert alice_alerts[0].id != bob_alerts[0].id
+
+    def test_upsert_preference_isolated_per_owner(self, rls_store: PostgresStore) -> None:
+        rls_store.upsert_preference("alice", "pk", "global", [], {"value": "alice-pref"})
+        rls_store.upsert_preference("bob", "pk", "global", [], {"value": "bob-pref"})
+        alice_prefs = rls_store.get_knowledge("alice", entry_type=EntryType.PREFERENCE)
+        bob_prefs = rls_store.get_knowledge("bob", entry_type=EntryType.PREFERENCE)
+        assert len(alice_prefs) == 1 and alice_prefs[0].data["value"] == "alice-pref"
+        assert len(bob_prefs) == 1 and bob_prefs[0].data["value"] == "bob-pref"
+
+    def test_upsert_by_logical_key_isolated_per_owner(self, rls_store: PostgresStore) -> None:
+        from mcp_awareness.schema import Entry
+
+        shared_key = "shared-logical-key"
+
+        def _entry(owner_desc: str) -> Entry:
+            return Entry(
+                id=make_id(),
+                type=EntryType.NOTE,
+                source="shared-src",
+                tags=["upsert-lk"],
+                created=now_utc(),
+                expires=None,
+                data={"description": owner_desc},
+                logical_key=shared_key,
+            )
+
+        alice_entry, alice_created = rls_store.upsert_by_logical_key(
+            "alice", "shared-src", shared_key, _entry("alice body")
+        )
+        bob_entry, bob_created = rls_store.upsert_by_logical_key(
+            "bob", "shared-src", shared_key, _entry("bob body")
+        )
+        # Each is a fresh create under its own tenant — same logical key,
+        # different owners, so no upsert-conflict.
+        assert alice_created is True
+        assert bob_created is True
+        assert alice_entry.id != bob_entry.id
+        # Alice can not see bob's row, and vice versa
+        assert rls_store.get_entry_by_id("alice", bob_entry.id) is None
+        assert rls_store.get_entry_by_id("bob", alice_entry.id) is None
