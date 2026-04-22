@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.18.2] - 2026-04-21
+
 ### Changed
 - **Dockerfile base image bumped from `python:3.12-slim` to `python:3.13-slim`.** `Dockerfile` line 17, plus a matching docstring update in `benchmarks/semantic_search_bench.py:30` (the "temporary container" example for running the benchmark standalone). CI matrix coverage for 3.13 was added in [#354](https://github.com/cmeans/mcp-awareness/pull/354), so the shipped image now runs on a Python version the test suite exercises end-to-end. 3.14-slim was considered but deferred — 3.14 only GA'd in October and some transitive tooling (wheel availability outside our own deps) hasn't fully caught up. 3.13 gets ~5 years of upstream support (EOL October 2029). Validated by `docker-smoke.yml` (build + import smokes on any `Dockerfile` PR, [#348](https://github.com/cmeans/mcp-awareness/issues/348)). The `docker-smoke.yml:29` comment referencing `python:3.12-slim -> 3.14-slim` is historical context about PR [#346](https://github.com/cmeans/mcp-awareness/pull/346) and is correct as-is. Follows up on Dependabot [#346](https://github.com/cmeans/mcp-awareness/pull/346) (closed unmerged pending matrix coverage).
 
@@ -573,7 +575,8 @@ Initial implementation.
 - **Dockerfile** for container deployment
 - Design docs: core spec and collation layer
 
-[Unreleased]: https://github.com/cmeans/mcp-awareness/compare/v0.18.1...HEAD
+[Unreleased]: https://github.com/cmeans/mcp-awareness/compare/v0.18.2...HEAD
+[0.18.2]: https://github.com/cmeans/mcp-awareness/compare/v0.18.1...v0.18.2
 [0.18.1]: https://github.com/cmeans/mcp-awareness/compare/v0.18.0...v0.18.1
 [0.18.0]: https://github.com/cmeans/mcp-awareness/compare/v0.17.0...v0.18.0
 [0.17.0]: https://github.com/cmeans/mcp-awareness/compare/v0.16.2...v0.17.0
