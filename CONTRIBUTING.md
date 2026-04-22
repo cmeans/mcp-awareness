@@ -42,6 +42,21 @@ Your GitHub username and the timestamp of your signature are recorded in a
 public Gist owned by the maintainer; see [`docs/cla.md`](docs/cla.md) for
 the signature record location.
 
+## Before opening a pull request
+
+**File or link an issue first.** For anything beyond a typo fix or obvious
+documentation correction, please open an issue describing what you want to
+change and why, or link to an existing one. PRs without a linked issue may
+be closed without review — not because your work isn't valued, but because
+the discussion should happen somewhere visible before code is written.
+
+If you're unsure whether something is worth an issue, open one anyway —
+it's cheap, and a quick "yes, that's a real problem, go for it" saves you
+time on code that might not fit the project's direction.
+
+Issues stay permissive. Please don't let the PR expectation above discourage
+you from reporting a bug or asking a question — that's what issues are for.
+
 ## Development setup
 
 ```bash
@@ -66,3 +81,27 @@ mypy src/mcp_awareness/    # type check
 - Python 3.10+, strict mypy
 - Ruff for linting and formatting (configured in `pyproject.toml`)
 - 100-character line length
+
+## AI-assistance disclosure
+
+This project is developed with AI tools (Claude Code in particular).
+Contributors using AI in their work are welcome — please disclose it on
+the pull request so reviewers know what kind of review the code needs.
+The PR template includes checkboxes for the common cases; "No AI used"
+is a perfectly valid answer and so is "Copilot generated half of this."
+
+What we'd rather not see: undisclosed AI work presented as hand-written,
+especially when reviewers then spend time debugging patterns that would
+have been obvious AI tells had they known. If in doubt, disclose.
+
+## Do not commit secrets
+
+Never include `.env` contents, credentials, API tokens, signing keys, or
+production configuration values in a PR diff, commit message, or PR body.
+If you're testing with real credentials, scrub them before committing.
+
+mcp-awareness has no secret-scanning gate on incoming PRs yet — human
+review is the only line of defense, so please help make that review
+possible. If you accidentally push a secret, rotate it immediately;
+git history rewriting is best-effort and public mirrors may already
+have the value.
