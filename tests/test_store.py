@@ -676,17 +676,38 @@ def test_get_deleted_pagination(store):
 
 
 def test_do_cleanup_logs_errors(store, caplog):
-    """_do_cleanup logs error instead of silently swallowing."""
+    """_do_cleanup logs error instead of silently swallowing.
+
+    Uses ``caplog.set_level`` (fixture-scoped) and inspects ``caplog.records``
+    directly rather than the ``at_level`` context manager + ``caplog.text``
+    string concat — the latter pattern intermittently failed on CI across
+    every Python version (observed repeatedly on 3.11 and 3.14) despite
+    ``_do_cleanup`` being fully synchronous. The flake was in the capture
+    path, not the code under test. Records-based assertion is sturdier
+    because it doesn't depend on the logging formatter or caplog's
+    text-buffer flushing semantics. See issue #374.
+    """
     import logging
     from unittest.mock import patch
 
-    # Mock pool.connection to raise an error
-    with (
-        caplog.at_level(logging.ERROR, logger="mcp_awareness.postgres_store"),
-        patch.object(store._pool, "connection", side_effect=Exception("test error")),
-    ):
+    caplog.set_level(logging.ERROR, logger="mcp_awareness.postgres_store")
+
+    with patch.object(store._pool, "connection", side_effect=Exception("test error")):
         store._do_cleanup()
-    assert "Cleanup failed: Exception: test error" in caplog.text
+
+    matching = [
+        r
+        for r in caplog.records
+        if r.name == "mcp_awareness.postgres_store"
+        and r.levelno == logging.ERROR
+        and "Cleanup failed" in r.getMessage()
+        and "test error" in r.getMessage()
+    ]
+    assert matching, (
+        "expected an ERROR log record on mcp_awareness.postgres_store containing "
+        "'Cleanup failed' and 'test error'. Captured records: "
+        f"{[(r.name, r.levelname, r.getMessage()) for r in caplog.records]}"
+    )
 
 
 # ------------------------------------------------------------------

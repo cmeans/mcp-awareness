@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Flake in `tests/test_store.py::test_do_cleanup_logs_errors`.** Test was using the `caplog.at_level(...)` context manager plus `caplog.text` substring check. That pattern failed intermittently on CI (observed on Python 3.11 and 3.14) even though the code under test (`_do_cleanup`) is fully synchronous — the flake was in pytest's log-capture path, not in the production code. Rewritten to use `caplog.set_level(...)` at fixture scope and inspect `caplog.records` directly (logger name + level + message substring), which is sturdier across pytest/Python versions and produces a richer failure message when it does fire. Verified 10/10 consecutive local runs post-fix. Closes [#374](https://github.com/cmeans/mcp-awareness/issues/374).
+
 ### Security
 - **Third-party GitHub Actions pinned to full commit SHAs** (instead of floating `@vN` major-version tags). A moving major-version tag on a third-party action is an unreviewed supply-chain channel — the upstream owner can move the tag to any commit at any time, including after a repo compromise. Pinning to the commit SHA freezes the code under review. Affected references in `.github/workflows/`:
   - `codecov/codecov-action@v6` → `@57e3a136…` (v6.0.0) in `ci.yml`
