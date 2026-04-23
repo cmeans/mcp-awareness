@@ -76,13 +76,19 @@ unless you know exactly what you're doing.
 
 ## Security scanners
 
-CI runs two dependency-level scanners in addition to the code checks:
+CI runs several scanners in addition to the code checks:
 
 - **gitleaks** (`.github/workflows/gitleaks.yml`) — scans commits for
   hardcoded secrets. See `.gitleaksignore` for the allowlist.
 - **pip-audit** (`.github/workflows/pip-audit.yml`) — scans the installed
   Python dependency tree against the PyPA advisory database. Any known CVE
   in any installed package fails the build.
+- **trivy** (runs as two steps inside `.github/workflows/docker-smoke.yml`)
+  — scans the Dockerfile for misconfigurations and the built image for
+  CVEs in the base layer + system packages. Only fires on PRs that touch
+  the Dockerfile / pyproject.toml / uv.lock (matching the existing
+  docker-smoke trigger set); non-image PRs don't rebuild the image and
+  so don't re-scan.
 
 ### pip-audit failure policy
 
@@ -110,6 +116,27 @@ When pip-audit fails a PR, the triage path is, in order of preference:
 
 Do not silently pin, downgrade, or suppress without documenting the
 reasoning.
+
+### trivy failure policy
+
+- **Dockerfile config scan**: fails on `HIGH,CRITICAL` misconfigurations.
+  Lower-severity findings (e.g., missing HEALTHCHECK, at LOW) appear in
+  the run log but don't block the build. Address them when practical;
+  don't hide them.
+- **Image vulnerability scan**: fails on `HIGH,CRITICAL` CVEs that have
+  an upstream fix available (`--ignore-unfixed`). A fixed CVE means
+  "rebuild with a newer base image" and is actionable — bump the base,
+  re-test, move on. Unfixed-upstream CVEs surface in the log but don't
+  block CI because there's nothing to do about them until the fix is
+  released; noisy failures on every PR would just train everyone to
+  ignore the scanner.
+
+When trivy fails, the triage path is the same shape as pip-audit:
+1. Bump the base image / package (preferred).
+2. Adjust the Dockerfile to avoid the misconfig.
+3. Accept + allowlist via `.trivyignore` at repo root (one CVE ID or
+   finding key per line, with an inline `#` comment explaining why).
+   This is the escape hatch; every entry is visible in-repo.
 
 ## Pull request guidelines
 

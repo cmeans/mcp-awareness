@@ -102,3 +102,33 @@ jobs:
           docker image inspect mcp-awareness:pr-smoke --format \
             'image: {{.RepoTags}} | size: {{.Size}} bytes' || true
           docker image ls mcp-awareness:pr-smoke
+
+      # trivy config scan — Dockerfile misconfiguration (missing HEALTHCHECK,
+      # root user, chmod sprawl, etc.). Fails on HIGH/CRITICAL.
+      # Informational findings at MEDIUM and below are surfaced in the run
+      # log but don't block the build.
+      - name: Trivy — Dockerfile misconfiguration scan
+        # aquasecurity/trivy-action pinned to full commit SHA — v0.36.0
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25
+        with:
+          scan-type: config
+          scan-ref: Dockerfile
+          severity: "HIGH,CRITICAL"
+          exit-code: "1"
+          format: table
+
+      # trivy image scan — CVEs in base layer + installed system packages.
+      # Policy: fail on HIGH/CRITICAL that have an upstream fix available
+      # (`--ignore-unfixed`); unfixed-upstream findings surface in the log but
+      # don't block the build — there's no actionable remediation when the
+      # fix isn't released yet. Fixed findings mean "rebuild with newer base"
+      # and are an easy win to address.
+      - name: Trivy — image vulnerability scan
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25
+        with:
+          scan-type: image
+          image-ref: mcp-awareness:pr-smoke
+          severity: "HIGH,CRITICAL"
+          ignore-unfixed: true
+          exit-code: "1"
+          format: table
