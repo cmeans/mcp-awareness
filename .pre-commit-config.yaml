@@ -1,0 +1,12 @@
+# Pre-commit hooks for mcp-awareness.
+#
+# Install once per clone:    pre-commit install
+# Run manually on all files: pre-commit run --all-files
+#
+# See CONTRIBUTING.md § Development setup.
+
+repos:
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.30.1
+    hooks:
+      - id: gitleaks

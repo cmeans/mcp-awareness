@@ -61,11 +61,18 @@ you from reporting a bug or asking a question — that's what issues are for.
 
 ```bash
 pip install -e ".[dev]"    # install with dev dependencies
+pre-commit install         # install git hooks (runs gitleaks on commit)
 python -m pytest tests/    # run tests (requires Docker for Postgres)
 ruff check src/ tests/     # lint
 ruff format src/ tests/    # format
 mypy src/mcp_awareness/    # type check
 ```
+
+`pre-commit install` is a one-time step per clone. Configured hooks live in
+`.pre-commit-config.yaml`; the gitleaks hook blocks commits that contain
+secrets. To bypass a known false positive, add its fingerprint to
+`.gitleaksignore` with a comment explaining why; don't use `SKIP=gitleaks`
+unless you know exactly what you're doing.
 
 ## Pull request guidelines
 
@@ -100,8 +107,9 @@ Never include `.env` contents, credentials, API tokens, signing keys, or
 production configuration values in a PR diff, commit message, or PR body.
 If you're testing with real credentials, scrub them before committing.
 
-mcp-awareness has no secret-scanning gate on incoming PRs yet — human
-review is the only line of defense, so please help make that review
-possible. If you accidentally push a secret, rotate it immediately;
-git history rewriting is best-effort and public mirrors may already
-have the value.
+mcp-awareness runs `gitleaks` as a pre-commit hook and as a CI gate
+(`.github/workflows/gitleaks.yml`), but prevention beats detection —
+please don't rely on the scanner to catch paste-ins for you. If you
+accidentally push a secret, rotate it immediately; git history
+rewriting is best-effort and public mirrors may already have the
+value.

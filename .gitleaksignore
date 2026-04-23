@@ -1,0 +1,13 @@
+# Placeholder credentials in a deployment runbook — HAProxy stats admin
+# password. Line 183 of the runbook explicitly instructs the user to
+# replace with a value from KeePass on deploy; production is not running
+# this value. The docs/superpowers/plans tree is planned to migrate to an
+# awareness-infra repository separate from mcp-awareness.
+#
+# Two fingerprint formats are listed per finding: the commit-scoped form
+# (used when gitleaks scans git history) and the path-scoped form (used
+# when gitleaks scans the working tree with --no-git).
+d7d821b5bc2a49ff5d9d5662c8e89cb148c48ab2:docs/superpowers/plans/2026-04-02-zero-downtime-deployment.md:curl-auth-user:166
+d7d821b5bc2a49ff5d9d5662c8e89cb148c48ab2:docs/superpowers/plans/2026-04-02-zero-downtime-deployment.md:curl-auth-user:438
+docs/superpowers/plans/2026-04-02-zero-downtime-deployment.md:curl-auth-user:207
+docs/superpowers/plans/2026-04-02-zero-downtime-deployment.md:curl-auth-user:482
