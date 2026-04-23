@@ -17,6 +17,19 @@
 
 rules:
   - id: no-sql-string-interpolation
+    # Scoped to runtime server code. Alembic migrations under
+    # `alembic/versions/` legitimately build DDL with f-strings over
+    # hard-coded identifier lists (e.g.,
+    # `op.execute(f"ALTER TABLE {table} ENABLE ROW LEVEL SECURITY")`
+    # where `table` is a literal from a Python loop). Benchmarks under
+    # `benchmarks/` use ephemeral throwaway databases whose names come
+    # from the invoking developer, not from untrusted input. Both
+    # categories sit outside the request path and outside the
+    # parameterization discipline this rule enforces.
+    paths:
+      exclude:
+        - "alembic/versions/**"
+        - "benchmarks/**"
     message: |
       This execute() call is being passed a dynamically-constructed SQL
       string (f-string, .format(), or concatenation). That is a SQL
