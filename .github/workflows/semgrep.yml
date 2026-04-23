@@ -1,0 +1,60 @@
+# mcp-awareness — ambient system awareness for AI agents
+# Copyright (C) 2026 Chris Means
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Affero General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU Affero General Public License for more details.
+#
+# You should have received a copy of the GNU Affero General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+name: semgrep
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    name: scan
+    runs-on: ubuntu-latest
+    # The semgrep container ships the CLI + required runtime; no extra
+    # install step needed. Using a pinned tag rather than :latest so a
+    # new semgrep release can't change the policy without a PR.
+    container:
+      image: semgrep/semgrep:1.161.0
+    steps:
+      - uses: actions/checkout@v6
+
+      # Three sources merged in one run:
+      #   - p/python       — Semgrep's community Python rule pack
+      #   - p/owasp-top-ten — OWASP top-ten coverage
+      #   - .semgrep/      — project-specific custom rules (SQL owner scope,
+      #                      credential-identifier log prevention, SQL-string
+      #                      interpolation guard). See docs/security/semgrep-rules.md.
+      #
+      # --error makes any finding exit non-zero (fails CI). --oss-only
+      # disables Semgrep-Pro features we don't pay for. --skip-unknown-
+      # extensions keeps the scan from warning about SVG / favicon files
+      # which semgrep doesn't understand.
+      - name: Run Semgrep
+        run: |
+          semgrep \
+            --config p/python \
+            --config p/owasp-top-ten \
+            --config .semgrep/ \
+            --error \
+            --oss-only \
+            --skip-unknown-extensions \
+            --metrics=off

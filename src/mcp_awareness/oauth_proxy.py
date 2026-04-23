@@ -249,7 +249,11 @@ def discover_oidc_endpoints(issuer: str) -> dict[str, str | None] | None:
 
     registration_endpoint = config.get("registration_endpoint")
 
-    logger.info(
+    # False positive on Semgrep's python-logger-credential-disclosure:
+    # the format string contains the word "token" as a label for the
+    # OIDC `token_endpoint` URL, not a credential value. Values pass
+    # through safe_url_for_log() which redacts any embedded credentials.
+    logger.info(  # nosemgrep
         "OAuth proxy: discovered endpoints — authorize=%s, token=%s, register=%s",
         safe_url_for_log(authorization_endpoint),
         safe_url_for_log(token_endpoint),

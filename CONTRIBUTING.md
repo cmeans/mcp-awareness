@@ -89,6 +89,11 @@ CI runs several scanners in addition to the code checks:
   the Dockerfile / pyproject.toml / uv.lock (matching the existing
   docker-smoke trigger set); non-image PRs don't rebuild the image and
   so don't re-scan.
+- **Semgrep** (`.github/workflows/semgrep.yml`) — static analysis with
+  the community packs `p/python` and `p/owasp-top-ten`, plus three
+  project-specific rules under `.semgrep/`: SQL owner-scoping guard,
+  credential-identifier-in-logs prevention, and SQL-string-interpolation
+  ban. Custom rules are documented in `docs/security/semgrep-rules.md`.
 
 ### pip-audit failure policy
 
@@ -116,6 +121,13 @@ When pip-audit fails a PR, the triage path is, in order of preference:
 
 Do not silently pin, downgrade, or suppress without documenting the
 reasoning.
+
+### Semgrep failure policy
+
+- CI runs `semgrep --config p/python --config p/owasp-top-ten --config .semgrep/ --error`. Any finding (from the community packs or from our local rules) exits non-zero and fails the build.
+- Project-specific rules live in `.semgrep/*.yml`, one rule per file. See `docs/security/semgrep-rules.md` for what each catches and why.
+- Suppress individual findings with a same-line `# nosemgrep: RULE_ID` comment plus a diff-visible justification. Do not blanket-disable rules.
+- Baseline false positives (e.g., `python-logger-credential-disclosure` firing on a log line whose format string mentions "token" as a URL label, not a credential) should be suppressed at the callsite, not removed from the rule set.
 
 ### trivy failure policy
 

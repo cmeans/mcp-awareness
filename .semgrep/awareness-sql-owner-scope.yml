@@ -1,0 +1,65 @@
+# mcp-awareness — ambient system awareness for AI agents
+# Copyright (C) 2026 Chris Means
+#
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# Semgrep rule: enforce owner_id scoping on SQL statements that touch
+# owner-scoped awareness-data tables. The rls_store + RLS policies defend
+# at two layers; this rule enforces that the SQL-filter layer is present
+# at authoring time, before the rls_store layer has a chance to back it
+# up. It codifies the R1–R4 RLS harness's contract in static form.
+#
+# Tables considered owner-scoped (all have an owner_id column):
+#   entries, reads, actions, embeddings
+#
+# Non-awareness tables (users, session_registry, session_redirects) are
+# not listed — they have their own key (id / user_id) and never take
+# owner_id.
+#
+# The rule matches a SQL statement that touches one of the listed tables
+# and does NOT reference owner_id anywhere in the same statement. This
+# avoids the false-positive that per-match-point pattern-not-regex would
+# cause: the negation is scoped to the statement text, not to a single
+# token within it.
+
+rules:
+  - id: awareness-sql-missing-owner-id
+    message: |
+      This SQL statement references an owner-scoped awareness-data table
+      (entries, reads, actions, or embeddings) but does not include
+      `owner_id` in its body. All queries against these tables MUST
+      filter on owner_id to preserve cross-tenant isolation — defense-
+      in-depth with RLS policies alone is insufficient when one layer
+      regresses.
+
+      If this is a legitimate exception (e.g., a shared-schema read
+      against `owner_id = '_system'`, a deliberate cross-tenant cleanup
+      scan), wrap the statement with a preceding comment block
+      containing `semgrep:allow awareness-sql-missing-owner-id` and a
+      short justification.
+    languages: [generic]
+    severity: ERROR
+    paths:
+      include:
+        - "src/mcp_awareness/sql/*.sql"
+    patterns:
+      # Match a SQL statement — SELECT / INSERT / UPDATE / DELETE — that
+      # hits one of the owner-scoped tables. The [^;]* lets us span up
+      # to the terminating semicolon; the alternate anchor lets it end
+      # at end-of-file for files without a trailing semicolon.
+      - pattern-either:
+          - pattern-regex: '(?i)\b(SELECT|INSERT\s+INTO|UPDATE|DELETE\s+FROM)\b[^;]*\b(entries|reads|actions|embeddings)\b[^;]*;'
+          - pattern-regex: '(?i)\b(SELECT|INSERT\s+INTO|UPDATE|DELETE\s+FROM)\b[^;]*\b(entries|reads|actions|embeddings)\b[^;]*$'
+      # The same statement must not already include owner_id.
+      - pattern-not-regex: '(?i)owner_id'
+      # Templated files (mode: templated) substitute placeholders like
+      # {where}, {order_by}, {limit_clause} at runtime via
+      # _query_entries / similar in postgres_store.py. The Python caller
+      # is responsible for passing owner_id as a parameter; runtime RLS
+      # + the R1–R4 harness tests verify the result. This rule does not
+      # try to statically prove owner_id presence through the template
+      # layer — it skips statements that contain a {placeholder}.
+      - pattern-not-regex: '\{[a-z_]+\}'
+      # Documented-exception escape hatch for files that deliberately
+      # span tenants (e.g., admin cleanup, shared-schema reads).
+      - pattern-not-regex: 'semgrep:allow awareness-sql-missing-owner-id'
