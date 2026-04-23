@@ -56,8 +56,8 @@ leading digits, owner IDs equal to a reserved-looking literal).
 
 A single-layer regression does NOT fail these tests — that's defense
 in depth working as designed. Patching **both** layers reproduces a
-hypothesis failure with shrinking. Observed in-session during PR #379
-round 2:
+hypothesis failure with shrinking. The repro procedure documents the
+aggregate contract rather than a single-layer guarantee:
 
 1. Drop ``WHERE owner_id = %s`` from ``src/mcp_awareness/sql/get_tags.sql``.
 2. Weaken the ``entries``-table RLS policy in ``rls_store`` to ``USING (true)``.
