@@ -1,0 +1,61 @@
+# mcp-awareness — ambient system awareness for AI agents
+# Copyright (C) 2026 Chris Means
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Affero General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU Affero General Public License for more details.
+#
+# You should have received a copy of the GNU Affero General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+name: pip-audit
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    name: audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      # Upgrade pip + setuptools first so venv-bootstrap CVEs don't count
+      # against the project. These packages aren't runtime deps — they're
+      # packaging tooling shipped with every venv — but pip-audit scans
+      # the whole environment, so we make sure they're current.
+      - name: Upgrade packaging tooling
+        run: python -m pip install --upgrade pip setuptools
+
+      - name: Install project + dev deps
+        run: pip install -e ".[dev]"
+
+      - name: Install pip-audit
+        run: pip install "pip-audit==2.10.0"
+
+      # Exit code 0 = no vulns, 1 = vulns found. Any finding fails the
+      # build — forces immediate triage. Known-accepted CVEs can be
+      # allowlisted with `--ignore-vuln CVE-ID` (add here with a comment
+      # explaining why; see CONTRIBUTING.md § "Security scanners").
+      #
+      # `--skip-editable` excludes the project itself (installed via
+      # `pip install -e`) from the scan; pip-audit would otherwise skip
+      # it with a warning since it isn't published on PyPI.
+      - name: Run pip-audit
+        run: pip-audit --skip-editable

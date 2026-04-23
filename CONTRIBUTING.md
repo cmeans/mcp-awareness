@@ -74,6 +74,43 @@ secrets. To bypass a known false positive, add its fingerprint to
 `.gitleaksignore` with a comment explaining why; don't use `SKIP=gitleaks`
 unless you know exactly what you're doing.
 
+## Security scanners
+
+CI runs two dependency-level scanners in addition to the code checks:
+
+- **gitleaks** (`.github/workflows/gitleaks.yml`) — scans commits for
+  hardcoded secrets. See `.gitleaksignore` for the allowlist.
+- **pip-audit** (`.github/workflows/pip-audit.yml`) — scans the installed
+  Python dependency tree against the PyPA advisory database. Any known CVE
+  in any installed package fails the build.
+
+### pip-audit failure policy
+
+- CI runs `pip-audit --skip-editable` on a fresh venv containing this
+  project plus its `[dev]` extras. Exit code 1 (any vulnerability) fails
+  the build.
+- `--skip-editable` excludes the project itself from the scan; it's
+  installed in editable mode and isn't published to PyPI.
+- Bootstrap tooling (`pip`, `setuptools`) is upgraded before the scan so
+  venv-bootstrap CVEs don't count against the project — those packages
+  aren't part of what the server ships.
+
+When pip-audit fails a PR, the triage path is, in order of preference:
+
+1. **Bump the dependency** to the fix version. Preferred — it's the
+   upstream answer.
+2. **Pin around the vuln** if the bump isn't available yet (e.g., wait
+   for a compatible minor release). Record the pin as a TODO-pinned
+   comment in `pyproject.toml` so it's visible.
+3. **Accept + allowlist** via `--ignore-vuln CVE-ID` added to
+   `pip-audit.yml` with a comment explaining why the exposure is
+   acceptable (non-exploitable in this project's code path, upstream
+   dispute, etc.). This is the escape hatch; every entry is reviewable
+   in the workflow file itself.
+
+Do not silently pin, downgrade, or suppress without documenting the
+reasoning.
+
 ## Pull request guidelines
 
 - One concern per PR — don't mix unrelated changes
