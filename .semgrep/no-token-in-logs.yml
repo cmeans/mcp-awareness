@@ -1,0 +1,84 @@
+# mcp-awareness — ambient system awareness for AI agents
+# Copyright (C) 2026 Chris Means
+#
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# Semgrep rule: reject log and ctx.* calls whose arguments interpolate any
+# identifier that conventionally holds a credential (OAuth bearer token,
+# OAuth code, password, client secret, API key, authorization header value).
+#
+# This is a pattern-based check rather than Semgrep taint mode. Taint mode
+# would be higher-fidelity but also higher-complexity for the empirical
+# current state (no sites today — see exploration notes in the #363 PR).
+# The pattern approach catches the common regression of someone typing
+# `logger.info(f"got req {authorization}")` while a reviewer might miss
+# it in PR; it will not catch laundering through an intermediate variable
+# named benignly. Follow-up to upgrade to taint mode is fine if future
+# evidence shows value.
+#
+# Variable names considered sensitive:
+#   token, bearer, authorization, auth_header, password, passwd, pwd,
+#   secret, client_secret, api_key, access_token, refresh_token, id_token
+#
+# The rule targets positional + f-string + .format args to common log
+# sinks. logger.debug is NOT included — debug is the documented outlet
+# for developer troubleshooting, and excluding it keeps the rule from
+# firing on benign debug lines. Reviewers should still avoid logging
+# credentials at debug level; the rule is best-effort, not exhaustive.
+
+rules:
+  - id: no-credential-identifier-in-logs
+    # Scope note: intentionally applies to `tests/` as well as `src/`.
+    # Tests can accidentally log real credentials pulled from fixtures
+    # (CLI-provided OAuth tokens, pytest-provisioned DB passwords,
+    # etc.), and the risk of a test log landing in a CI aggregator is
+    # non-zero. Tests that *deliberately* need a credential-shaped
+    # variable in a log call (e.g., a redaction-layer test) should use
+    # the canonical suppression form:
+    #   # nosemgrep: no-credential-identifier-in-logs because <reason>
+    # on the offending line.
+    message: |
+      This log or context call appears to interpolate a variable whose name
+      suggests it holds a credential (token, bearer, authorization header,
+      password, secret, api_key, etc.). Logging credential values — even
+      accidentally, even at info/warning level — risks leaking them to
+      disk, log aggregators, or screenshots.
+
+      If the variable doesn't actually hold a credential despite the name,
+      rename it (e.g., `token_label` → `label`, `api_key_prefix` →
+      `key_prefix`). Do not suppress this rule without a very clear
+      justification committed in the diff.
+    languages: [python]
+    severity: ERROR
+    patterns:
+      - pattern-either:
+          - pattern: logger.info(..., $VAR, ...)
+          - pattern: logger.warning(..., $VAR, ...)
+          - pattern: logger.error(..., $VAR, ...)
+          - pattern: logger.critical(..., $VAR, ...)
+          - pattern: logger.exception(..., $VAR, ...)
+          - pattern: logger.info(f"...{$VAR}...")
+          - pattern: logger.warning(f"...{$VAR}...")
+          - pattern: logger.error(f"...{$VAR}...")
+          - pattern: logger.critical(f"...{$VAR}...")
+          - pattern: logger.exception(f"...{$VAR}...")
+          - pattern: ctx.info(..., $VAR, ...)
+          - pattern: ctx.warning(..., $VAR, ...)
+          - pattern: ctx.error(..., $VAR, ...)
+          - pattern: ctx.info(f"...{$VAR}...")
+          - pattern: ctx.warning(f"...{$VAR}...")
+          - pattern: ctx.error(f"...{$VAR}...")
+      - metavariable-regex:
+          metavariable: $VAR
+          # Case-insensitive, with a single optional prefix (`*_`) and a
+          # single optional tail of common value-shape suffixes
+          # (`_hash`, `_value`, `_b64`, `_bytes`, `_plain`). The middle
+          # term is one of a short curated list of credential words.
+          # Matches: `token`, `Authorization`, `bearer_token`,
+          # `access_token`, `password_hash`, `secret_bytes`,
+          # `api_key`. Does NOT match: `token_bucket`, `api_key_label`,
+          # `rate_limit_token_budget` — arguably a gap, but the review
+          # conversation "rename or suppress-with-justification" is
+          # acceptable when it does misfire. Prefer widening this list
+          # over introducing taint analysis.
+          regex: '(?i)^(.*_)?(token|bearer|authorization|auth_header|password|passwd|pwd|secret|client_secret|api_key|access_token|refresh_token|id_token|credential)(_hash|_value|_b64|_bytes|_plain)?$'

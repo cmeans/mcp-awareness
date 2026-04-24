@@ -1,0 +1,70 @@
+# mcp-awareness — ambient system awareness for AI agents
+# Copyright (C) 2026 Chris Means
+#
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# Semgrep rule: reject f-strings, .format(), and string concatenation as
+# arguments to cursor.execute / conn.execute / conn.executemany. These
+# idioms are the entry point for SQL injection — every parameter must
+# flow through psycopg's parameterization (the second positional arg).
+#
+# The project loads SQL from files under src/mcp_awareness/sql/ and
+# passes parameters via tuples; this rule codifies that convention.
+# `_query_entries` in postgres_store.py builds a dynamic WHERE clause
+# with psycopg.sql.Composed/Identifier — that path is safe and is NOT
+# targeted here (it doesn't use f-strings/format/concat on the raw
+# execute arg).
+
+rules:
+  - id: no-sql-string-interpolation
+    # Scoped to runtime server code. Alembic migrations under
+    # `alembic/versions/` legitimately build DDL with f-strings over
+    # hard-coded identifier lists (e.g.,
+    # `op.execute(f"ALTER TABLE {table} ENABLE ROW LEVEL SECURITY")`
+    # where `table` is a literal from a Python loop). Benchmarks under
+    # `benchmarks/` use ephemeral throwaway databases whose names come
+    # from the invoking developer, not from untrusted input. Both
+    # categories sit outside the request path and outside the
+    # parameterization discipline this rule enforces.
+    paths:
+      # Leading `/` anchors these patterns to the repo root per
+      # Semgrepignore v2 / gitignore semantics — avoids the forthcoming
+      # Semgrep behavior change where unanchored patterns get a `/`
+      # prefix applied implicitly.
+      exclude:
+        - "/alembic/versions/**"
+        - "/benchmarks/**"
+    message: |
+      This execute() call is being passed a dynamically-constructed SQL
+      string (f-string, .format(), or concatenation). That is a SQL
+      injection vector and a direct violation of the project's
+      parameterization convention.
+
+      Use the execute(sql, params) form instead:
+        cursor.execute("SELECT ... WHERE id = %s", (user_id,))
+      Or for dynamic identifiers (table / column names), use psycopg's
+      sql.Composed + sql.Identifier, as `_query_entries` in
+      postgres_store.py does.
+
+      If you are absolutely sure this is a literal SQL string with no
+      runtime-sourced content (e.g., a one-shot admin utility building
+      SQL from hard-coded strings), suppress with `# nosemgrep:
+      no-sql-string-interpolation because <reason>` on the same line
+      — and include the reason in the diff.
+    languages: [python]
+    severity: ERROR
+    patterns:
+      - pattern-either:
+          # f-string passed directly
+          - pattern: $CUR.execute(f"...", ...)
+          - pattern: $CUR.execute(f"...")
+          - pattern: $CUR.executemany(f"...", ...)
+          # .format() passed directly
+          - pattern: $CUR.execute("...".format(...), ...)
+          - pattern: $CUR.execute("...".format(...))
+          - pattern: $CUR.executemany("...".format(...), ...)
+          # string concatenation passed directly
+          - pattern: $CUR.execute("..." + $X, ...)
+          - pattern: $CUR.execute("..." + $X)
+          - pattern: $CUR.execute($X + "...", ...)
+          - pattern: $CUR.execute($X + "...")
