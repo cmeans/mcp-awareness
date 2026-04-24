@@ -980,9 +980,42 @@ class TestGenerateBriefing:
         fired = briefing.get("fired_intentions", [])
         assert len(fired) == 10
         assert briefing["evaluation"]["intentions_fired"] == 15
-        # High-urgency entries should rank first
-        high_urgency_in_list = sum(1 for f in fired if f.get("urgency") == "high")
-        assert high_urgency_in_list == 3
+        # Strict slot check: high-urgency entries occupy the first three slots.
+        # A count-only assertion would also pass if the sort key flipped
+        # direction (high-urgency entries at slots 7-9 instead of 0-2).
+        assert [f["urgency"] for f in fired[:3]] == ["high", "high", "high"]
+        assert all(f["urgency"] == "normal" for f in fired[3:])
+
+    def test_briefing_summary_reports_total_fired_count_not_capped(self, store):
+        """compose_summary must report the full fired count, not the capped
+        displayed list length. Regression guard: prior implementation used
+        len(fired_intentions) which is capped at 10, silently under-reporting
+        backlogs of 11+ fired handoffs."""
+        for i in range(15):
+            eid = make_id()
+            store.add(
+                TEST_OWNER,
+                Entry(
+                    id=eid,
+                    type=EntryType.INTENTION,
+                    source="personal",
+                    tags=["handoff"],
+                    created=now_utc(),
+                    expires=None,
+                    data={
+                        "goal": f"Task {i}",
+                        "state": "pending",
+                        "deliver_at": None,
+                    },
+                ),
+            )
+            store.update_intention_state(TEST_OWNER, eid, "fired")
+
+        briefing = generate_briefing(store, TEST_OWNER)
+        assert briefing["evaluation"]["intentions_fired"] == 15
+        assert len(briefing["fired_intentions"]) == 10
+        assert "15 intentions ready" in briefing["summary"]
+        assert "10 intentions ready" not in briefing["summary"]
 
     def test_briefing_no_intentions_when_none_pending(self, store):
         """Briefing doesn't include intentions when none exist."""

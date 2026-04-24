@@ -221,7 +221,8 @@ def compose_summary(briefing: dict[str, Any]) -> str:
 
     fired = briefing.get("fired_intentions", [])
     if fired:
-        parts.append(f"{len(fired)} intention{'s' if len(fired) != 1 else ''} ready")
+        total = briefing.get("evaluation", {}).get("intentions_fired", len(fired))
+        parts.append(f"{total} intention{'s' if total != 1 else ''} ready")
 
     return ". ".join(parts) + "." if parts else f"All clear across {total} sources."
 
