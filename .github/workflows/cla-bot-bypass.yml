@@ -32,16 +32,28 @@
 # assistant.io's issue tracker too; this workflow is the repo-local
 # mitigation until that's addressed.
 #
-# Security note: `pull_request` (not `pull_request_target`) means this
-# workflow runs the version of itself on the PR's base branch (main).
-# PR authors cannot edit the bypass logic or allowlist and have it
-# take effect on their own PR — a malicious PR editing the allowlist
-# runs the old allowlist from main, not the new one.
+# Security note: this workflow uses `pull_request_target`, not
+# `pull_request`. `pull_request` on same-repo PRs runs the workflow
+# file *and* allowlist from the PR branch with a write-capable
+# GITHUB_TOKEN, which means a contributor with push access could
+# self-bypass `license/cla` by editing `.github/cla-bot-allowlist`
+# (or this workflow itself) inside their own PR branch. That hole
+# was observed empirically during this workflow's own rollout —
+# the feature PR auto-bypassed itself, which is the symptom, not the
+# feature. `pull_request_target` always runs the workflow file and
+# the allowlist read from the base branch (main), so a PR cannot
+# alter the gating logic that's applied to it. The usual
+# `pull_request_target` pitfall — checking out and executing
+# untrusted PR code with elevated permissions — does not apply here:
+# this workflow reads `.github/cla-bot-allowlist` from the base
+# branch checkout and posts a status keyed on PR metadata
+# (`github.event.pull_request.user.login` and `…head.sha`). It
+# never builds or runs PR content.
 
 name: cla-bot-bypass
 
 on:
-  pull_request:
+  pull_request_target:
     types: [opened, synchronize, reopened]
 
 permissions:
