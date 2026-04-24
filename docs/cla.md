@@ -51,6 +51,35 @@ in this repository. Currently exempt:
 To update the whitelist, sign in at https://cla-assistant.io, open the
 linked repository, and edit the settings.
 
+### Bot bypass mirror (`.github/cla-bot-allowlist`)
+
+CLAassistant silently skips PRs whose diff touches files under
+`.github/workflows/**` — its OAuth scope does not include GitHub's
+`workflow` scope, so reading the diff fails and the entire run is
+aborted. No `license/cla` status is posted, and branch protection then
+blocks merge on every workflow-touching bot PR regardless of the
+dashboard whitelist.
+
+The repo-local workaround is
+[`.github/workflows/cla-bot-bypass.yml`](../.github/workflows/cla-bot-bypass.yml),
+which reads [`.github/cla-bot-allowlist`](../.github/cla-bot-allowlist)
+on every PR event. When the PR author's login matches an entry, the
+workflow posts `license/cla = success` to the PR head with a
+description identifying the bypass. Human contributors are not
+affected — their PRs still flow through CLAassistant normally.
+
+The allowlist file is the single source of truth for bot bypasses.
+To add or remove a bot:
+
+1. Edit `.github/cla-bot-allowlist` — one GitHub login per line;
+   comments with `#` allowed.
+2. Also update the cla-assistant dashboard whitelist to match (the
+   dashboard is still authoritative for the *non-workflow-touching*
+   bot PR case where CLAassistant fires normally).
+
+When CLAassistant's OAuth scope eventually covers `workflow`, this
+mirror mechanism becomes redundant and the workflow can be removed.
+
 ## How to sign (contributor view)
 
 See [`CONTRIBUTING.md`](../CONTRIBUTING.md#how-to-sign).

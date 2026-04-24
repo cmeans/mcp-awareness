@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+- **CLA bypass workflow for whitelisted bot authors on workflow-touching PRs.** New `.github/workflows/cla-bot-bypass.yml` posts `license/cla = success` on PRs whose author login appears in `.github/cla-bot-allowlist` (currently `cmeans-claude-dev[bot]` and `dependabot[bot]`). Works around a CLAassistant OAuth-scope gap: the hosted CLA bot silently skips PRs whose diff touches files under `.github/workflows/**` because its OAuth token lacks GitHub's `workflow` scope, so no `license/cla` status is posted and branch protection blocks merge on every such bot PR — which hit each of the four security-tooling PRs that landed today (#380, #382, #385, #386) and required a manual `gh api statuses` call per head SHA. Uses `pull_request` (not `pull_request_target`) so the workflow always runs from the base branch — a PR editing the allowlist or the workflow logic cannot have the edited version take effect on its own PR. Human contributors are unaffected; CLAassistant handles those normally. `docs/cla.md` updated to describe the mirror and its authoritative scope (bots only). Closes [#381](https://github.com/cmeans/mcp-awareness/issues/381).
+
 ## [0.18.3] - 2026-04-24
 
 ### Fixed

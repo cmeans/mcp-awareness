@@ -1,0 +1,21 @@
+# mcp-awareness CLA bypass allowlist.
+#
+# One GitHub login per line. Comments start with `#` and are ignored.
+# Empty lines are ignored. Leading / trailing whitespace is trimmed.
+#
+# Consumed by .github/workflows/cla-bot-bypass.yml — when a PR is
+# opened (or synchronized / reopened) by one of the logins below, the
+# workflow posts `license/cla = success` to the PR head SHA. This
+# mirrors the cla-assistant.io dashboard whitelist for the specific
+# case where CLAassistant silently skips PRs that touch files under
+# .github/workflows/** (its OAuth scope doesn't cover `workflow`, so
+# reading the diff fails — PRs never get a status posted at all).
+#
+# Humans still go through the cla-assistant.io signing flow unchanged;
+# this list is for automation accounts the maintainer controls.
+#
+# Authoritative source for human CLA status: https://cla-assistant.io
+# Mirror (this file) covers bot authors only.
+
+cmeans-claude-dev[bot]
+dependabot[bot]
