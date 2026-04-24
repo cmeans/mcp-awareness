@@ -40,9 +40,27 @@ awareness-sql-missing-owner-id because <reason>` to the statement.
 **File**: `.semgrep/no-token-in-logs.yml`
 
 Reject `logger.*` and `ctx.*` calls whose arguments interpolate variables
-with credential-suggesting names (`token`, `bearer`, `authorization`,
-`auth_header`, `password`, `passwd`, `pwd`, `secret`, `client_secret`,
-`api_key`, `access_token`, `refresh_token`, `id_token`).
+with credential-suggesting names. The match is case-insensitive, accepts
+a single optional prefix (e.g., `oauth_access_token`, `bearer_token`,
+`user_password`), and accepts a short tail of value-shape suffixes
+(`_hash`, `_value`, `_b64`, `_bytes`, `_plain`). The base name set is:
+`token`, `bearer`, `authorization`, `auth_header`, `password`, `passwd`,
+`pwd`, `secret`, `client_secret`, `api_key`, `access_token`,
+`refresh_token`, `id_token`, `credential`.
+
+Matches: `token`, `Authorization`, `bearer_token`, `oauth_access_token`,
+`password_hash`, `secret_bytes`. Non-matches (examples that would not
+fire the rule): `token_bucket`, `api_key_label`,
+`rate_limit_token_budget` — accept the gap; a misfire here is handled
+by the "rename or suppress-with-justification" conversation, which is
+preferable to the complexity of a taint-mode rule for a class of
+mistake that's rare in practice.
+
+The rule applies repo-wide, including `tests/`, because test code can
+still accidentally log real fixture credentials into CI aggregators.
+Tests that need a credential-shaped variable for a deliberate reason
+(e.g., testing a redaction layer) should use the canonical per-line
+suppression.
 
 **Why this rule exists.** The empirical current state at rule authoring
 (2026-04-23) had zero sites logging credentials — but preventive rules
@@ -58,9 +76,14 @@ routinely evaded via intermediate renames, upgrading to taint mode is a
 clean follow-up.
 
 **Suppress responsibly.** If a variable named (say) `token_label` is
-genuinely not a credential, rename the variable. Only use `# nosemgrep`
-with an inline justification in the diff — suppressions are reviewable
-surface.
+genuinely not a credential, rename the variable. If suppression is the
+right answer (e.g., a redaction-layer test that must construct a
+credential-shaped value), use the canonical same-line form required by
+`CONTRIBUTING.md`: `# nosemgrep: no-credential-identifier-in-logs
+because <one-line reason>`. Bare `# nosemgrep` (without a rule ID)
+would silently suppress every Semgrep finding on that line — including
+unrelated future matches — and is disallowed by the project's
+suppression policy.
 
 ### `no-sql-string-interpolation`
 

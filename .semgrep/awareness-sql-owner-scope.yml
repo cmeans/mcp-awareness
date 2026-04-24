@@ -40,8 +40,12 @@ rules:
     languages: [generic]
     severity: ERROR
     paths:
+      # Leading `/` anchors this pattern to the repo root per
+      # Semgrepignore v2 / gitignore semantics — avoids the forthcoming
+      # Semgrep behavior change where unanchored patterns get a `/`
+      # prefix applied implicitly.
       include:
-        - "src/mcp_awareness/sql/*.sql"
+        - "/src/mcp_awareness/sql/*.sql"
     patterns:
       # Match a SQL statement — SELECT / INSERT / UPDATE / DELETE — that
       # hits one of the owner-scoped tables. The [^;]* lets us span up

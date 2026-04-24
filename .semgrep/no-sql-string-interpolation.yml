@@ -27,9 +27,13 @@ rules:
     # categories sit outside the request path and outside the
     # parameterization discipline this rule enforces.
     paths:
+      # Leading `/` anchors these patterns to the repo root per
+      # Semgrepignore v2 / gitignore semantics — avoids the forthcoming
+      # Semgrep behavior change where unanchored patterns get a `/`
+      # prefix applied implicitly.
       exclude:
-        - "alembic/versions/**"
-        - "benchmarks/**"
+        - "/alembic/versions/**"
+        - "/benchmarks/**"
     message: |
       This execute() call is being passed a dynamically-constructed SQL
       string (f-string, .format(), or concatenation). That is a SQL

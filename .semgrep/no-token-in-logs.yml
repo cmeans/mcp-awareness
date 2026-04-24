@@ -28,6 +28,15 @@
 
 rules:
   - id: no-credential-identifier-in-logs
+    # Scope note: intentionally applies to `tests/` as well as `src/`.
+    # Tests can accidentally log real credentials pulled from fixtures
+    # (CLI-provided OAuth tokens, pytest-provisioned DB passwords,
+    # etc.), and the risk of a test log landing in a CI aggregator is
+    # non-zero. Tests that *deliberately* need a credential-shaped
+    # variable in a log call (e.g., a redaction-layer test) should use
+    # the canonical suppression form:
+    #   # nosemgrep: no-credential-identifier-in-logs because <reason>
+    # on the offending line.
     message: |
       This log or context call appears to interpolate a variable whose name
       suggests it holds a credential (token, bearer, authorization header,
@@ -61,4 +70,15 @@ rules:
           - pattern: ctx.error(f"...{$VAR}...")
       - metavariable-regex:
           metavariable: $VAR
-          regex: '^(token|bearer|authorization|auth_header|password|passwd|pwd|secret|client_secret|api_key|access_token|refresh_token|id_token)$'
+          # Case-insensitive, with a single optional prefix (`*_`) and a
+          # single optional tail of common value-shape suffixes
+          # (`_hash`, `_value`, `_b64`, `_bytes`, `_plain`). The middle
+          # term is one of a short curated list of credential words.
+          # Matches: `token`, `Authorization`, `bearer_token`,
+          # `access_token`, `password_hash`, `secret_bytes`,
+          # `api_key`. Does NOT match: `token_bucket`, `api_key_label`,
+          # `rate_limit_token_budget` — arguably a gap, but the review
+          # conversation "rename or suppress-with-justification" is
+          # acceptable when it does misfire. Prefer widening this list
+          # over introducing taint analysis.
+          regex: '(?i)^(.*_)?(token|bearer|authorization|auth_header|password|passwd|pwd|secret|client_secret|api_key|access_token|refresh_token|id_token|credential)(_hash|_value|_b64|_bytes|_plain)?$'
