@@ -1,0 +1,117 @@
+# mcp-awareness — ambient system awareness for AI agents
+# Copyright (C) 2026 Chris Means
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Affero General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU Affero General Public License for more details.
+#
+# You should have received a copy of the GNU Affero General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+# CLA bypass for bot authors on workflow-touching PRs.
+#
+# Problem this workflow solves: CLAassistant (cla-assistant.io, SAP-
+# hosted OAuth app) silently skips PRs whose diff includes files under
+# `.github/workflows/**` because its OAuth scope does not include
+# GitHub's `workflow` scope. When CLAassistant can't read the diff it
+# aborts the whole run — no comment, no status posted. The required
+# `license/cla` status then sits permanently unreported and branch
+# protection blocks merge.
+#
+# Scope of this workaround: limited to GitHub App bots whose logins are
+# explicitly listed in `.github/cla-bot-allowlist`. Human contributors
+# still go through CLAassistant unchanged.
+#
+# Tracking: #381. Upstream gap report would ideally land in cla-
+# assistant.io's issue tracker too; this workflow is the repo-local
+# mitigation until that's addressed.
+#
+# Security note: this workflow uses `pull_request_target`, not
+# `pull_request`. `pull_request` on same-repo PRs runs the workflow
+# file *and* allowlist from the PR branch with a write-capable
+# GITHUB_TOKEN, which means a contributor with push access could
+# self-bypass `license/cla` by editing `.github/cla-bot-allowlist`
+# (or this workflow itself) inside their own PR branch. That hole
+# was observed empirically during this workflow's own rollout —
+# the feature PR auto-bypassed itself, which is the symptom, not the
+# feature. `pull_request_target` always runs the workflow file and
+# the allowlist read from the base branch (main), so a PR cannot
+# alter the gating logic that's applied to it. The usual
+# `pull_request_target` pitfall — checking out and executing
+# untrusted PR code with elevated permissions — does not apply here:
+# this workflow reads `.github/cla-bot-allowlist` from the base
+# branch checkout and posts a status keyed on PR metadata
+# (`github.event.pull_request.user.login` and `…head.sha`). It
+# never builds or runs PR content.
+
+name: cla-bot-bypass
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  statuses: write
+  pull-requests: read
+
+jobs:
+  bypass:
+    name: bypass
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Check allowlist + post license/cla status
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+
+          allowlist_file=.github/cla-bot-allowlist
+          if [ ! -f "$allowlist_file" ]; then
+            echo "::notice::$allowlist_file not present on base branch; nothing to do."
+            exit 0
+          fi
+
+          # Read allowlist: strip comments (# through EOL), drop empty lines, trim whitespace.
+          # Match PR author against each entry exactly (login is case-insensitive in GitHub,
+          # but stored as provided — we lowercase both sides for safety).
+          author_lower=$(printf '%s' "$PR_AUTHOR" | tr '[:upper:]' '[:lower:]')
+          matched=no
+          while IFS= read -r line || [ -n "$line" ]; do
+            # Strip comment tail + trim whitespace.
+            entry=$(printf '%s' "$line" | sed 's/#.*$//' | awk '{$1=$1};1')
+            [ -z "$entry" ] && continue
+            entry_lower=$(printf '%s' "$entry" | tr '[:upper:]' '[:lower:]')
+            if [ "$author_lower" = "$entry_lower" ]; then
+              matched=yes
+              break
+            fi
+          done < "$allowlist_file"
+
+          if [ "$matched" = no ]; then
+            echo "::notice::PR #$PR_NUMBER author '$PR_AUTHOR' not in $allowlist_file — CLAassistant handles this PR normally."
+            exit 0
+          fi
+
+          echo "::notice::PR #$PR_NUMBER author '$PR_AUTHOR' matches allowlist — posting license/cla success."
+
+          # Note: we post state=success with an explicit description so the
+          # bypass is visible in the PR's checks list rather than silently
+          # indistinguishable from a real CLAassistant signoff.
+          gh api "repos/${GITHUB_REPOSITORY}/statuses/${PR_HEAD_SHA}" \
+            -X POST \
+            -f state=success \
+            -f context=license/cla \
+            -f description="Bypassed by .github/cla-bot-allowlist (bot author: ${PR_AUTHOR})" \
+            -f target_url="https://github.com/${GITHUB_REPOSITORY}/blob/main/.github/cla-bot-allowlist"
