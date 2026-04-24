@@ -29,6 +29,9 @@ from typing import Any
 from .schema import Entry, severity_rank, to_iso
 from .store import Store
 
+_URGENCY_RANK = {"low": 0, "normal": 1, "high": 2}
+_MAX_FIRED_IN_BRIEFING = 10
+
 
 def _suppression_tags_match(s_tags: list[str], alert: Entry) -> bool:
     """Check if suppression tags match the alert via tags or content keywords."""
@@ -348,31 +351,41 @@ def generate_briefing(store: Store, owner_id: str) -> dict[str, Any]:
 
     briefing["active_suppressions"] = store.count_active_suppressions(owner_id)
 
-    # Evaluate time-based intentions — fire pending intentions whose deliver_at has passed
-    fired_intentions = store.get_fired_intentions(owner_id)
-    if fired_intentions:
-        # Transition each matched intention from "pending" to "fired" so they
-        # don't fire again on subsequent briefing reads
-        for intention in fired_intentions:
-            store.update_intention_state(
-                owner_id, intention.id, "fired", reason="Delivered via briefing"
-            )
+    # Auto-fire path: pending intentions whose deliver_at has passed transition to "fired"
+    auto_fired = store.get_fired_intentions(owner_id)
+    for intention in auto_fired:
+        store.update_intention_state(
+            owner_id, intention.id, "fired", reason="Delivered via briefing"
+        )
+
+    # Surface all intentions in "fired" state — includes auto-fired this call AND
+    # handoffs manually transitioned to "fired" by other agents/sessions. These
+    # persist in the briefing until the receiving agent moves them to "active"
+    # / "completed" / "cancelled" / "snoozed".
+    all_fired = store.get_intentions(owner_id, state="fired")
+    all_fired.sort(
+        key=lambda i: (
+            -_URGENCY_RANK.get(i.data.get("urgency", "normal"), 1),
+            -(i.updated or i.created).timestamp(),
+        )
+    )
+    if all_fired:
         briefing["fired_intentions"] = [
             {
                 "id": i.id,
                 "goal": i.data.get("goal", i.data.get("description", "")),
                 "source": i.source,
                 "tags": i.tags,
+                "urgency": i.data.get("urgency", "normal"),
+                "updated": to_iso(i.updated or i.created),
             }
-            for i in fired_intentions
+            for i in all_fired[:_MAX_FIRED_IN_BRIEFING]
         ]
         briefing["attention_needed"] = True
 
-    # Count pending intentions, excluding those already fired (avoid double-counting)
-    all_pending = store.get_intentions(owner_id, state="pending")
-    fired_ids = {i.id for i in fired_intentions}
-    pending_not_fired = [i for i in all_pending if i.id not in fired_ids]
-    briefing["pending_intentions"] = len(pending_not_fired)
+    # Count pending intentions (auto-fire transitions removed them from pending)
+    pending = store.get_intentions(owner_id, state="pending")
+    briefing["pending_intentions"] = len(pending)
 
     briefing["evaluation"] = {
         "alerts_checked": eval_alerts_checked,
@@ -380,8 +393,8 @@ def generate_briefing(store: Store, owner_id: str) -> dict[str, Any]:
         "pattern_matched": eval_pattern_matched,
         "stale_sources": eval_stale_sources,
         "surfaced": briefing["active_alerts"],
-        "intentions_pending": len(pending_not_fired),
-        "intentions_fired": len(fired_intentions),
+        "intentions_pending": len(pending),
+        "intentions_fired": len(all_fired),
     }
     briefing["summary"] = compose_summary(briefing)
 

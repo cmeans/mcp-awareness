@@ -876,15 +876,21 @@ class TestGenerateBriefing:
         fired_after = store.get_intentions(TEST_OWNER, state="fired")
         assert any(i.id == intention_id for i in fired_after)
 
-    def test_fired_intention_not_surfaced_on_second_briefing(self, store):
-        """Once an intention fires and transitions, it doesn't appear in subsequent briefings."""
+    def test_fired_intention_persists_until_actioned(self, store):
+        """Fired intentions keep surfacing in briefings until moved off 'fired' state.
+
+        Handoff convention: agents transition 'pending' -> 'fired' manually to surface
+        work in the next session's briefing. The briefing must show these until the
+        receiving agent transitions them to 'active' / 'completed' / 'cancelled' / 'snoozed'.
+        """
         from datetime import timedelta
 
         past = now_utc() - timedelta(hours=1)
+        intention_id = make_id()
         store.add(
             TEST_OWNER,
             Entry(
-                id=make_id(),
+                id=intention_id,
                 type=EntryType.INTENTION,
                 source="personal",
                 tags=["errands"],
@@ -901,10 +907,82 @@ class TestGenerateBriefing:
         briefing1 = generate_briefing(store, TEST_OWNER)
         assert len(briefing1.get("fired_intentions", [])) == 1
 
-        # Second briefing should not fire it again
+        # Second briefing still surfaces it — it hasn't been actioned yet
         briefing2 = generate_briefing(store, TEST_OWNER)
-        assert briefing2.get("fired_intentions") is None
-        assert briefing2["evaluation"]["intentions_fired"] == 0
+        assert len(briefing2.get("fired_intentions", [])) == 1
+        assert briefing2["fired_intentions"][0]["id"] == intention_id
+        assert briefing2["evaluation"]["intentions_fired"] == 1
+
+        # Agent transitions fired -> active. Next briefing stops surfacing it.
+        store.update_intention_state(TEST_OWNER, intention_id, "active")
+        briefing3 = generate_briefing(store, TEST_OWNER)
+        assert briefing3.get("fired_intentions") is None
+        assert briefing3["evaluation"]["intentions_fired"] == 0
+
+    def test_briefing_surfaces_manually_fired_intention(self, store):
+        """Handoff pattern: an agent transitions pending -> fired directly
+        (no deliver_at). The next briefing must surface it."""
+        intention_id = make_id()
+        store.add(
+            TEST_OWNER,
+            Entry(
+                id=intention_id,
+                type=EntryType.INTENTION,
+                source="mcp-awareness-project",
+                tags=["handoff", "wip"],
+                created=now_utc(),
+                expires=None,
+                data={
+                    "goal": "Resume PR #387 after reboot",
+                    "state": "pending",
+                    "deliver_at": None,
+                    "urgency": "high",
+                },
+            ),
+        )
+        # Agent fires it manually (no deliver_at, no auto-fire path)
+        store.update_intention_state(TEST_OWNER, intention_id, "fired", reason="Compaction handoff")
+
+        briefing = generate_briefing(store, TEST_OWNER)
+        assert briefing["attention_needed"] is True
+        fired = briefing.get("fired_intentions", [])
+        assert len(fired) == 1
+        assert fired[0]["id"] == intention_id
+        assert fired[0]["goal"] == "Resume PR #387 after reboot"
+        assert briefing["evaluation"]["intentions_fired"] == 1
+
+    def test_briefing_caps_fired_intention_list(self, store):
+        """When many intentions are fired, briefing lists at most 10 but counts all."""
+        ids = []
+        for i in range(15):
+            eid = make_id()
+            ids.append(eid)
+            store.add(
+                TEST_OWNER,
+                Entry(
+                    id=eid,
+                    type=EntryType.INTENTION,
+                    source="personal",
+                    tags=["handoff"],
+                    created=now_utc(),
+                    expires=None,
+                    data={
+                        "goal": f"Task {i}",
+                        "state": "pending",
+                        "deliver_at": None,
+                        "urgency": "high" if i < 3 else "normal",
+                    },
+                ),
+            )
+            store.update_intention_state(TEST_OWNER, eid, "fired")
+
+        briefing = generate_briefing(store, TEST_OWNER)
+        fired = briefing.get("fired_intentions", [])
+        assert len(fired) == 10
+        assert briefing["evaluation"]["intentions_fired"] == 15
+        # High-urgency entries should rank first
+        high_urgency_in_list = sum(1 for f in fired if f.get("urgency") == "high")
+        assert high_urgency_in_list == 3
 
     def test_briefing_no_intentions_when_none_pending(self, store):
         """Briefing doesn't include intentions when none exist."""
