@@ -36,10 +36,9 @@ jobs:
         with:
           python-version: "3.12"
 
-      # Upgrade pip + setuptools first so venv-bootstrap CVEs don't count
-      # against the project. These packages aren't runtime deps — they're
-      # packaging tooling shipped with every venv — but pip-audit scans
-      # the whole environment, so we make sure they're current.
+      # Keep pip + setuptools current. Even though they're excluded from
+      # the scan scope below (see "Write scan requirements file"), a stale
+      # pip can break the install step itself.
       - name: Upgrade packaging tooling
         run: python -m pip install --upgrade pip setuptools
 
@@ -49,13 +48,48 @@ jobs:
       - name: Install pip-audit
         run: pip install "pip-audit==2.10.0"
 
-      # Exit code 0 = no vulns, 1 = vulns found. Any finding fails the
-      # build — forces immediate triage. Known-accepted CVEs can be
-      # allowlisted with `--ignore-vuln CVE-ID` (add here with a comment
-      # explaining why; see CONTRIBUTING.md § "Security scanners").
+      # pip-audit scans whatever Python environment it sees. The install
+      # steps above put bootstrap tooling (pip, setuptools, wheel,
+      # virtualenv) into the venv, but none of those are runtime deps of
+      # the mcp-awareness server — they're install-time tooling. A CVE
+      # in pip/setuptools/wheel cannot be reached by any request the
+      # server serves; the exposure path is install-time supply chain,
+      # addressed by Dependabot and signed commits, not by runtime-dep
+      # vulnerability scanning.
       #
-      # `--skip-editable` excludes the project itself (installed via
-      # `pip install -e`) from the scan; pip-audit would otherwise skip
-      # it with a warning since it isn't published on PyPI.
+      # Scope the scan explicitly: take the full installed set
+      # (`pip list --format freeze` — direct + transitive project deps
+      # plus CI tooling), remove only the bootstrap trio and the project
+      # itself, and pass the rest to `pip-audit -r`. pip-audit and its
+      # transitive deps stay in scope on purpose — if one of them picks
+      # up a CVE, we upgrade pip-audit (which we control) rather than
+      # hide the finding. No CVE-level ignores; scope decisions are
+      # package-level and reviewable.
+      - name: Write scan requirements file
+        run: |
+          pip list --format freeze \
+            | grep -v -E '^(pip|setuptools|wheel|virtualenv)==' \
+            | grep -v -E '^mcp-awareness-server==' \
+            > scan-requirements.txt
+          echo "Packages in scan scope:"
+          wc -l scan-requirements.txt
+          echo "Excluded (bootstrap tooling + editable project):"
+          pip list --format freeze \
+            | grep -E '^(pip|setuptools|wheel|virtualenv|mcp-awareness-server)==' \
+            || true
+
+      # Exit code 0 = no vulns, 1 = vulns found. Any finding fails the
+      # build — forces immediate triage. If a package in the scan scope
+      # picks up a CVE with no upstream fix, prefer a short-lived pin or
+      # a scope decision ("is this package actually reachable from the
+      # server's runtime path?") over adding a `--ignore-vuln` entry —
+      # CVE-level ignores tend to become forever-exemptions.
+      # --no-deps: scan exactly the packages listed (the requirements
+      #   file already contains the full resolved tree from
+      #   `pip list --format freeze`).
+      # --disable-pip: skip pip-audit's internal venv-creation +
+      #   pip-install step for dep resolution (not needed since we're
+      #   passing a fully-resolved list; faster and avoids a second
+      #   bootstrap-pip round-trip on every CI run).
       - name: Run pip-audit
-        run: pip-audit --skip-editable
+        run: pip-audit --disable-pip --no-deps -r scan-requirements.txt
