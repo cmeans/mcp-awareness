@@ -626,7 +626,7 @@ Three findings from prior code reviews, single PR. Spec: `docs/superpowers/specs
 
 ### Manual tests (via MCP tools)
 1. - [ ] **Auth still works after the change** — connect any MCP client; expect tools to be reachable as before.
-2. - [ ] **429 path** — saturate `max_concurrent_per_owner` (default 3) for one owner via three concurrent slow tool calls; the 4th must return HTTP 429 with `{"error": "Too many concurrent requests"}`.
+2. - [ ] **429 path** — saturate `max_concurrent_per_owner` for one owner. The constructor default is **3**, but production wires `AWARENESS_MAX_CONCURRENT_PER_OWNER` with a deployment default of **10** (`src/mcp_awareness/server.py:97`); fire `N+1` concurrent slow tool calls matching whatever the test instance is configured for. The over-limit request must return HTTP 429 with `{"error": "Too many concurrent requests"}`.
 3. - [ ] **Counter collapses** — after the saturation test completes, restart-free, fire one more request; expect 200, and `_owner_inflight` (visible via debugger or stats endpoint if added) should be empty for that owner_id between requests.
 
 🤖 Generated with [Claude Code](https://claude.com/claude-code)
