@@ -34,6 +34,7 @@ import re
 import time
 import urllib.error
 import urllib.request
+from collections import OrderedDict
 from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import parse_qs
@@ -43,6 +44,10 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 from .helpers import safe_url_for_log
 
 logger = logging.getLogger(__name__)
+
+# Cap on the number of IP keys tracked in RateLimiter._hits.
+# Bounds memory in long-running deployments; LRU-evicts on overflow.
+_MAX_RATE_LIMIT_IPS = 10_000
 
 # Default trusted-header chain — Cloudflare environment.
 # Literal strings here (not computed from env) so they can be logged
@@ -135,7 +140,7 @@ class RateLimiter:
         self.max_requests = max_requests
         self.window_seconds = window_seconds
         self.ban_duration = ban_duration
-        self._hits: dict[str, list[float]] = {}
+        self._hits: OrderedDict[str, list[float]] = OrderedDict()
         self._bans: dict[str, float] = {}  # ip -> ban_expiry (monotonic)
         self._rate_limited_count = 0
         self._last_rate_limited: str | None = None
@@ -159,12 +164,16 @@ class RateLimiter:
 
         if len(timestamps) >= self.max_requests:
             self._hits[ip] = timestamps
+            self._hits.move_to_end(ip)
             self._rate_limited_count += 1
             self._last_rate_limited = datetime.now(timezone.utc).isoformat()
             return False
 
         timestamps.append(now)
         self._hits[ip] = timestamps
+        self._hits.move_to_end(ip)
+        if len(self._hits) > _MAX_RATE_LIMIT_IPS:
+            self._hits.popitem(last=False)
         return True
 
     def ban(self, ip: str, *, reason: str) -> None:
