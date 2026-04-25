@@ -21,6 +21,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import pathlib
+from collections import OrderedDict
 from collections.abc import Callable
 from typing import Any
 
@@ -28,6 +29,10 @@ from starlette.responses import JSONResponse, Response
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 logger = logging.getLogger(__name__)
+
+# Cap on the number of owner_id keys tracked in AuthMiddleware._owner_inflight.
+# Bounds memory in long-running deployments; LRU-evicts on overflow.
+_MAX_OWNERS = 10_000
 
 # The health response builder is injected so middleware doesn't depend on server globals.
 HealthBuilder = Callable[[], dict[str, Any]]
@@ -204,7 +209,8 @@ class AuthMiddleware:
         self.auto_provision = auto_provision
         self.resource_metadata_url = resource_metadata_url
         self._max_concurrent = max_concurrent_per_owner
-        self._owner_semaphores: dict[str, asyncio.Semaphore] = {}
+        self._owner_inflight: OrderedDict[str, int] = OrderedDict()
+        self._owner_lock = asyncio.Lock()
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http":
@@ -246,13 +252,18 @@ class AuthMiddleware:
             await resp(scope, receive, send)
             return
 
-        # Per-owner concurrency limit — prevents one client from DOSing others
-        sem = self._owner_semaphores.get(owner_id)
-        if sem is None:
-            sem = asyncio.Semaphore(self._max_concurrent)
-            self._owner_semaphores[owner_id] = sem
+        # Per-owner concurrency limit — prevents one client from DOSing others.
+        # Counter-based; intrinsically bounded by _MAX_OWNERS via LRU eviction.
+        async with self._owner_lock:
+            inflight = self._owner_inflight.get(owner_id, 0)
+            over_limit = inflight >= self._max_concurrent
+            if not over_limit:
+                self._owner_inflight[owner_id] = inflight + 1
+                self._owner_inflight.move_to_end(owner_id)
+                if len(self._owner_inflight) > _MAX_OWNERS:
+                    self._owner_inflight.popitem(last=False)
 
-        if not sem._value:  # All slots taken — reject immediately
+        if over_limit:
             resp = JSONResponse({"error": "Too many concurrent requests"}, status_code=429)
             await resp(scope, receive, send)
             return
@@ -260,12 +271,17 @@ class AuthMiddleware:
         # Set owner context for downstream handlers
         from .server import _owner_ctx
 
-        async with sem:
-            token_reset = _owner_ctx.set(owner_id)
-            try:
-                await self.app(scope, receive, send)
-            finally:
-                _owner_ctx.reset(token_reset)
+        token_reset = _owner_ctx.set(owner_id)
+        try:
+            await self.app(scope, receive, send)
+        finally:
+            _owner_ctx.reset(token_reset)
+            async with self._owner_lock:
+                new_count = self._owner_inflight.get(owner_id, 1) - 1
+                if new_count <= 0:
+                    self._owner_inflight.pop(owner_id, None)
+                else:
+                    self._owner_inflight[owner_id] = new_count
 
     def _try_self_signed(self, token: str) -> tuple[str | None, str | None]:
         """Validate a self-signed JWT (from mcp-awareness-token CLI).

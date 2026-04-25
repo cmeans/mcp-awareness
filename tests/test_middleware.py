@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -763,6 +764,145 @@ class TestAuthMiddleware:
         status, _ = await _collect_response(app, scope)
         assert status == 200
         assert captured_owner == ["bob"]
+
+    @pytest.mark.anyio
+    async def test_owner_inflight_dict_bounded(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """`_owner_inflight` never grows past `_MAX_OWNERS`, even under live in-flight load."""
+        # Lower the cap so the test runs fast.
+        monkeypatch.setattr("mcp_awareness.middleware._MAX_OWNERS", 3)
+
+        gate = asyncio.Event()
+
+        async def slow_app(scope: dict[str, Any], receive: Any, send: Any) -> None:
+            await gate.wait()
+            await _dummy_app(scope, receive, send)
+
+        app = AuthMiddleware(slow_app, _JWT_SECRET, max_concurrent_per_owner=10)
+        tasks = []
+        for i in range(5):  # 3 cap + 2 over
+            token = self._make_token(sub=f"owner-{i}")
+            scope = {
+                "type": "http",
+                "path": "/mcp",
+                "method": "POST",
+                "headers": [(b"authorization", f"Bearer {token}".encode())],
+            }
+            tasks.append(asyncio.create_task(_collect_response(app, scope)))
+        # Yield repeatedly so all tasks reach the gate.
+        for _ in range(20):
+            await asyncio.sleep(0)
+        try:
+            assert len(app._owner_inflight) <= 3
+        finally:
+            gate.set()
+            for t in tasks:
+                await t
+
+    @pytest.mark.anyio
+    async def test_owner_inflight_evicts_lru(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Filling past the cap evicts the least-recently-used owner_id."""
+        monkeypatch.setattr("mcp_awareness.middleware._MAX_OWNERS", 3)
+
+        gate = asyncio.Event()
+
+        async def slow_app(scope: dict[str, Any], receive: Any, send: Any) -> None:
+            await gate.wait()
+            await _dummy_app(scope, receive, send)
+
+        app = AuthMiddleware(slow_app, _JWT_SECRET, max_concurrent_per_owner=10)
+        tasks = []
+        for i in range(4):  # owner-0 first → evicted when owner-3 arrives
+            token = self._make_token(sub=f"owner-{i}")
+            scope = {
+                "type": "http",
+                "path": "/mcp",
+                "method": "POST",
+                "headers": [(b"authorization", f"Bearer {token}".encode())],
+            }
+            tasks.append(asyncio.create_task(_collect_response(app, scope)))
+        for _ in range(20):
+            await asyncio.sleep(0)
+        try:
+            assert "owner-0" not in app._owner_inflight
+            assert "owner-3" in app._owner_inflight
+            assert len(app._owner_inflight) == 3
+        finally:
+            gate.set()
+            for t in tasks:
+                await t
+
+    @pytest.mark.anyio
+    async def test_concurrent_limit_returns_429(self) -> None:
+        """When inflight count for one owner_id reaches `_max_concurrent`, next request gets 429."""
+        # Build a slow app that blocks on an event so we can pile up inflight requests.
+        gate = asyncio.Event()
+
+        async def slow_app(scope: dict[str, Any], receive: Any, send: Any) -> None:
+            await gate.wait()
+            await _dummy_app(scope, receive, send)
+
+        app = AuthMiddleware(slow_app, _JWT_SECRET, max_concurrent_per_owner=2)
+        token = self._make_token(sub="alice")
+        scope = {
+            "type": "http",
+            "path": "/mcp",
+            "method": "POST",
+            "headers": [(b"authorization", f"Bearer {token}".encode())],
+        }
+
+        # Start two concurrent requests — both should be in flight (waiting on gate).
+        in_flight = [asyncio.create_task(_collect_response(app, scope)) for _ in range(2)]
+        # Yield so the tasks reach the gate.
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+
+        # A third request must be rejected with 429.
+        status, body = await _collect_response(app, scope)
+        assert status == 429
+        data = json.loads(body)
+        assert "too many" in data["error"].lower()
+
+        # Release the gate so the in-flight tasks finish.
+        gate.set()
+        for task in in_flight:
+            await task
+
+    @pytest.mark.anyio
+    async def test_inflight_collapses_after_completion(self) -> None:
+        """After a request completes, the owner's entry is removed from `_owner_inflight`."""
+        app = self._make_app()
+        token = self._make_token(sub="alice")
+        scope = {
+            "type": "http",
+            "path": "/mcp",
+            "method": "POST",
+            "headers": [(b"authorization", f"Bearer {token}".encode())],
+        }
+        status, _ = await _collect_response(app, scope)
+        assert status == 200
+        assert "alice" not in app._owner_inflight
+
+    @pytest.mark.anyio
+    async def test_owner_inflight_thread_safety_under_concurrency(self) -> None:
+        """100 concurrent requests for one owner_id with limit=100 all succeed; counter resets."""
+
+        async def app_inner(scope: dict[str, Any], receive: Any, send: Any) -> None:
+            # Yield to the event loop a few times so coroutines interleave.
+            await asyncio.sleep(0)
+            await asyncio.sleep(0)
+            await _dummy_app(scope, receive, send)
+
+        app = AuthMiddleware(app_inner, _JWT_SECRET, max_concurrent_per_owner=100)
+        token = self._make_token(sub="alice")
+        scope = {
+            "type": "http",
+            "path": "/mcp",
+            "method": "POST",
+            "headers": [(b"authorization", f"Bearer {token}".encode())],
+        }
+        results = await asyncio.gather(*[_collect_response(app, scope) for _ in range(100)])
+        assert all(status == 200 for status, _ in results)
+        assert "alice" not in app._owner_inflight
 
     @pytest.mark.anyio
     async def test_unexpected_exception_re_raises(self) -> None:
