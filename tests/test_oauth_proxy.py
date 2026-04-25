@@ -126,6 +126,46 @@ class TestRateLimiter:
         assert stats["rate_limited"] >= 1
         assert stats["banned_ips"] == 1
 
+    def test_hits_dict_bounded(self) -> None:
+        """`_hits` never grows past `_MAX_RATE_LIMIT_IPS`."""
+        from mcp_awareness.oauth_proxy import _MAX_RATE_LIMIT_IPS
+
+        rl = RateLimiter(max_requests=10, window_seconds=60)
+        for i in range(_MAX_RATE_LIMIT_IPS + 1):
+            rl.check(f"10.0.{i // 256}.{i % 256}")
+        assert len(rl._hits) <= _MAX_RATE_LIMIT_IPS
+
+    def test_hits_evicts_lru_ip(self) -> None:
+        """Filling past the cap evicts the oldest IP."""
+        from mcp_awareness.oauth_proxy import _MAX_RATE_LIMIT_IPS
+
+        rl = RateLimiter(max_requests=10, window_seconds=60)
+        first_ip = "10.0.0.0"
+        for i in range(_MAX_RATE_LIMIT_IPS):
+            rl.check(f"10.0.{i // 256}.{i % 256}")
+        assert first_ip in rl._hits
+        # One more IP — should evict the LRU (first_ip).
+        rl.check("192.168.1.1")
+        assert first_ip not in rl._hits
+        assert "192.168.1.1" in rl._hits
+        assert len(rl._hits) == _MAX_RATE_LIMIT_IPS
+
+    def test_hits_recency_updated_on_access(self) -> None:
+        """Re-hitting an existing IP refreshes its LRU position."""
+        from mcp_awareness.oauth_proxy import _MAX_RATE_LIMIT_IPS
+
+        rl = RateLimiter(max_requests=10, window_seconds=60)
+        # Fill to cap.
+        for i in range(_MAX_RATE_LIMIT_IPS):
+            rl.check(f"10.0.{i // 256}.{i % 256}")
+        # Re-hit the oldest IP — moves it to the end.
+        rl.check("10.0.0.0")
+        # Now add a new IP; the second-oldest (10.0.0.1) should be evicted, not 10.0.0.0.
+        rl.check("192.168.1.1")
+        assert "10.0.0.0" in rl._hits
+        assert "10.0.0.1" not in rl._hits
+        assert "192.168.1.1" in rl._hits
+
 
 class TestDetectBogusRequest:
     """Tests for detect_bogus_request()."""
