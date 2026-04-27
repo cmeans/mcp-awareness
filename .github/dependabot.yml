@@ -10,8 +10,16 @@
 #     apply to version-updates (non-security).
 #   - Version updates run once per week, grouped by ecosystem, to keep
 #     PR volume low on a solo-maintained repo.
-#   - Labels route to the existing `dependencies` label so Dependabot PRs
-#     sort alongside manual dependency work.
+#   - Labels route to the `dependencies` umbrella plus an ecosystem-
+#     specific tag (`python` / `github-actions` / `docker`) so Dependabot
+#     PRs sort alongside manual dependency work and remain filterable by
+#     ecosystem. Dependabot does NOT auto-create labels named here — they
+#     must already exist on the repo or Dependabot silently skips them.
+#   - Commit prefix is bare `chore` plus `include: scope`, which yields
+#     `chore(deps): bump foo`. Setting `prefix: chore(deps)` with
+#     `include: scope` produces a doubled `chore(deps)(deps):` because
+#     Dependabot auto-appends the `(deps)` scope when `include: scope`
+#     is set — see the dependabot-pr-hygiene playbook for context.
 
 version: 2
 
@@ -29,8 +37,9 @@ updates:
     open-pull-requests-limit: 5
     labels:
       - "dependencies"
+      - "python"
     commit-message:
-      prefix: "chore(deps)"
+      prefix: "chore"
       include: "scope"
     groups:
       python-production:
@@ -57,8 +66,9 @@ updates:
       timezone: "America/Chicago"
     labels:
       - "dependencies"
+      - "github-actions"
     commit-message:
-      prefix: "chore(deps)"
+      prefix: "chore"
       include: "scope"
     groups:
       github-actions:
@@ -77,8 +87,9 @@ updates:
       timezone: "America/Chicago"
     labels:
       - "dependencies"
+      - "docker"
     commit-message:
-      prefix: "chore(deps)"
+      prefix: "chore"
       include: "scope"
 
   # docker-compose — images in docker-compose.yaml. Dependabot skips
@@ -97,8 +108,9 @@ updates:
       timezone: "America/Chicago"
     labels:
       - "dependencies"
+      - "docker"
     commit-message:
-      prefix: "chore(deps)"
+      prefix: "chore"
       include: "scope"
     groups:
       docker-compose:
