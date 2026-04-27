@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.18.4] - 2026-04-27
+
 ### Added
 - **Dependabot CHANGELOG automation + ecosystem labels.** New `.github/workflows/dependabot-changelog.yml` runs on `pull_request_target` filtered to `dependabot[bot]`-authored PRs and prepends a one-line `### Changed` entry under `[Unreleased]` summarizing the bumped packages and version arrows. Authentication uses a GitHub App installation token (minted via `actions/create-github-app-token@v3.1.1`, requires repo secrets `BOT_APP_ID` + `BOT_APP_PRIVATE_KEY`) rather than `secrets.GITHUB_TOKEN` so the workflow's commit re-fires required CI checks (lint, typecheck, test, qa-gate, scan) — pushes by `GITHUB_TOKEN` are silently skipped by GitHub's anti-loop policy and would leave required checks unsatisfied on the bot's HEAD SHA, blocking merge under main-protection. `dependabot/fetch-metadata` pinned to `@v3.1.0` (full SHA) — earlier 2.x versions return empty `prevVersion`/`newVersion` on grouped updates. Inline composer carries the Keep-a-Changelog v1.1.0 ordering fix (Added → Changed → Deprecated → Removed → Fixed → Security): when creating a fresh `### Changed` subsection, walks forward to insert before the first later-sorting subsection (or end of `[Unreleased]`) instead of placing it at `unreleased_idx + 1`. Loop guard skips on bot-authored last commit; idempotency guard skips when CHANGELOG already references the PR number. Detects both `## Unreleased` and `## [Unreleased]` heading styles; this repo uses the bracketed form. Repo labels `python`, `github-actions`, `docker` created (`dependencies` already existed) so Dependabot stops silently skipping them. Ports the `dependabot-pr-hygiene-playbook` validated on cmeans/mcp-synology (PR #58 + #63 ordering fix), cmeans/mcp-clipboard, and cmeans/pypi-winnow-downloads.
 
@@ -633,7 +635,8 @@ Initial implementation.
 - **Dockerfile** for container deployment
 - Design docs: core spec and collation layer
 
-[Unreleased]: https://github.com/cmeans/mcp-awareness/compare/v0.18.3...HEAD
+[Unreleased]: https://github.com/cmeans/mcp-awareness/compare/v0.18.4...HEAD
+[0.18.4]: https://github.com/cmeans/mcp-awareness/compare/v0.18.3...v0.18.4
 [0.18.3]: https://github.com/cmeans/mcp-awareness/compare/v0.18.2...v0.18.3
 [0.18.2]: https://github.com/cmeans/mcp-awareness/compare/v0.18.1...v0.18.2
 [0.18.1]: https://github.com/cmeans/mcp-awareness/compare/v0.18.0...v0.18.1
