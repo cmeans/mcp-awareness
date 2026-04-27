@@ -48,11 +48,11 @@ jobs:
       - uses: actions/checkout@v6
 
       - name: Set up Docker Buildx
-        # docker/setup-buildx-action pinned to full commit SHA — v3.12.0
+        # docker/setup-buildx-action pinned to full commit SHA — v4.0.0
         uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd
 
       - name: Build image (no push)
-        # docker/build-push-action pinned to full commit SHA — v6.19.2
+        # docker/build-push-action pinned to full commit SHA — v7.1.0
         uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f
         with:
           context: .
