@@ -1327,9 +1327,15 @@ async def remind(
     Use this for tasks, errands, goals, follow-ups, and scheduled work. Intentions
     have a lifecycle: pending -> fired -> active -> completed/snoozed/cancelled.
     goal: what needs to happen (e.g., 'pick up milk', 'review PR #47', 'call dentist').
-    deliver_at: ISO 8601 timestamp — when to surface this. Required for time-based
-    reminders. Omit for open-ended todos or intentions triggered by other conditions
-    (location, events) in the future.
+    deliver_at: ISO 8601 timestamp — when to surface this. Three modes:
+      • Future ISO  → auto-fires when that time passes (next briefing call after the
+        deadline transitions pending -> fired and surfaces it).
+      • Current/past ISO  → auto-fires on the very next briefing call. Use this for
+        self-handoffs and any "I want this surfaced now" case — it's the single-step
+        path; no follow-up update_intention call required.
+      • Omitted (None)  → open-ended todo. Stays pending until an agent explicitly
+        transitions it via update_intention(state='fired') (or 'active'/'completed'
+        /'cancelled'/'snoozed') when ready to act.
     constraints: optional preferences or requirements (e.g., 'organic, budget-conscious').
     urgency: 'low', 'normal', or 'high'. High-urgency intentions surface more prominently.
     recurrence: reserved for future use. Currently only one-shot intentions are supported.
