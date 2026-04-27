@@ -113,6 +113,9 @@ async def get_briefing() -> str:
     If attention_needed is true, mention the suggested_mention or compose
     your own from the source headlines. If false, nothing to report.
     Pre-filtered through patterns and suppressions — no further processing needed.
+    Also fires any pending intentions whose `deliver_at` has passed and
+    surfaces currently-fired intentions inline in the briefing. A follow-up
+    `get_intentions(state='fired')` is redundant after this call.
     This tool always returns structured JSON. If you receive an unstructured
     error, the failure is in the transport or platform layer, not in awareness."""
     return json.dumps(generate_briefing(_srv.store, _srv._owner_id()), indent=2)
@@ -1336,6 +1339,9 @@ async def remind(
       • Omitted (None)  → open-ended todo. Stays pending until an agent explicitly
         transitions it via update_intention(state='fired') (or 'active'/'completed'
         /'cancelled'/'snoozed') when ready to act.
+    `get_briefing` is the trigger that both fires due intentions and surfaces
+    fired ones — no separate read is needed to see your own handoff once it
+    auto-fires.
     constraints: optional preferences or requirements (e.g., 'organic, budget-conscious').
     urgency: 'low', 'normal', or 'high'. High-urgency intentions surface more prominently.
     recurrence: reserved for future use. Currently only one-shot intentions are supported.
@@ -1379,6 +1385,11 @@ async def get_intentions(
 ) -> str:
     """Get intentions, optionally filtered by state, source, or tags.
     Valid states: 'pending', 'fired', 'active', 'completed', 'snoozed', 'cancelled'.
+    Fired intentions are already included in `get_briefing`'s output; use
+    this tool to drill into other states ('active', 'pending', 'snoozed') or
+    to filter by source/tags. Pending intentions without `deliver_at` are
+    not auto-fired by `get_briefing` — surface them via state='pending'
+    when you want to act on the open-ended backlog.
     mode: omit for full entries, 'list' for metadata only.
     This tool always returns structured JSON."""
     if limit is None:
