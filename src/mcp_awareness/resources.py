@@ -44,6 +44,9 @@ async def briefing_resource() -> str:
     ~200 tokens when all clear, ~500 when issues exist. Pre-filtered through
     patterns and suppressions. If attention_needed is false, nothing to mention.
     If true, use suggested_mention or compose from source headlines.
+    Also fires any pending intentions whose `deliver_at` has passed and
+    surfaces currently-fired intentions inline in the briefing. A follow-up
+    `get_intentions(state='fired')` is redundant after this call.
     Drill into other resources only if briefing indicates issues or user asks."""
     return json.dumps(generate_briefing(_srv.store, _srv._owner_id()), indent=2)
 
