@@ -16,8 +16,19 @@
 
 name: QA Gate
 
+# Trigger is `pull_request_target` so the workflow file the base branch
+# (main) ships is always what runs — a PR cannot edit this file and have
+# the edit gate-bypass its own PR. `pull_request` would run the PR's
+# merge-preview version with a write-capable GITHUB_TOKEN, letting a
+# contributor with push access flip the gate logic to always-success.
+# See feedback log entry `pull_request vs pull_request_target` and PR
+# #387 retrospective.
+#
+# Safe with `pull_request_target` because this workflow never checks out
+# the PR branch and never executes PR code; it only reads PR labels from
+# `github.event` and posts a commit status via the GitHub API.
 on:
-  pull_request:
+  pull_request_target:
     branches: [main]
     types: [opened, synchronize, reopened, labeled, unlabeled]
 
@@ -31,15 +42,22 @@ jobs:
       - name: Set QA status
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+          REPO: ${{ github.repository }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
-          if echo '${{ toJSON(github.event.pull_request.labels.*.name) }}' | grep -q '"QA Approved"'; then
+          # PR_LABELS / REPO / HEAD_SHA come via env (not direct GHA
+          # expressions) so contributor-controlled values cannot be
+          # interpolated into the shell command line. JSON-encoded label
+          # array means embedded quotes/backticks are escaped.
+          if echo "$PR_LABELS" | grep -q '"QA Approved"'; then
             STATE="success"
             DESC="QA testing completed"
           else
             STATE="pending"
             DESC="Waiting for QA — add 'QA Approved' label when testing is complete"
           fi
-          gh api repos/${{ github.repository }}/statuses/${{ github.event.pull_request.head.sha }} \
+          gh api "repos/$REPO/statuses/$HEAD_SHA" \
             --method POST \
             -f state="$STATE" \
             -f description="$DESC" \

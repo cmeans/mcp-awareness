@@ -18,8 +18,25 @@ name: PR Label Automation
 
 # Handles label transitions triggered by PR events (push, label, unlabel).
 # CI-completion promotion lives in pr-labels-ci.yml (separate workflow_run trigger).
+#
+# Trigger is `pull_request_target` so the workflow file the base branch
+# (main) ships is always what runs — a PR cannot edit this file or the
+# label rules it encodes and have the edit take effect on its own PR.
+# `pull_request` would run the PR's merge-preview version of this file
+# with a write-capable GITHUB_TOKEN, letting a contributor with push
+# access self-bypass the label discipline. See feedback log entry
+# `pull_request vs pull_request_target` and PR #387 retrospective.
+#
+# Safe with `pull_request_target` because this workflow never checks out
+# the PR branch and never executes PR code; it only reads PR metadata
+# from `github.event` and writes labels via the GitHub API.
+#
+# Consequence: this introduction PR will not auto-label itself
+# (the base branch still has `pull_request` and the PR has
+# `pull_request_target` — neither matches the other event). Future PRs
+# pick up the new behavior once this lands on main.
 on:
-  pull_request:
+  pull_request_target:
     branches: [main]
     types: [opened, synchronize, labeled, unlabeled]
 
