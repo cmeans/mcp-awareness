@@ -37,8 +37,11 @@ permissions:
   checks: read
 
 jobs:
-  # When CI passes on a PR branch, promote from Awaiting CI to Ready for QA.
-  # Skips if Dev Active is present (dev isn't done yet).
+  # When CI passes on a PR branch, promote from Awaiting CI OR CI Failed
+  # to Ready for QA. Skips if Dev Active is present (dev isn't done yet)
+  # or if a review-state label (QA Active / Ready for QA Signoff /
+  # QA Approved) is present — review-machine state is not torn down by
+  # a CI re-run.
   on-ci-pass:
     if: >-
       github.event.workflow_run.conclusion == 'success'
@@ -83,18 +86,39 @@ jobs:
             exit 0
           fi
 
-          # Promote if Awaiting CI is present
+          # Don't disrupt in-flight review state. QA Active implies the
+          # PR has already advanced past Ready for QA; Ready for QA
+          # Signoff and QA Approved are even further along. A passing
+          # CI re-run on those states is a no-op — the success status
+          # is visible on its own check, no label transition needed.
+          for QA_STATE in "QA Active" "Ready for QA Signoff" "QA Approved"; do
+            if echo "$LABELS" | grep -q "^$QA_STATE$"; then
+              echo "$QA_STATE present — skipping promotion (review in progress)"
+              exit 0
+            fi
+          done
+
+          # Promote if Awaiting CI OR CI Failed is the current pre-state.
+          # Closes #378: previous code only fired on Awaiting CI, so a
+          # PR sitting at CI Failed never auto-promoted when a fix push
+          # made CI go green.
+          REMOVE=""
           if echo "$LABELS" | grep -q "^Awaiting CI$"; then
             REMOVE="Awaiting CI"
-            if echo "$LABELS" | grep -q "^CI Failed$"; then
-              REMOVE="Awaiting CI,CI Failed"
-            fi
+          fi
+          if echo "$LABELS" | grep -q "^CI Failed$"; then
+            REMOVE="${REMOVE:+$REMOVE,}CI Failed"
+          fi
+          if [ -n "$REMOVE" ]; then
             gh pr edit "$PR" --repo "$REPO" --remove-label "$REMOVE"
             gh pr edit "$PR" --repo "$REPO" --add-label "Ready for QA"
           fi
 
   # When CI fails on a PR branch, set CI Failed.
-  # Skips if Dev Active is present (dev is already working).
+  # Skips if Dev Active is present (dev is already working) or if a
+  # review-state label (QA Active / Ready for QA Signoff / QA Approved)
+  # is present — a CI re-run failure does not retroactively invalidate
+  # an in-flight review; the failed check is visible on its own.
   on-ci-fail:
     if: >-
       github.event.workflow_run.conclusion == 'failure'
@@ -133,8 +157,29 @@ jobs:
             exit 0
           fi
 
-          # Set CI Failed if Awaiting CI is present (normal flow)
+          # Don't disrupt in-flight review state. The failure is visible
+          # via the CI status check on the PR; tearing down review-machine
+          # state on a (possibly transient) re-run failure would erase
+          # work the reviewer has already done.
+          for QA_STATE in "QA Active" "Ready for QA Signoff" "QA Approved"; do
+            if echo "$LABELS" | grep -q "^$QA_STATE$"; then
+              echo "$QA_STATE present — skipping CI Failed (review in progress)"
+              exit 0
+            fi
+          done
+
+          # Set CI Failed if state is Awaiting CI OR Ready for QA.
+          # Adding Ready for QA closes the symmetric trap noted in #378:
+          # a CI re-run failure on a PR sitting at Ready for QA used to
+          # leave the PR labelled green even though CI was now red.
+          REMOVE=""
           if echo "$LABELS" | grep -q "^Awaiting CI$"; then
-            gh pr edit "$PR" --repo "$REPO" --remove-label "Awaiting CI"
+            REMOVE="Awaiting CI"
+          fi
+          if echo "$LABELS" | grep -q "^Ready for QA$"; then
+            REMOVE="${REMOVE:+$REMOVE,}Ready for QA"
+          fi
+          if [ -n "$REMOVE" ]; then
+            gh pr edit "$PR" --repo "$REPO" --remove-label "$REMOVE"
             gh pr edit "$PR" --repo "$REPO" --add-label "CI Failed"
           fi
