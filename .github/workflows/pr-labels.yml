@@ -94,8 +94,16 @@ jobs:
           # Check if CI already passed for the head commit.
           # HEAD_SHA/PR/REPO come via env (not direct GHA expressions)
           # for cascade consistency with pr-labels-ci.yml hardening.
-          CI_CONCLUSION=$(gh api "repos/$REPO/actions/workflows/ci.yml/runs?head_sha=$HEAD_SHA" \
-            --jq '.workflow_runs[0].conclusion // empty' 2>/dev/null) || true
+          #
+          # Lists ci.yml runs UNFILTERED and matches by head_sha client-side
+          # via jq (env.HEAD_SHA). The Workflow Runs API filter parameters
+          # (?head_sha=, ?branch=, ?event=, ?status=) intermittently return
+          # total_count: 0 for this repo's ci.yml even when matching runs
+          # exist (suspected stale internal index). Unfiltered listings hit
+          # a different code path and return correct results. See #406.
+          CI_CONCLUSION=$(gh api "repos/$REPO/actions/workflows/ci.yml/runs?per_page=50" \
+            --jq '.workflow_runs[] | select(.head_sha == env.HEAD_SHA) | .conclusion // empty' \
+            2>/dev/null | head -1) || true
 
           if [ "$CI_CONCLUSION" = "success" ]; then
             # CI passed — promote to Ready for QA
