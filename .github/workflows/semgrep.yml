@@ -35,7 +35,7 @@ jobs:
     container:
       image: semgrep/semgrep:1.161.0
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       # Three sources merged in one run:
       #   - p/python       — Semgrep's community Python rule pack
